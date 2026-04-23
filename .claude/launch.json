@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "next-dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev"],
+      "port": 3000
+    },
+    {
+      "name": "next-prod",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["start"],
+      "port": 3000
+    },
+    {
+      "name": "henri-static",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "C:/Users/yabis/Desktop/henry-2.1-extracted", "-l", "3847", "--no-clipboard"],
+      "port": 3847
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "Project-level MCP config for Henri. Added 2026-04-22 to unblock the",
+    "wedge + FSM plan phases that need programmatic DB + outbound",
+    "delivery access. Each server below requires an env-sourced secret —",
+    "paste the matching key into .env.local (already gitignored) and",
+    "restart Claude Code; the server auto-activates.",
+    "",
+    "Once live, these servers give Claude:",
+    "  - supabase  → apply_migration, execute_sql, list_tables, RLS mgmt",
+    "  - resend    → send feedback/outreach/invoice emails from templates",
+    "  - stripe    → read subscription state, refund flows (rare)",
+    "  - playwright→ deterministic browser automation for contractor-side QA",
+    "",
+    "Secrets NEVER live here. .mcp.json IS committed to git (project",
+    "shape is part of the repo), but every `env` line references a",
+    "process variable that the user sets outside the repo."
+  ],
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=ivfxylgoxgrxttknewsf"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+      }
+    },
+    "resend": {
+      "command": "npx",
+      "args": ["-y", "mcp-send-email"],
+      "env": {
+        "RESEND_API_KEY": "${RESEND_API_KEY}",
+        "SENDER_EMAIL_ADDRESS": "henri@henri.app"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    }
+  }
+}

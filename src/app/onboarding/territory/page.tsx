@@ -1,0 +1,618 @@
+"use client";
+
+import { useState, useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Search, MapPin, Check, X, Loader2 } from "lucide-react";
+import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
+import { useUser } from "@/hooks/useUser";
+import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils/cn";
+
+/* ── Plan ZIP limits ── */
+const PLAN_LIMITS: Record<string, number> = {
+  founder: 3,
+  starter: 5,
+  pro: 12,
+  enterprise: 20,
+  free: 1,
+};
+
+/* ── ZIP metadata by city (names curated; availability fetched live) ── */
+type ZipMeta = { zip: string; name: string };
+type ZipWithAvailability = ZipMeta & { available: boolean; loading: boolean };
+
+const CITY_ZIPS: Record<string, { city: string; state: string; zips: ZipMeta[] }> = {
+  "Los Angeles, CA": {
+    city: "Los Angeles", state: "CA",
+    zips: [
+      { zip: "90001", name: "Florence" },
+      { zip: "90002", name: "Watts" },
+      { zip: "90003", name: "South LA" },
+      { zip: "90004", name: "Hancock Park" },
+      { zip: "90005", name: "Koreatown" },
+      { zip: "90006", name: "Westlake" },
+      { zip: "90007", name: "USC" },
+      { zip: "90008", name: "Baldwin Hills" },
+      { zip: "90010", name: "Mid-Wilshire" },
+      { zip: "90011", name: "South Central" },
+      { zip: "90012", name: "Downtown" },
+      { zip: "90013", name: "Arts District" },
+      { zip: "90015", name: "Staples Center" },
+      { zip: "90016", name: "West Adams" },
+      { zip: "90017", name: "Financial District" },
+      { zip: "90018", name: "Jefferson Park" },
+      { zip: "90019", name: "Mid-City" },
+      { zip: "90020", name: "Koreatown West" },
+      { zip: "90024", name: "Westwood" },
+      { zip: "90025", name: "West LA" },
+      { zip: "90026", name: "Echo Park" },
+      { zip: "90027", name: "Los Feliz" },
+      { zip: "90028", name: "Hollywood" },
+      { zip: "90029", name: "Thai Town" },
+      { zip: "90031", name: "Lincoln Heights" },
+      { zip: "90032", name: "El Sereno" },
+      { zip: "90033", name: "Boyle Heights" },
+      { zip: "90034", name: "Palms" },
+      { zip: "90035", name: "Beverlywood" },
+      { zip: "90036", name: "Fairfax" },
+      { zip: "90037", name: "Vermont Square" },
+      { zip: "90038", name: "Hollywood Center" },
+      { zip: "90039", name: "Silver Lake" },
+      { zip: "90041", name: "Eagle Rock" },
+      { zip: "90042", name: "Highland Park" },
+      { zip: "90043", name: "View Park" },
+      { zip: "90044", name: "Athens" },
+      { zip: "90045", name: "Westchester" },
+      { zip: "90046", name: "Hollywood Hills" },
+      { zip: "90047", name: "Gramercy Park" },
+      { zip: "90048", name: "Beverly Grove" },
+      { zip: "90049", name: "Brentwood" },
+      { zip: "90056", name: "Ladera Heights" },
+      { zip: "90057", name: "Pico-Union" },
+      { zip: "90058", name: "Vernon" },
+      { zip: "90059", name: "Willowbrook" },
+      { zip: "90061", name: "Athens Park" },
+      { zip: "90062", name: "Chesterfield Square" },
+      { zip: "90063", name: "East LA" },
+      { zip: "90064", name: "Rancho Park" },
+      { zip: "90065", name: "Glassell Park" },
+      { zip: "90066", name: "Mar Vista" },
+      { zip: "90067", name: "Century City" },
+      { zip: "90068", name: "Hollywood Hills West" },
+      { zip: "90069", name: "West Hollywood" },
+      { zip: "90077", name: "Bel Air" },
+      { zip: "90210", name: "Beverly Hills" },
+      { zip: "90230", name: "Culver City" },
+      { zip: "90232", name: "Culver City South" },
+      { zip: "90247", name: "Gardena" },
+      { zip: "90248", name: "Gardena South" },
+      { zip: "90249", name: "Gardena West" },
+      { zip: "90250", name: "Hawthorne" },
+      { zip: "90254", name: "Hermosa Beach" },
+      { zip: "90260", name: "Lawndale" },
+      { zip: "90266", name: "Manhattan Beach" },
+      { zip: "90270", name: "Maywood" },
+      { zip: "90274", name: "Palos Verdes" },
+      { zip: "90275", name: "Rancho Palos Verdes" },
+      { zip: "90277", name: "Redondo Beach North" },
+      { zip: "90278", name: "Redondo Beach" },
+      { zip: "90291", name: "Venice" },
+      { zip: "90292", name: "Marina Del Rey" },
+      { zip: "90293", name: "Playa Del Rey" },
+      { zip: "90301", name: "Inglewood" },
+      { zip: "90302", name: "Inglewood North" },
+      { zip: "90303", name: "Inglewood East" },
+      { zip: "90304", name: "Lennox" },
+      { zip: "90305", name: "Inglewood West" },
+      { zip: "90401", name: "Santa Monica" },
+      { zip: "90402", name: "Santa Monica North" },
+      { zip: "90403", name: "Santa Monica Mid" },
+      { zip: "90404", name: "Santa Monica East" },
+      { zip: "90405", name: "Santa Monica South" },
+      { zip: "90501", name: "Torrance" },
+      { zip: "90502", name: "Torrance South" },
+      { zip: "90503", name: "Torrance West" },
+      { zip: "90504", name: "Torrance North" },
+      { zip: "90505", name: "Torrance East" },
+    ],
+  },
+  "Redondo Beach, CA": {
+    city: "Redondo Beach", state: "CA",
+    zips: [
+      { zip: "90277", name: "North Redondo" },
+      { zip: "90278", name: "South Redondo" },
+    ],
+  },
+  "Sacramento, CA": {
+    city: "Sacramento", state: "CA",
+    zips: [
+      { zip: "95811", name: "Midtown" },
+      { zip: "95814", name: "Downtown" },
+      { zip: "95816", name: "East Sacramento" },
+      { zip: "95817", name: "Oak Park" },
+      { zip: "95818", name: "Land Park" },
+      { zip: "95819", name: "East Sac Fab Forties" },
+      { zip: "95820", name: "Colonial Heights" },
+      { zip: "95822", name: "Meadowview" },
+      { zip: "95823", name: "Parkway" },
+      { zip: "95824", name: "Fruitridge" },
+      { zip: "95825", name: "Arden" },
+      { zip: "95826", name: "College Greens" },
+      { zip: "95828", name: "Florin" },
+      { zip: "95829", name: "Elk Grove North" },
+      { zip: "95831", name: "Pocket" },
+      { zip: "95832", name: "Delta Shores" },
+      { zip: "95833", name: "Natomas" },
+      { zip: "95834", name: "North Natomas" },
+      { zip: "95835", name: "Natomas Park" },
+      { zip: "95838", name: "Del Paso Heights" },
+    ],
+  },
+};
+
+const CITY_OPTIONS = Object.keys(CITY_ZIPS);
+
+export default function TerritoryPage() {
+  const router = useRouter();
+  const { profile } = useUser();
+  const [searchMode, setSearchMode] = useState<"city" | "zip">("city");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCity, setSelectedCity] = useState<string | null>(null);
+  const [selectedZips, setSelectedZips] = useState<string[]>([]);
+  const [plan, setPlan] = useState("starter");
+  const [saving, setSaving] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+  // availabilityMap: zip -> { available, loading } — populated when a city is selected
+  const [availabilityMap, setAvailabilityMap] = useState<Record<string, { available: boolean; loading: boolean }>>({});
+  // Direct ZIP entry
+  const [zipInput, setZipInput] = useState("");
+  const [zipCheckResult, setZipCheckResult] = useState<{ available: boolean; zip: string } | null>(null);
+  const [zipCheckLoading, setZipCheckLoading] = useState(false);
+
+  // Load plan from user profile
+  useEffect(() => {
+    if (profile?.plan) setPlan(profile.plan);
+  }, [profile]);
+
+  const maxZips = PLAN_LIMITS[plan] ?? 3;
+  const cityData = selectedCity ? CITY_ZIPS[selectedCity] : null;
+
+  // Fetch live availability from /api/territories/[zip] whenever a city is selected
+  useEffect(() => {
+    if (!cityData) return;
+    let cancelled = false;
+
+    // Mark all as loading
+    setAvailabilityMap((prev) => {
+      const next = { ...prev };
+      for (const z of cityData.zips) {
+        if (!next[z.zip]) next[z.zip] = { available: true, loading: true };
+      }
+      return next;
+    });
+
+    (async () => {
+      // Fetch in chunks of 8 to avoid hammering the API
+      const chunkSize = 8;
+      for (let i = 0; i < cityData.zips.length; i += chunkSize) {
+        if (cancelled) return;
+        const chunk = cityData.zips.slice(i, i + chunkSize);
+        const results = await Promise.all(
+          chunk.map(async (z) => {
+            try {
+              const r = await fetch(`/api/territories/${z.zip}`, { cache: "no-store" });
+              if (!r.ok) return { zip: z.zip, available: true };
+              const data = await r.json();
+              // is_claimed comes from the ZipAvailability type
+              return { zip: z.zip, available: !data?.is_claimed };
+            } catch {
+              return { zip: z.zip, available: true };
+            }
+          }),
+        );
+        if (cancelled) return;
+        setAvailabilityMap((prev) => {
+          const next = { ...prev };
+          for (const r of results) {
+            next[r.zip] = { available: r.available, loading: false };
+          }
+          return next;
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cityData]);
+
+  const zipsWithAvailability: ZipWithAvailability[] = cityData
+    ? cityData.zips.map((z) => ({
+        ...z,
+        available: availabilityMap[z.zip]?.available ?? true,
+        loading: availabilityMap[z.zip]?.loading ?? true,
+      }))
+    : [];
+
+  const filteredCities = CITY_OPTIONS.filter((c) =>
+    c.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const toggleZip = useCallback((zip: string) => {
+    setSelectedZips((prev) => {
+      if (prev.includes(zip)) return prev.filter((z) => z !== zip);
+      if (prev.length >= maxZips) return prev;
+      return [...prev, zip];
+    });
+  }, [maxZips]);
+
+  const checkZipDirect = useCallback(async () => {
+    const z = zipInput.trim().replace(/\D/g, "").slice(0, 5);
+    if (z.length !== 5) return;
+    setZipCheckLoading(true);
+    setZipCheckResult(null);
+    try {
+      const r = await fetch(`/api/territories/${z}`, { cache: "no-store" });
+      if (!r.ok) { setZipCheckResult({ available: true, zip: z }); return; }
+      const data = await r.json();
+      setZipCheckResult({ available: !data?.is_claimed, zip: z });
+    } catch {
+      setZipCheckResult({ available: true, zip: z });
+    } finally {
+      setZipCheckLoading(false);
+    }
+  }, [zipInput]);
+
+  const handleConfirm = async () => {
+    if (selectedZips.length === 0) return;
+    setSaving(true);
+    setClaimError(null);
+    try {
+      // Claim each ZIP via the real API (enforces exclusivity via claim_territory RPC)
+      const claimResults = await Promise.all(
+        selectedZips.map(async (zip) => {
+          const r = await fetch("/api/territories", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ zip }),
+          });
+          const body = await r.json().catch(() => ({}));
+          return { zip, ok: r.ok, error: body?.error as string | undefined };
+        }),
+      );
+
+      const failures = claimResults.filter((r) => !r.ok);
+      if (failures.length > 0) {
+        setClaimError(
+          `Couldn't claim ${failures.length} ZIP(s): ${failures
+            .map((f) => `${f.zip} (${f.error ?? "unknown"})`)
+            .join(", ")}`,
+        );
+        setSaving(false);
+        return;
+      }
+
+      // Mark onboarding complete — but only after verifying the user
+      // actually has a Stripe customer attached (i.e., the payment step
+      // actually ran). Previously this flip happened unconditionally,
+      // which combined with the payment-step dev-bypass let users land
+      // on /dashboard without paying.
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profileCheck } = await supabase
+          .from("profiles")
+          .select("stripe_customer_id, plan, license_state")
+          .eq("id", user.id)
+          .single();
+        const hasPrereqs =
+          !!profileCheck?.stripe_customer_id &&
+          !!profileCheck?.plan &&
+          !!profileCheck?.license_state;
+        if (!hasPrereqs) {
+          setClaimError(
+            "Your account is missing required setup. Please complete license, plan, and payment first.",
+          );
+          setSaving(false);
+          // Re-route to the earliest unmet step so the user can finish.
+          if (!profileCheck?.license_state) router.push("/onboarding/license");
+          else if (!profileCheck?.plan) router.push("/onboarding/plan");
+          else router.push("/onboarding/payment");
+          return;
+        }
+        await supabase
+          .from("profiles")
+          .update({ onboarding_completed: true })
+          .eq("id", user.id);
+      }
+
+      router.push("/dashboard");
+    } catch (err) {
+      console.error("Territory claim error:", err);
+      setClaimError("Network error. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Header */}
+      <header className="border-b border-border bg-card px-6 py-4 shrink-0">
+        <div className="mx-auto max-w-6xl flex items-center justify-between">
+          <Link href="/contractors" className="font-heading text-xl font-medium text-primary">
+            Henri.
+          </Link>
+          <OnboardingProgress currentStep={4} />
+          <div className="text-sm text-muted-foreground">
+            Step 4 of 4
+          </div>
+        </div>
+      </header>
+
+      {/* Main content */}
+      <div className="flex-1 flex flex-col lg:flex-row">
+        {/* Left panel — search + ZIP list */}
+        <div className="w-full lg:w-[400px] border-r border-border bg-card flex flex-col shrink-0">
+          {/* Title */}
+          <div className="px-6 py-5 border-b border-border">
+            <h1 className="font-heading text-xl font-normal text-foreground">
+              Select your territories
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Choose up to <span className="font-semibold text-primary">{maxZips} ZIP codes</span> in your service area.
+              Each ZIP is exclusive to one contractor per trade.
+            </p>
+          </div>
+
+          {/* Search mode tabs */}
+          <div className="px-6 pt-3 pb-0 border-b border-border">
+            <div className="flex gap-1 mb-3">
+              <button
+                onClick={() => setSearchMode("city")}
+                className={cn(
+                  "flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors",
+                  searchMode === "city"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-accent"
+                )}
+              >
+                Search by city
+              </button>
+              <button
+                onClick={() => setSearchMode("zip")}
+                className={cn(
+                  "flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors",
+                  searchMode === "zip"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-accent"
+                )}
+              >
+                Enter ZIP code
+              </button>
+            </div>
+
+            {searchMode === "city" ? (
+              <div className="relative mb-3">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setShowDropdown(true); }}
+                  onFocus={() => setShowDropdown(true)}
+                  placeholder="Search for a city..."
+                  className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                {showDropdown && searchQuery.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-card border border-border rounded-lg shadow-lg z-20 max-h-48 overflow-y-auto">
+                    {filteredCities.length > 0 ? filteredCities.map((city) => (
+                      <button
+                        key={city}
+                        onClick={() => { setSelectedCity(city); setSearchQuery(city); setShowDropdown(false); }}
+                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-accent transition-colors flex items-center gap-2"
+                      >
+                        <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                        {city}
+                      </button>
+                    )) : (
+                      <div className="px-4 py-3 text-sm text-muted-foreground">
+                        City not listed — try &ldquo;Enter ZIP code&rdquo; tab to add any US ZIP directly.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mb-3 space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={5}
+                    value={zipInput}
+                    onChange={(e) => { setZipInput(e.target.value.replace(/\D/g, "").slice(0, 5)); setZipCheckResult(null); }}
+                    onKeyDown={(e) => e.key === "Enter" && checkZipDirect()}
+                    placeholder="e.g. 80203"
+                    className="flex-1 px-3 py-2.5 rounded-lg border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <button
+                    onClick={checkZipDirect}
+                    disabled={zipInput.length !== 5 || zipCheckLoading}
+                    className="px-3 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50 transition-opacity"
+                  >
+                    {zipCheckLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Check"}
+                  </button>
+                </div>
+                {zipCheckResult && (
+                  <div className={cn(
+                    "flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm",
+                    zipCheckResult.available
+                      ? "border-[#3D9970]/30 bg-[rgba(61,153,112,0.06)]"
+                      : "border-destructive/30 bg-destructive/5"
+                  )}>
+                    <div className="flex items-center gap-2">
+                      {zipCheckResult.available
+                        ? <Check className="h-4 w-4 text-[#3D9970]" />
+                        : <X className="h-4 w-4 text-destructive" />}
+                      <span className="font-medium text-foreground">ZIP {zipCheckResult.zip}</span>
+                      <span className="text-muted-foreground">
+                        {zipCheckResult.available ? "— available" : "— already taken"}
+                      </span>
+                    </div>
+                    {zipCheckResult.available && !selectedZips.includes(zipCheckResult.zip) && selectedZips.length < maxZips && (
+                      <button
+                        onClick={() => { toggleZip(zipCheckResult.zip); setZipInput(""); setZipCheckResult(null); }}
+                        className="text-xs font-semibold text-primary hover:underline ml-2"
+                      >
+                        Add
+                      </button>
+                    )}
+                    {selectedZips.includes(zipCheckResult.zip) && (
+                      <span className="text-xs text-primary font-semibold ml-2">Added</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Selection counter */}
+          <div className="px-6 py-2.5 border-b border-border bg-bg-subtle">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {selectedCity ? `ZIPs in ${cityData?.city}` : "Select a city to see ZIPs"}
+              </span>
+              <span className={cn(
+                "text-xs font-bold px-2 py-0.5 rounded-full",
+                selectedZips.length >= maxZips
+                  ? "bg-primary text-white"
+                  : "bg-primary-10 text-primary"
+              )}>
+                {selectedZips.length} / {maxZips}
+              </span>
+            </div>
+          </div>
+
+          {/* ZIP list */}
+          <div className="flex-1 overflow-y-auto">
+            {cityData ? (
+              <div className="divide-y divide-border">
+                {zipsWithAvailability.map((z) => {
+                  const isSelected = selectedZips.includes(z.zip);
+                  const isFull = selectedZips.length >= maxZips && !isSelected;
+                  const disabled = z.loading || !z.available || isFull;
+                  return (
+                    <button
+                      key={z.zip}
+                      onClick={() => z.available && !z.loading && toggleZip(z.zip)}
+                      disabled={disabled}
+                      className={cn(
+                        "w-full text-left px-6 py-3 flex items-center justify-between transition-colors",
+                        isSelected && "bg-primary-04",
+                        !z.available && !z.loading && "opacity-50 cursor-not-allowed",
+                        isFull && z.available && "opacity-40",
+                        z.available && !isSelected && !isFull && !z.loading && "hover:bg-bg-subtle"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors",
+                          isSelected
+                            ? "bg-primary border-primary"
+                            : z.available
+                              ? "border-border"
+                              : "border-destructive/30 bg-destructive/5"
+                        )}>
+                          {isSelected && <Check className="h-3 w-3 text-white" />}
+                          {!z.available && !z.loading && <X className="h-3 w-3 text-destructive/50" />}
+                        </div>
+                        <div>
+                          <span className="text-sm font-medium text-foreground">{z.zip}</span>
+                          <span className="text-xs text-muted-foreground ml-2">{z.name}</span>
+                        </div>
+                      </div>
+                      <span className={cn(
+                        "text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full",
+                        isSelected && "bg-primary text-white",
+                        z.loading && "bg-muted text-muted-foreground",
+                        !z.loading && !z.available && "bg-destructive/10 text-destructive",
+                        !z.loading && z.available && !isSelected && "bg-[rgba(61,153,112,0.1)] text-[#3D9970]"
+                      )}>
+                        {z.loading ? "Checking..." : isSelected ? "Selected" : z.available ? "Available" : "Taken"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full py-16 text-center px-6">
+                <MapPin className="h-10 w-10 text-muted-foreground/30 mb-3" />
+                <p className="text-sm font-medium text-foreground">Search for your city</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  We'll show you every available ZIP code in that area.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Confirm button */}
+          <div className="px-6 py-4 border-t border-border shrink-0">
+            {claimError && (
+              <div className="mb-3 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+                {claimError}
+              </div>
+            )}
+            <button
+              onClick={handleConfirm}
+              disabled={selectedZips.length === 0 || saving}
+              className={cn(
+                "w-full py-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2",
+                selectedZips.length > 0
+                  ? "bg-primary text-white hover:opacity-90"
+                  : "bg-muted text-muted-foreground cursor-not-allowed"
+              )}
+            >
+              {saving ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Claiming territories...</>
+              ) : (
+                `Confirm ${selectedZips.length} territor${selectedZips.length === 1 ? "y" : "ies"} & launch dashboard`
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Right panel — Map placeholder (Mapbox would render here) */}
+        <div className="flex-1 bg-bg-subtle relative flex items-center justify-center">
+          <div className="text-center space-y-4 p-8">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-primary-10 flex items-center justify-center">
+              <MapPin className="h-8 w-8 text-primary" />
+            </div>
+            <h2 className="font-heading text-2xl font-normal text-foreground">
+              Territory Map
+            </h2>
+            <p className="text-sm text-muted-foreground max-w-sm">
+              {selectedCity
+                ? `Showing ${cityData?.zips.length} ZIP codes in ${cityData?.city}, ${cityData?.state}`
+                : "Search for a city or enter any US ZIP code directly to check availability."}
+            </p>
+            {selectedZips.length > 0 && (
+              <div className="flex flex-wrap gap-2 justify-center mt-4">
+                {selectedZips.map((zip) => (
+                  <span key={zip} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-white text-xs font-semibold">
+                    <MapPin className="h-3 w-3" />
+                    {zip}
+                    <button onClick={() => toggleZip(zip)} className="ml-0.5 hover:opacity-70">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

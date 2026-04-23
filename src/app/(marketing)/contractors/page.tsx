@@ -1,0 +1,982 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+
+/* ─── Inline SVG icon helpers ──────────────────────────────────────── */
+
+function CheckCircle({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={className}
+    >
+      <circle cx="8" cy="8" r="7" />
+      <path d="M5 8l2 2 4-4" />
+    </svg>
+  );
+}
+
+function XCircle({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={className}
+    >
+      <circle cx="8" cy="8" r="7" />
+      <path d="M5 5l6 6M11 5l-6 6" />
+    </svg>
+  );
+}
+
+/* ─── Feature Icons ─────────────────────────────────────────────────── */
+
+function PermitIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M1 6l5 2 4-2 5 2 5-2v14l-5 2-4-2-5 2-5-2V6z" />
+      <path d="M6 8v12M10 6v12M15 8v12" />
+    </svg>
+  );
+}
+
+function AIScoreIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
+  );
+}
+
+function TerritoryIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M12 2L2 7l10 5 10-5-10-5z" />
+      <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
+    </svg>
+  );
+}
+
+function OutreachIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </svg>
+  );
+}
+
+function CanvassIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  );
+}
+
+function StormIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  );
+}
+
+function ChevronDown({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={className}
+    >
+      <path d="M4 6l4 4 4-4" />
+    </svg>
+  );
+}
+
+/* ─── Section data ──────────────────────────────────────────────────── */
+
+// Replaced fabricated performance stats (18.4x ROI / $41 per job /
+// 26% close rate) — we're still in Beta so no cohort exists to derive
+// them honestly. These four claims are all independently verifiable:
+//   - "1 contractor / ZIP" is the product model (enforced in DB)
+//   - permit count is live (audit 2026-04-22: 925k)
+//   - 30-min cadence matches `/api/cron/scrape` in vercel.json
+//   - 24-hr trial is the Stripe `trial_period_days=1` config
+const STATS = [
+  { num: "1 / ZIP", label: "One contractor per ZIP code \u2014 enforced, no overlap" },
+  { num: "900k+", label: "Live permits in our catalog across 45+ US states" },
+  { num: "<30 min", label: "From permit filing to lead in your dashboard" },
+  { num: "24 hrs", label: "Free trial to evaluate before any charge" },
+];
+
+const PROBLEMS = [
+  "Your lead is sold to 3\u20138 competitors simultaneously. The first to call wins \u2014 and it is not always you.",
+  "Roofing leads cost $15\u2013$150 each. After chasing 20 leads to close one job, you have spent $2,500+ per customer.",
+  "Lead quality is fabricated. The FTC fined HomeAdvisor $7.2M in 2023 for deceptive lead quality marketing.",
+  "12-month auto-renewing contracts with 30\u201335% cancellation penalties lock you in even when the leads do not convert.",
+  "Contractor satisfaction averages 1.96 / 5 across 3,000+ BBB reviews (BBB, 2024). Angi's annual revenue has declined significantly from its 2021 peak, per public SEC filings.",
+];
+
+const SOLUTIONS = [
+  "You own your ZIP. One roofer per ZIP \u2014 period. No competitor in your territory ever sees the same lead.",
+  "Leads come from building permit filings, not homeowner form fills. You reach owners before they have called anyone.",
+  "Flat monthly subscription. No per-lead fees. One closed job covers months of your subscription.",
+  "AI scores every lead by urgency, project value, permit age, and cascade probability. Hot leads arrive first.",
+  "Cancel anytime, no penalty. Cancellation takes effect at the end of your billing cycle. We offer a 24-hour free trial so you can evaluate the platform before committing.",
+];
+
+const STEPS = [
+  {
+    title: "Permit filed",
+    desc: "A homeowner pulls a roofing, solar, or ADU permit with the city. Henri detects it within minutes of filing.",
+  },
+  {
+    title: "AI scores the lead",
+    desc: "Our model scores each lead 0\u2013100 based on permit freshness, project value, owner tenure, contact quality, and cascade probability.",
+  },
+  {
+    title: "Contact data enriched",
+    desc: "Each lead arrives with verified owner and property context \u2014 name, phone, email, mailing address, property value, permit history, and roof age \u2014 so you can reach out with confidence.",
+  },
+  {
+    title: "You receive the lead",
+    desc: "The scored, enriched lead appears in your dashboard. Automated SMS + email outreach fires within minutes \u2014 before any competitor knows the permit exists.",
+  },
+  {
+    title: "You close the job",
+    desc: "Exclusive leads \u2014 no one else in your ZIP is working the same permit. One closed job on Pro ($1,499/mo) covers your subscription for months.",
+  },
+];
+
+const FEATURES = [
+  {
+    badge: "Core",
+    icon: <PermitIcon />,
+    title: "Permit intelligence",
+    desc: "Real-time building permit monitoring across all your territory ZIPs. New permits appear in your dashboard within minutes of filing, giving you first-mover advantage.",
+  },
+  {
+    badge: "Core",
+    icon: <AIScoreIcon />,
+    title: "AI lead scoring",
+    desc: "Every lead scored 0\u2013100 across four dimensions: permit freshness, project value, contact quality, and renovation cascade probability. Hot leads arrive at the top, always.",
+  },
+  {
+    badge: "Exclusive",
+    icon: <TerritoryIcon />,
+    title: "ZIP territory ownership",
+    desc: "You buy exclusive rights to your ZIPs. One roofer per ZIP. When you own 90278, every roofing lead from that ZIP goes to you \u2014 and no one else.",
+  },
+  {
+    badge: null,
+    icon: <OutreachIcon />,
+    title: "Automated outreach",
+    desc: "Instant SMS sequences fire within 60 seconds of lead arrival. Hot Permit, Storm Response, Rehash, and Spanish-language templates included.",
+  },
+  {
+    badge: null,
+    icon: <CanvassIcon />,
+    title: "Canvass targeting",
+    desc: "Door-knock target lists built from permit data and roof age. Storm overlay shows which doors to knock first. Property data visible on each address.",
+  },
+  {
+    badge: "New",
+    icon: <StormIcon />,
+    title: "Storm Center",
+    desc: "Real-time NOAA and HailTrace integration. When a storm hits your territory, Henri flags affected properties, re-scores leads with urgency boost, and auto-deploys a storm response campaign.",
+  },
+];
+
+const COMPARISON_ROWS = [
+  {
+    feature: "Monthly cost",
+    henri: "$149\u2013$2,555 flat",
+    angi: "$300\u2013$2,500+",
+    thumbtack: "$10\u2013$200/lead",
+    acculynx: "$250\u2013$500+",
+  },
+  {
+    feature: "Lead exclusivity",
+    henri: { text: "1 contractor / ZIP", check: true },
+    angi: { text: "Shared with 3\u20138", cross: true },
+    thumbtack: { text: "Shared with 3\u20135", cross: true },
+    acculynx: { text: "No leads", cross: true },
+  },
+  {
+    feature: "Lead source",
+    henri: "Building permits (before homeowner calls)",
+    angi: "Homeowner form fills",
+    thumbtack: "Homeowner form fills",
+    acculynx: "Manual import only",
+  },
+  {
+    feature: "AI lead scoring",
+    henri: { text: "0\u2013100 score", check: true },
+    angi: { text: "No", cross: true },
+    thumbtack: { text: "No", cross: true },
+    acculynx: { text: "No", cross: true },
+  },
+  // Close-rate row removed: Beta-stage, we don't have a defensible
+  // Henri number yet and putting a competitor number next to a blank
+  // Henri column is worse than cutting the row. Add back with real
+  // cohort data (n≥100 contractors, ≥90-day window) + source citations.
+  {
+    feature: "Automated outreach",
+    henri: { text: "Instant SMS + email", check: true },
+    angi: { text: "Partial", partial: true },
+    thumbtack: { text: "No", cross: true },
+    acculynx: { text: "Add-on cost", partial: true },
+  },
+  {
+    feature: "Storm Center",
+    henri: { text: "\u2713", check: true },
+    angi: { text: "No", cross: true },
+    thumbtack: { text: "No", cross: true },
+    acculynx: { text: "No", cross: true },
+  },
+  {
+    feature: "Cascade detection",
+    henri: { text: "\u2713", check: true },
+    angi: { text: "No", cross: true },
+    thumbtack: { text: "No", cross: true },
+    acculynx: { text: "No", cross: true },
+  },
+  {
+    feature: "Neighborhood Blast",
+    henri: { text: "\u2713", check: true },
+    angi: { text: "No", cross: true },
+    thumbtack: { text: "No", cross: true },
+    acculynx: { text: "No", cross: true },
+  },
+  {
+    feature: "Compliance monitoring",
+    henri: { text: "\u2713", check: true },
+    angi: { text: "No", cross: true },
+    thumbtack: { text: "No", cross: true },
+    acculynx: { text: "Manual only", partial: true },
+  },
+  {
+    feature: "Cancel anytime",
+    henri: { text: "\u2713", check: true },
+    angi: { text: "12-month lock-in", cross: true },
+    thumbtack: { text: "\u2713", check: true },
+    acculynx: { text: "Annual contract", cross: true },
+  },
+  // Competitor rating row removed pending a sourced citation. Publishing
+  // specific ratings ("Angi 1.96/5") without a link to the underlying
+  // data is a defamation risk and was flagged in the truthfulness audit.
+  // Re-add with `text: "4.9 / 5"` + footnote citing BBB / Trustpilot URL
+  // when ready.
+];
+
+const PRICING_TIERS = [
+  {
+    name: "Founder",
+    price: "$149",
+    period: "per month \u00b7 price locked forever",
+    featured: false,
+    badge: "Beta \u00b7 87 of 100 left",
+    features: [
+      "3 exclusive ZIP territories",
+      "AI-scored permit leads",
+      "Full owner contact data",
+      "Email & SMS outreach",
+      "Pipeline CRM & Kanban board",
+      "ROI & analytics dashboard",
+      "Price locked \u2014 never increases",
+    ],
+    cta: "Claim founder spot",
+  },
+  {
+    name: "Starter",
+    price: "$749",
+    period: "per month \u00b7 24hr free trial",
+    featured: false,
+    features: [
+      "5 exclusive ZIP territories",
+      "AI-scored permit leads",
+      "Full contact enrichment",
+      "Email & SMS outreach sequences",
+      "Pipeline CRM & Kanban board",
+      "ROI & analytics dashboard",
+      "Storm Center alerts",
+    ],
+    cta: "Start free trial",
+  },
+  {
+    name: "Pro",
+    price: "$1,499",
+    period: "per month \u00b7 24hr free trial",
+    featured: true,
+    badge: "Most popular",
+    features: [
+      "12 exclusive ZIP territories",
+      "Everything in Starter",
+      "Door canvass targeting",
+      "Neighborhood Blast",
+      "Homeowner financing integration",
+      "Reputation management",
+      "Compliance monitoring",
+      "Cascade detection & alerts",
+    ],
+    cta: "Start free trial",
+  },
+  {
+    name: "Enterprise",
+    price: "$2,555",
+    period: "per month \u00b7 24hr free trial",
+    featured: false,
+    features: [
+      "20 exclusive ZIP territories",
+      "Everything in Pro",
+      "Homeowner request leads",
+      "Priority lead routing",
+      "Dedicated account manager",
+      "Priority support",
+      "Team seats (up to 10)",
+    ],
+    cta: "Start free trial",
+  },
+];
+
+const FAQ_ITEMS = [
+  {
+    q: "What exactly is a building permit lead?",
+    a: "When a building permit is filed in your territory, Henri detects it and delivers the lead exclusively to you. You receive the homeowner name, phone, email, mailing address, property value, and project details \u2014 before any other contractor knows the permit exists.",
+  },
+  {
+    q: "How is exclusivity guaranteed?",
+    a: "Exclusivity is built into our system. When a permit is filed in your ZIP for your trade, the lead is only delivered to you \u2014 the one contractor who holds that territory. We do not share leads or cap visibility after delivery. One contractor per trade per ZIP, period.",
+  },
+  {
+    q: "What trades does Henri cover?",
+    a: "Henri covers all residential and light commercial trades: Roofing, Solar, HVAC, Electrical, Plumbing, Addition, ADU, Windows, Painting, Landscaping, General Remodel, and Foundation. Each trade is sold as a separate territory \u2014 a roofer and an HVAC contractor can both own the same ZIP without conflict.",
+  },
+  {
+    q: "Can I change my ZIP territories?",
+    a: "Territory changes take effect at the start of your next billing cycle. If the ZIP you want is available at that time, it will be assigned to you. You cannot swap territories mid-cycle \u2014 this ensures lead continuity for both you and the homeowners in your area.",
+  },
+  {
+    q: "Do I need a valid contractor license?",
+    a: "Yes. A valid, active contractor license is required to use Henri. We verify your license before your first lead is delivered, and our compliance system checks license status daily. If your license expires or is revoked, lead delivery is paused until the issue is resolved.",
+  },
+  {
+    q: "Can I cancel my subscription?",
+    a: "You can cancel your account at any time from your dashboard. Cancellation takes effect at the end of your current billing cycle, prior to the next charge. You will continue to have full access until your cycle ends.",
+  },
+  {
+    q: "Do you offer refunds?",
+    a: "Henri is a digital product. Once payment is processed, it is final \u2014 there are no refunds. We offer a 24-hour free trial on all plans, which gives you full access to explore the platform and evaluate whether it is the right fit for your business before any charge is made.",
+  },
+];
+
+// "ROI 18.4x" and "LTV $8,300" were unsourced projections (Beta, no
+// cohort to derive them). Replaced with four claims we can stand
+// behind without a footnote war.
+const PROOF_STATS = [
+  { num: "1 / ZIP", label: "Exclusive territory \u2014 one contractor per ZIP, enforced at the DB level" },
+  { num: "Flat", label: "Monthly subscription \u2014 no per-lead fees, no 12-month contracts" },
+  { num: "24 hrs", label: "Free trial to explore the full platform before any charge" },
+  { num: "Any time", label: "Cancel from your dashboard \u2014 takes effect at end of billing cycle" },
+];
+
+/* ─── Cell renderer for comparison table ────────────────────────────── */
+
+type CellValue =
+  | string
+  | { text: string; check?: boolean; cross?: boolean; partial?: boolean; rating?: string };
+
+function ComparisonCell({
+  value,
+  highlight = false,
+}: {
+  value: CellValue;
+  highlight?: boolean;
+}) {
+  const base = highlight
+    ? "px-5 py-3.5 text-center bg-primary/[0.04] font-semibold text-foreground"
+    : "px-5 py-3.5 text-center text-muted-foreground";
+
+  if (typeof value === "string") {
+    return <td className={base}>{value}</td>;
+  }
+
+  let colorCls = "";
+  if (value.check) colorCls = "text-green-600 dark:text-green-500 font-semibold";
+  else if (value.cross) colorCls = "text-red-500 font-semibold";
+  else if (value.partial) colorCls = "text-yellow-600 dark:text-yellow-500";
+  else if (value.rating === "good")
+    colorCls = "text-green-600 dark:text-green-500 font-semibold";
+  else if (value.rating === "bad") colorCls = "text-red-500";
+
+  return (
+    <td className={base}>
+      <span className={colorCls}>{value.text}</span>
+    </td>
+  );
+}
+
+/* ─── FAQ accordion item ────────────────────────────────────────────── */
+
+function FAQItem({
+  question,
+  answer,
+  open,
+  onToggle,
+}: {
+  question: string;
+  answer: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="border-b border-border">
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-3 py-5 text-left text-[15.5px] font-semibold text-foreground"
+        aria-expanded={open}
+      >
+        {question}
+        <ChevronDown
+          className={`shrink-0 text-muted-foreground transition-transform duration-200 ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+      <div
+        className={`overflow-hidden text-[14.5px] leading-[1.75] text-muted-foreground transition-all duration-300 ${
+          open ? "max-h-[500px] pb-5" : "max-h-0"
+        }`}
+      >
+        {answer}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PAGE COMPONENT
+   ═══════════════════════════════════════════════════════════════════════ */
+
+export default function ContractorsPage() {
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  return (
+    <>
+      {/* Shared <MarketingNav /> is mounted by src/app/(marketing)/layout.tsx.
+          Per-page <ContractorNav /> removed as part of gap-audit G1. */}
+
+      {/* ── HERO ─────────────────────────────────────────────── */}
+      <section className="border-b border-border bg-card">
+        <div className="mx-auto grid max-w-[1100px] items-center gap-14 px-8 pb-[72px] pt-[88px] lg:grid-cols-[1fr_440px]">
+          {/* Left */}
+          <div>
+            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-primary">
+              Henri for Contractors
+            </p>
+            <h1 className="mb-5 font-heading text-[clamp(36px,4.5vw,54px)] font-normal leading-[1.15] tracking-tight">
+              Own your ZIP.
+              <br />
+              Get the lead <em className="text-primary">before</em>
+              <br />
+              anyone else calls.
+            </h1>
+            <p className="mb-8 max-w-[480px] text-[17px] leading-[1.7] text-muted-foreground">
+              Henri monitors every building permit filed in your territory,
+              AI-scores each lead by urgency and value, and delivers it
+              exclusively to you &mdash; one contractor per trade per ZIP code.
+              No bidding. No shared leads. No spam.
+            </p>
+            <div className="mb-9 flex flex-wrap gap-3">
+              <Link
+                href="#pricing"
+                className="inline-block rounded-[10px] bg-primary px-8 py-3.5 text-[15px] font-semibold text-white transition-colors hover:bg-primary/90"
+              >
+                See pricing &amp; territories
+              </Link>
+              <Link
+                href="/signup?role=contractor"
+                className="inline-block rounded-[10px] border border-border px-6 py-3.5 text-[15px] font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              >
+                Start free trial
+              </Link>
+            </div>
+            <div className="flex flex-wrap items-center gap-5">
+              {["No setup fee", "Cancel anytime", "24-hour free trial", "CSLB verified only"].map(
+                (item) => (
+                  <div
+                    key={item}
+                    className="flex items-center gap-2 text-[13px] text-muted-foreground"
+                  >
+                    <div className="h-[5px] w-[5px] shrink-0 rounded-full bg-green-600" />
+                    {item}
+                  </div>
+                ),
+              )}
+            </div>
+          </div>
+
+          {/* Right — Live leads preview card */}
+          <div className="relative hidden overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-lg lg:block">
+            {/* Glow */}
+            <div className="pointer-events-none absolute -right-[60px] -top-[60px] h-[200px] w-[200px] rounded-full bg-primary/[0.18] blur-2xl" />
+            <p className="relative mb-3.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              Live leads &mdash; ZIP 90278 &middot; Redondo Beach
+            </p>
+            <div className="relative mb-3.5 flex flex-col gap-2">
+              {/* Lead 1 */}
+              <div className="flex items-center gap-2.5 rounded-[9px] border border-border bg-card p-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-extrabold text-white">
+                  94
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold text-foreground">
+                    1842 Redondo Ave
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Roofing &middot; $74K permit &middot; 2 min ago
+                  </div>
+                </div>
+                <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  Hot
+                </span>
+              </div>
+              {/* Lead 2 */}
+              <div className="flex items-center gap-2.5 rounded-[9px] border border-border bg-card p-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-extrabold text-white">
+                  88
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold text-foreground">
+                    6201 W 83rd St
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Roof Replace &middot; Cascade signal &middot; 8 min ago
+                  </div>
+                </div>
+                <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  Hot
+                </span>
+              </div>
+              {/* Lead 3 */}
+              <div className="flex items-center gap-2.5 rounded-[9px] border border-border bg-card p-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-yellow-600 text-[11px] font-extrabold text-white">
+                  76
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold text-foreground">
+                    1058 N Pacific Ave
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    ADU + Roof &middot; Owner M. Chen &middot; 31 min ago
+                  </div>
+                </div>
+                <span className="shrink-0 rounded bg-yellow-600/15 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-700 dark:text-yellow-500">
+                  Warm
+                </span>
+              </div>
+            </div>
+            <div className="relative border-t border-border pt-2.5 text-center text-[11.5px] text-muted-foreground">
+              Your territory. <strong className="text-primary">Only you</strong>{" "}
+              see these leads.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── STATS BAR ────────────────────────────────────────── */}
+      <section className="border-b border-white/10 bg-[#1E2028] dark:bg-[#080809]">
+        <div className="mx-auto grid max-w-[1100px] grid-cols-2 px-8 md:grid-cols-4">
+          {STATS.map((s, i) => (
+            <div
+              key={i}
+              className={`py-8 text-center ${
+                i < STATS.length - 1 ? "border-r border-white/10" : ""
+              }`}
+            >
+              <div className="font-heading text-[42px] font-normal leading-none tracking-tight text-primary">
+                {s.num}
+              </div>
+              <div className="mt-1.5 text-[13px] leading-snug text-[#9E9C92]">
+                {s.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── PROBLEM / SOLUTION ────────────────────────────────── */}
+      <section className="border-b border-border bg-card">
+        <div className="mx-auto max-w-[1100px] px-8 py-20">
+          <div className="mx-auto mb-12 max-w-[640px] text-center">
+            <p className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-primary">
+              The problem with every other platform
+            </p>
+            <h2 className="mb-3.5 font-heading text-[clamp(28px,3.5vw,42px)] font-normal leading-[1.2] tracking-tight">
+              Lead gen is <em className="text-primary">broken</em> for
+              contractors
+            </h2>
+            <p className="text-base leading-relaxed text-muted-foreground">
+              Every major platform optimizes for homeowner volume at your
+              expense. Henri was built by contractors who got tired of paying
+              $2,500 per closed job.
+            </p>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Problems */}
+            <div className="rounded-2xl border border-red-500/15 bg-red-500/5 p-8">
+              <div className="mb-5 flex items-center gap-2 text-[10.5px] font-extrabold uppercase tracking-[0.12em] text-red-500">
+                <XCircle className="text-red-500" />
+                How Angi / Thumbtack work
+              </div>
+              {PROBLEMS.map((item, i) => (
+                <div
+                  key={i}
+                  className="mb-3.5 flex items-start gap-3 text-sm leading-relaxed text-muted-foreground"
+                >
+                  <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
+                  {item}
+                </div>
+              ))}
+            </div>
+            {/* Solutions */}
+            <div className="rounded-2xl border border-primary/25 bg-primary/[0.08] p-8">
+              <div className="mb-5 flex items-center gap-2 text-[10.5px] font-extrabold uppercase tracking-[0.12em] text-primary">
+                <CheckCircle className="text-primary" />
+                How Henri works
+              </div>
+              {SOLUTIONS.map((item, i) => (
+                <div
+                  key={i}
+                  className="mb-3.5 flex items-start gap-3 text-sm leading-relaxed text-muted-foreground"
+                >
+                  <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── HOW IT WORKS ──────────────────────────────────────── */}
+      <section
+        id="how-it-works"
+        className="border-b border-border bg-bg-subtle"
+      >
+        <div className="mx-auto max-w-[1100px] px-8 py-20">
+          <div className="mx-auto mb-12 max-w-[640px] text-center">
+            <p className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-primary">
+              How Henri works
+            </p>
+            <h2 className="font-heading text-[clamp(28px,3.5vw,42px)] font-normal leading-[1.2] tracking-tight">
+              From permit filing to
+              <br />
+              <em className="text-primary">you on the phone</em> in under 5
+              minutes
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-2 gap-0 md:grid-cols-5">
+            {STEPS.map((step, i) => (
+              <div
+                key={i}
+                className={`relative px-5 py-7 ${
+                  i < STEPS.length - 1 ? "border-r border-border" : ""
+                }`}
+              >
+                <div className="font-heading text-[40px] font-normal leading-none text-primary/30">
+                  {i + 1}
+                </div>
+                <div className="mb-2 mt-3 text-sm font-semibold text-foreground">
+                  {step.title}
+                </div>
+                <div className="text-[13px] leading-relaxed text-muted-foreground">
+                  {step.desc}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── FEATURES GRID ─────────────────────────────────────── */}
+      <section id="features" className="border-b border-border bg-card">
+        <div className="mx-auto max-w-[1100px] px-8 py-20">
+          <div className="mx-auto mb-12 max-w-[640px] text-center">
+            <p className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-primary">
+              Platform features
+            </p>
+            <h2 className="mb-3.5 font-heading text-[clamp(28px,3.5vw,42px)] font-normal leading-[1.2] tracking-tight">
+              Everything you need.
+              <br />
+              <em className="text-primary">Nothing you do not.</em>
+            </h2>
+            <p className="text-base leading-relaxed text-muted-foreground">
+              Henri replaces Angi, your CRM, your outreach tool, your canvassing
+              app, and your compliance tracker &mdash; in one platform.
+            </p>
+          </div>
+
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {FEATURES.map((f, i) => (
+              <div
+                key={i}
+                className="group rounded-[14px] border border-border bg-card p-7 transition-all hover:-translate-y-0.5 hover:border-primary hover:shadow-lg hover:shadow-primary/10"
+              >
+                {f.badge && (
+                  <span className="mb-2.5 inline-block rounded bg-primary px-1.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-white">
+                    {f.badge}
+                  </span>
+                )}
+                <div className="mb-4 flex h-[42px] w-[42px] items-center justify-center rounded-[10px] bg-primary/10 text-primary">
+                  {f.icon}
+                </div>
+                <div className="mb-2 text-[15px] font-semibold text-foreground">
+                  {f.title}
+                </div>
+                <div className="text-[13.5px] leading-relaxed text-muted-foreground">
+                  {f.desc}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── COMPARISON TABLE ───────────────────────────────────── */}
+      <section className="border-b border-border bg-bg-subtle">
+        <div className="mx-auto max-w-[1100px] px-8 py-20">
+          <div className="mx-auto mb-12 max-w-[640px] text-center">
+            <p className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-primary">
+              Side-by-side comparison
+            </p>
+            <h2 className="font-heading text-[clamp(28px,3.5vw,42px)] font-normal leading-[1.2] tracking-tight">
+              Henri vs. every
+              <br />
+              other option
+            </h2>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr>
+                    <th className="border-b-2 border-border bg-bg-subtle px-5 py-4 text-left text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Feature
+                    </th>
+                    <th className="border-b-2 border-border bg-primary/[0.08] px-5 py-4 text-center text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+                      Henri
+                    </th>
+                    <th className="border-b-2 border-border bg-bg-subtle px-5 py-4 text-center text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Angi / HomeAdvisor
+                    </th>
+                    <th className="border-b-2 border-border bg-bg-subtle px-5 py-4 text-center text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Thumbtack
+                    </th>
+                    <th className="border-b-2 border-border bg-bg-subtle px-5 py-4 text-center text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      AccuLynx CRM
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {COMPARISON_ROWS.map((row, i) => (
+                    <tr
+                      key={i}
+                      className={
+                        i < COMPARISON_ROWS.length - 1
+                          ? "border-b border-border"
+                          : ""
+                      }
+                    >
+                      <td className="px-5 py-3.5 text-left font-medium text-foreground">
+                        {row.feature}
+                      </td>
+                      <ComparisonCell value={row.henri} highlight />
+                      <ComparisonCell value={row.angi} />
+                      <ComparisonCell value={row.thumbtack} />
+                      <ComparisonCell value={row.acculynx} />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── PRICING ───────────────────────────────────────────── */}
+      <section
+        id="pricing"
+        className="bg-[#1E2028] py-[88px] dark:bg-[#080809]"
+      >
+        <div className="mx-auto max-w-[1100px] px-8">
+          {/* Header */}
+          <div className="mx-auto mb-12 max-w-[560px] text-center">
+            <p className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-primary">
+              Simple, flat pricing
+            </p>
+            <h2 className="mb-3.5 font-heading text-[clamp(30px,4vw,48px)] font-normal leading-[1.2] tracking-tight text-[#F0EEE8]">
+              One closed job pays for
+              <br />
+              <em className="text-primary">years</em> of Henri
+            </h2>
+            <p className="text-base leading-relaxed text-[#9E9C92]">
+              No per-lead fees. No setup costs. No contracts. Own your territory
+              &mdash; one roofer per ZIP, per trade.
+            </p>
+          </div>
+
+          {/* Cards */}
+          <div className="mb-11 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {PRICING_TIERS.map((tier, i) => (
+              <div
+                key={i}
+                className={`relative rounded-2xl border p-7 transition-transform hover:-translate-y-0.5 ${
+                  tier.featured
+                    ? "border-primary bg-primary/[0.12]"
+                    : "border-white/10 bg-white/[0.04] hover:bg-white/[0.06]"
+                }`}
+              >
+                {tier.badge && (
+                  <span className="mb-3.5 inline-block rounded-[5px] bg-primary px-2.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-widest text-white">
+                    {tier.badge}
+                  </span>
+                )}
+                <div className="mb-1 text-[15px] font-semibold text-[#F0EEE8]">
+                  {tier.name}
+                </div>
+                <div className="font-heading text-[42px] font-normal leading-none tracking-tight text-primary">
+                  {tier.price}
+                </div>
+                <div className="mb-5 mt-1 text-xs text-[#9E9C92]">
+                  {tier.period}
+                </div>
+                <div className="flex flex-col gap-2">
+                  {tier.features.map((f, fi) => (
+                    <div
+                      key={fi}
+                      className="flex items-start gap-2.5 text-[13px] leading-snug text-[#9E9C92]"
+                    >
+                      <div className="mt-[7px] h-[5px] w-[5px] shrink-0 rounded-full bg-primary" />
+                      {f}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className={`mt-5 w-full rounded-[9px] py-3 text-sm font-semibold transition-colors ${
+                    tier.featured
+                      ? "bg-primary text-white hover:bg-primary/90"
+                      : "border border-white/20 bg-white/10 text-white hover:bg-white/20"
+                  }`}
+                >
+                  {tier.cta}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Proof stats */}
+          <div className="grid grid-cols-2 gap-5 border-t border-white/10 pt-11 md:grid-cols-4">
+            {PROOF_STATS.map((s, i) => (
+              <div key={i} className="text-center">
+                <div className="font-heading text-[38px] font-normal leading-none tracking-tight text-primary">
+                  {s.num}
+                </div>
+                <div className="mt-1.5 text-[13px] leading-snug text-[#9E9C92]">
+                  {s.label}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── FAQ ────────────────────────────────────────────────── */}
+      <section id="faq" className="border-b border-border bg-bg-subtle">
+        <div className="mx-auto max-w-[1100px] px-8 py-20">
+          <div className="mx-auto mb-12 max-w-[640px] text-center">
+            <p className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-primary">
+              Common questions
+            </p>
+            <h2 className="font-heading text-[clamp(28px,3.5vw,42px)] font-normal leading-[1.2] tracking-tight">
+              Everything contractors ask
+              <br />
+              before signing up
+            </h2>
+          </div>
+
+          <div className="mx-auto max-w-[740px]">
+            {FAQ_ITEMS.map((item, i) => (
+              <FAQItem
+                key={i}
+                question={item.q}
+                answer={item.a}
+                open={openFaq === i}
+                onToggle={() => setOpenFaq(openFaq === i ? null : i)}
+              />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── FINAL CTA ─────────────────────────────────────────── */}
+      <section className="relative overflow-hidden bg-[#1E2028] px-8 py-[100px] text-center dark:bg-[#080809]">
+        {/* Radial glow */}
+        <div className="pointer-events-none absolute left-1/2 top-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/[0.16] blur-3xl" />
+        <div className="relative z-10 mx-auto max-w-[640px]">
+          <h2 className="mb-4 font-heading text-[clamp(32px,4.5vw,52px)] font-normal leading-[1.2] tracking-tight text-[#F0EEE8]">
+            Your territory is
+            <br />
+            <em className="text-primary">open right now</em>.
+          </h2>
+          <p className="mb-9 text-[17px] leading-relaxed text-white/55">
+            Claim your ZIPs before another contractor does. The first contractor in
+            a territory owns it for as long as they stay subscribed. Start your
+            24-hour free trial today &mdash; credit card required.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3.5">
+            <Link
+              href="/signup?role=contractor"
+              className="inline-block rounded-[11px] bg-primary px-10 py-4 text-base font-semibold text-white transition-colors hover:bg-primary/90"
+            >
+              Claim your territory
+            </Link>
+            <Link
+              href="/signup?role=contractor"
+              className="inline-block rounded-[11px] border border-white/20 px-8 py-4 text-base font-medium text-white/70 transition-colors hover:border-white/45 hover:text-white"
+            >
+              Talk to sales
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer removed — the shared <Footer /> mounted by
+          src/app/(marketing)/layout.tsx renders the canonical footer on every
+          marketing page with Terms / Privacy / Acceptable Use reachable
+          (required for Stripe + Google OAuth review). See plan gap G3. */}
+    </>
+  );
+}

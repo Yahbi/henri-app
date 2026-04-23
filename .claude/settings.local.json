@@ -1,0 +1,89 @@
+{
+  "_comment": [
+    "Henri App permissions — curated set for Phase 0+. Wildcards cover",
+    "the hot-path tooling (pnpm, npx, curl, node one-liners, git read,",
+    "Supabase CLI) without re-approving every variation. Any tool that",
+    "can mutate production (git push, git reset --hard, supabase db",
+    "push against prod, etc.) stays explicit and off this list."
+  ],
+  "permissions": {
+    "allow": [
+      "Read(//tmp/**)",
+      "Read(C:\\Users\\yabis\\Desktop\\Henri App\\**)",
+      "Read(C:\\Users\\yabis\\.claude\\plans\\**)",
+
+      "Bash(pnpm:*)",
+      "Bash(npm run:*)",
+      "Bash(npm install:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx tsx:*)",
+      "Bash(npx next:*)",
+      "Bash(npx --yes supabase:*)",
+      "Bash(supabase:*)",
+      "Bash(node -e *)",
+      "Bash(node /tmp/*)",
+      "Bash(node scripts/*)",
+      "Bash(python3 -c :*)",
+      "Bash(python -c :*)",
+
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(wc -l *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(grep -l *)",
+      "Bash(grep -c *)",
+      "Bash(grep -rE *)",
+      "Bash(grep -E *)",
+      "Bash(xargs grep:*)",
+      "Bash(awk *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(which *)",
+      "Bash(test -f *)",
+      "Bash(test -d *)",
+
+      "Bash(curl -s *)",
+      "Bash(curl -sI *)",
+      "Bash(curl -sf *)",
+      "Bash(curl -i *)",
+      "Bash(curl -o *)",
+
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh api:*)",
+
+      "Bash(tasklist)",
+      "Bash(clip.exe)",
+      "Bash(sleep *)",
+      "Bash(until *)",
+
+      "mcp__Claude_Preview__*",
+      "mcp__Claude_in_Chrome__*",
+      "mcp__ccd_session__mark_chapter",
+      "mcp__ccd_session__spawn_task",
+      "mcp__scheduled-tasks__*",
+      "mcp__mcp-registry__*"
+    ],
+    "deny": [
+      "Bash(git push *--force*)",
+      "Bash(git push --force-with-lease*)",
+      "Bash(git reset --hard origin/main*)",
+      "Bash(git reset --hard origin/master*)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(npx supabase db push *--prod*)",
+      "Bash(supabase db push *--prod*)"
+    ]
+  }
+}

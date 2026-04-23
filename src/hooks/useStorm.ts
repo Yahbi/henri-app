@@ -1,0 +1,86 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+
+export interface StormAlert {
+  id: string;
+  event: string;
+  severity: string;
+  urgency: string;
+  headline: string;
+  description: string;
+  onset: string;
+  expires: string;
+  area: string;
+  // Both `instruction` and `areas` are populated by some NWS feeds and
+  // rendered by storm/page.tsx when present. Optional because not every
+  // alert type ships them.
+  instruction?: string | null;
+  areas?: string | null;
+}
+
+export interface StormData {
+  alerts: StormAlert[];
+  territories: string[];
+  fetchedAt: string;
+}
+
+interface UseStormReturn {
+  alerts: StormAlert[];
+  territories: string[];
+  fetchedAt: string | null;
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
+
+export function useStorm(): UseStormReturn {
+  const [alerts, setAlerts] = useState<StormAlert[]>([]);
+  const [territories, setTerritories] = useState<string[]>([]);
+  const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchStorm = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const res = await fetch("/api/storm");
+
+      if (!res.ok) {
+        // Gracefully return empty — no console errors
+        setAlerts([]);
+        setTerritories([]);
+        setFetchedAt(null);
+        setIsLoading(false);
+        return;
+      }
+
+      const data = await res.json();
+      setAlerts(data.alerts ?? []);
+      setTerritories(data.territories ?? []);
+      setFetchedAt(data.fetchedAt ?? null);
+    } catch {
+      // API not available — return clean defaults
+      setAlerts([]);
+      setTerritories([]);
+      setFetchedAt(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStorm();
+  }, [fetchStorm]);
+
+  return {
+    alerts,
+    territories,
+    fetchedAt,
+    isLoading,
+    error,
+    refresh: fetchStorm,
+  };
+}

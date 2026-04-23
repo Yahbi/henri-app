@@ -1,0 +1,150 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { logApiError } from "@/lib/log";
+
+/**
+ * POST /api/messages/send
+ * Body: { lead_id: string, channel: "sms"|"email", body: string, subject?: string }
+ *
+ * Sends a one-off outbound message to a lead. SMS via Twilio, email via
+ * Resend. Appends a `[out]` entry to the lead's `notes` so the
+ * /dashboard/messages thread reflects the new message (notes are still
+ * the chat log until the `messages` table migration lands).
+ *
+ * Graceful degradation: if the provider env vars aren't set, the message
+ * is still logged to notes so the UI shows activity, but ok=false and
+ * provider_error is surfaced so the contractor knows it didn't leave
+ * our system.
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const body = (await req.json()) as {
+      lead_id?: string;
+      channel?: string;
+      body?: string;
+      subject?: string;
+    };
+    const leadId = (body.lead_id ?? "").trim();
+    const channel = (body.channel ?? "sms").toLowerCase();
+    const text = (body.body ?? "").trim();
+    if (!leadId || !text) {
+      return NextResponse.json(
+        { error: "lead_id and body required" },
+        { status: 400 },
+      );
+    }
+    if (!["sms", "email"].includes(channel)) {
+      return NextResponse.json({ error: "channel must be sms or email" }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: lead } = await supabase
+      .from("leads")
+      .select("id, phone, email, owner_name, notes")
+      .eq("id", leadId)
+      .eq("contractor_id", user.id)
+      .single();
+    if (!lead) {
+      return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+    }
+
+    let providerOk = false;
+    let providerError: string | null = null;
+
+    if (channel === "sms") {
+      if (!lead.phone) {
+        return NextResponse.json(
+          { error: "Lead has no phone number on file" },
+          { status: 400 },
+        );
+      }
+      const sid = process.env.TWILIO_ACCOUNT_SID;
+      const token = process.env.TWILIO_AUTH_TOKEN;
+      const from = process.env.TWILIO_FROM_NUMBER;
+      if (!sid || !token || !from) {
+        providerError = "Twilio not configured (TWILIO_ACCOUNT_SID / AUTH_TOKEN / FROM_NUMBER)";
+      } else {
+        try {
+          const auth = Buffer.from(`${sid}:${token}`).toString("base64");
+          const res = await fetch(
+            `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Basic ${auth}`,
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: new URLSearchParams({
+                From: from,
+                To: String(lead.phone),
+                Body: text,
+              }).toString(),
+            },
+          );
+          providerOk = res.ok;
+          if (!res.ok) providerError = (await res.text().catch(() => "")).slice(0, 300);
+        } catch (e) {
+          providerError = (e as Error).message;
+        }
+      }
+    } else {
+      // email
+      if (!lead.email) {
+        return NextResponse.json(
+          { error: "Lead has no email on file" },
+          { status: 400 },
+        );
+      }
+      const resendKey = process.env.RESEND_API_KEY;
+      const fromAddr = process.env.RESEND_FROM_EMAIL ?? "henri@henri.app";
+      if (!resendKey) {
+        providerError = "RESEND_API_KEY not configured";
+      } else {
+        try {
+          const res = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${resendKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              from: fromAddr,
+              to: [lead.email],
+              subject: body.subject ?? "Message from your contractor",
+              text,
+            }),
+          });
+          providerOk = res.ok;
+          if (!res.ok) providerError = (await res.text().catch(() => "")).slice(0, 300);
+        } catch (e) {
+          providerError = (e as Error).message;
+        }
+      }
+    }
+
+    // Always log to notes so the UI reflects activity even when provider
+    // is down. Prefix with [out channel YYYY-MM-DD] for regex parsers.
+    const now = new Date().toISOString();
+    const entry = `[out ${channel} ${now.slice(0, 10)}] ${text}`;
+    const joined = lead.notes ? `${lead.notes}\n${entry}` : entry;
+    await supabase.from("leads").update({ notes: joined }).eq("id", leadId);
+
+    return NextResponse.json({
+      ok: providerOk,
+      channel,
+      provider_error: providerError,
+      logged_to_notes: true,
+    });
+  } catch (error) {
+    logApiError("messages.send", error);
+    return NextResponse.json(
+      { error: "Failed to send message" },
+      { status: 500 },
+    );
+  }
+}

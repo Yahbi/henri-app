@@ -1,0 +1,1155 @@
+# Free API Endpoints for Construction & Permits Across the US
+
+Generated on 2026-04-15 11:33:28
+
+This report aggregates live permit datasets, CKAN endpoints, and Socrata endpoints across federal, state, and local US data portals.
+
+## Category: Building Permits
+
+### Socrata & ArcGIS APIs (Local/State/City)
+
+- **Building Permits** (data.cityofchicago.org)
+  - **Link**: https://data.cityofchicago.org/d/ydr8-5enu
+  - **Type**: dataset
+- **Building Permits** (data.calgary.ca)
+  - **Link**: https://data.calgary.ca/d/c2es-76ed
+  - **Type**: dataset
+- **Building Permits** (cos-data.seattle.gov)
+  - **Link**: https://cos-data.seattle.gov/d/76t5-zqzr
+  - **Type**: dataset
+- **Building Permits** (data.oxnard.org)
+  - **Link**: https://data.oxnard.org/d/vmzx-48vx
+  - **Type**: dataset
+- **General Building Permits** (data.edmonton.ca)
+  - **Link**: https://data.edmonton.ca/d/24uj-dj8v
+  - **Type**: dataset
+- **Building Permits** (www.dallasopendata.com)
+  - **Link**: https://www.dallasopendata.com/d/e7gq-4sah
+  - **Type**: dataset
+- **Building Permit** (data.marincounty.gov)
+  - **Link**: https://data.marincounty.gov/d/mkbn-caye
+  - **Type**: dataset
+- **EBR Building Permits** (data.brla.gov)
+  - **Link**: https://data.brla.gov/d/7fq7-8j7r
+  - **Type**: dataset
+- **Building Permits** (data.cityofgainesville.org)
+  - **Link**: https://data.cityofgainesville.org/d/p798-x3nx
+  - **Type**: dataset
+- **Building Permits Report** (data.marincounty.gov)
+  - **Link**: https://data.marincounty.gov/d/nits-hbvx
+  - **Type**: filter
+- **Building Permit Map** (cos-data.seattle.gov)
+  - **Link**: https://cos-data.seattle.gov/d/5rc4-5s78
+  - **Type**: map
+- **Building Permits** (data.framinghamma.gov)
+  - **Link**: https://data.framinghamma.gov/d/2vzw-yean
+  - **Type**: dataset
+- **Building Permits by Community** (data.calgary.ca)
+  - **Link**: https://data.calgary.ca/d/kr8b-c44i
+  - **Type**: map
+- **Building Permits (RETIRED)** (citydata.mesaaz.gov)
+  - **Link**: https://citydata.mesaaz.gov/d/2gkz-7z4f
+  - **Type**: dataset
+- **Building Permits** (internal-sandiegocounty.data.socrata.com)
+  - **Link**: https://internal-sandiegocounty.data.socrata.com/d/dyzh-7eat
+  - **Type**: dataset
+- **LA BUILD PERMITS** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/xnhu-aczu
+  - **Type**: filter
+- **Cincinnati Building Permits** (data.cincinnati-oh.gov)
+  - **Link**: https://data.cincinnati-oh.gov/d/uhjb-xac9
+  - **Type**: dataset
+- **Building Permits** (citydata.mesaaz.gov)
+  - **Link**: https://citydata.mesaaz.gov/d/dzpk-hxfb
+  - **Type**: dataset
+- **Building Permits - Map Search** (data.edmonton.ca)
+  - **Link**: https://data.edmonton.ca/d/itki-s8y9
+  - **Type**: map
+- **Building Permits: New Housing Units** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/cpkv-aajs
+  - **Type**: filter
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/u8xs-sfb6
+  - **Type**: filter
+- **Building Permits Dashboards** (data.kcmo.org)
+  - **Link**: https://data.kcmo.org/stories/s/sq5v-m7n2
+  - **Type**: story
+- **Issued Building Permits** (cos-data.seattle.gov)
+  - **Link**: https://cos-data.seattle.gov/d/8tqq-u7ib
+  - **Type**: filter
+- **Detailed Building Permit Data** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/it4w-cpf4
+  - **Type**: dataset
+- **Building Permits Feb'15-Present** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/6q2s-9pnn
+  - **Type**: filter
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/yrwh-n3zy
+  - **Type**: filter
+- **CorStat - Building Permits** (corstat.coronaca.gov)
+  - **Link**: https://corstat.coronaca.gov/d/2agx-camz
+  - **Type**: dataset
+- **Building Permit Inspection** (data.marincounty.gov)
+  - **Link**: https://data.marincounty.gov/d/yfwm-p533
+  - **Type**: dataset
+- **Electrical Building Permits** (data.montgomerycountymd.gov)
+  - **Link**: https://data.montgomerycountymd.gov/d/qxie-8qnp
+  - **Type**: dataset
+- **Issued Building Permits** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/3z4i-4ta5
+  - **Type**: map
+- **Building Permits over 100K Valuation** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/y5ik-mwat
+  - **Type**: filter
+- **Aggregate Building Permit Data** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/p5sy-gt7y
+  - **Type**: dataset
+- **Building Permit Locations** (data.calgary.ca)
+  - **Link**: https://data.calgary.ca/d/55jd-afyr
+  - **Type**: map
+- **Building Permit Values by Community** (data.calgary.ca)
+  - **Link**: https://data.calgary.ca/d/jzna-hfhu
+  - **Type**: map
+- **New Commercial Building Permits over 100k** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/hhzr-9ttq
+  - **Type**: filter
+- **Building Permits Issued** (data.littlerock.gov)
+  - **Link**: https://data.littlerock.gov/stories/s/vms9-5yvi
+  - **Type**: story
+- **Building Permits: New Construction** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/9qm7-wbdc
+  - **Type**: dataset
+- **Building Permit Counts in Colorado** (data.colorado.gov)
+  - **Link**: https://data.colorado.gov/d/v4as-sthd
+  - **Type**: dataset
+- **Building Permits: Addition/Alteration** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/qu2z-8suj
+  - **Type**: dataset
+- **Apartment Building Permits over 100k** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/n3m5-kxzy
+  - **Type**: filter
+- **New Residential Building Permits over 100k** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/peyn-q7x3
+  - **Type**: filter
+- **Building Permits and Zoning** (data.calgary.ca)
+  - **Link**: https://data.calgary.ca/d/7zdt-jpt4
+  - **Type**: map
+- **Building Permit Builders Report** (data.calgary.ca)
+  - **Link**: https://data.calgary.ca/d/4ejs-ppnc
+  - **Type**: filter
+- **Building Permits by Year and Type** (citydata.mesaaz.gov)
+  - **Link**: https://citydata.mesaaz.gov/d/fwdp-w6rg
+  - **Type**: chart
+- **Building Permits Issued Yesterday** (corstat.coronaca.gov)
+  - **Link**: https://corstat.coronaca.gov/d/6vp3-jaxt
+  - **Type**: filter
+- **Building Permits** (opendata.utah.gov)
+  - **Link**: https://opendata.utah.gov/d/j2cn-uyhn
+  - **Type**: map
+- **Building Permits** (data.wcad.org)
+  - **Link**: https://data.wcad.org/d/fqhf-gyjx
+  - **Type**: dataset
+- **Building Permits Issued** (data.urbanaillinois.us)
+  - **Link**: https://data.urbanaillinois.us/d/x5kj-g5aj
+  - **Type**: map
+- **Cincinnati Building Permits Timeline** (data.cincinnati-oh.gov)
+  - **Link**: https://data.cincinnati-oh.gov/d/94uh-66xv
+  - **Type**: dataset
+- **Building Permits (Commercial, Residential and Signs)** (citydata.mesaaz.gov)
+  - **Link**: https://citydata.mesaaz.gov/d/m2kk-w2hz
+  - **Type**: filter
+
+### CKAN / Data.gov (Federal/State/Gov)
+
+- No CKAN datasets found.
+
+## Category: New Construction
+
+### Socrata & ArcGIS APIs (Local/State/City)
+
+- **Building Permits: New Construction** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/9qm7-wbdc
+  - **Type**: dataset
+- **New Construction Permits 2015** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/cv5a-dwmc
+  - **Type**: filter
+- **New Construction in Boyle Heights** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/fsxs-qr67
+  - **Type**: filter
+- **Fort Collins New Construction Permits** (opendata.fcgov.com)
+  - **Link**: https://opendata.fcgov.com/d/4nr5-i9u8
+  - **Type**: map
+- **Issued Construction Permits for New construction and remodels since April 1, 2016** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/hw8f-smxh
+  - **Type**: filter
+- **Commercial (New Construction) Building Permits Issued since 2010** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/d3mw-y7vr
+  - **Type**: chart
+- **New Construction, CTPs** (opendata.utah.gov)
+  - **Link**: https://opendata.utah.gov/d/5f67-kwji
+  - **Type**: href
+- **Multifamily Residential Existing and New Construction Energy Efficiency Projects Reported By NYSERDA: Beginning 2005** (data.ny.gov)
+  - **Link**: https://data.ny.gov/d/sknk-et96
+  - **Type**: dataset
+- **Multifamily Residential Existing and New Construction Energy Efficiency Measures Reported By NYSERDA: Beginning 2005** (data.ny.gov)
+  - **Link**: https://data.ny.gov/d/xt6e-eyna
+  - **Type**: dataset
+- **Percent of New Construction Inspected and Listed Prior to Mailing of Annual Assessment Notices - Department KPI** (sharefulton.fultoncountyga.gov)
+  - **Link**: https://sharefulton.fultoncountyga.gov/d/eceg-ftq6
+  - **Type**: measure
+- **Copy of Board of Assessors- New Construction Inspected and Listed KPI (Trend 2)** (sharefulton.fultoncountyga.gov)
+  - **Link**: https://sharefulton.fultoncountyga.gov/d/s83w-bz87
+  - **Type**: chart
+- **Dallas Market Value Analysis - Permit Points** (www.dallasopendata.com)
+  - **Link**: https://www.dallasopendata.com/d/xvhy-2xtn
+  - **Type**: map
+- **2020 Building Permit Listing** (data.kcmo.org)
+  - **Link**: https://data.kcmo.org/d/cwrz-29jm
+  - **Type**: dataset
+- **Total Value of Commercial Permits by Calendar Year** (citydata.mesaaz.gov)
+  - **Link**: https://citydata.mesaaz.gov/d/6r9m-pjgc
+  - **Type**: filter
+- **Permit Points** (www.dallasopendata.com)
+  - **Link**: https://www.dallasopendata.com/d/6ik7-4gqj
+  - **Type**: dataset
+- **Key Economic Indicators** (data.texas.gov)
+  - **Link**: https://data.texas.gov/d/karz-jr5v
+  - **Type**: dataset
+- **Total Value of Commercial Permits by Fiscal Year** (citydata.mesaaz.gov)
+  - **Link**: https://citydata.mesaaz.gov/d/gwcp-hxkd
+  - **Type**: filter
+- **Permits - BLDS** (data.nola.gov)
+  - **Link**: https://data.nola.gov/d/72f9-bi28
+  - **Type**: dataset
+- **2010 to September 2019 Building Permit Listing** (data.kcmo.org)
+  - **Link**: https://data.kcmo.org/d/i2p9-vksn
+  - **Type**: dataset
+- **Percent Change in Aggregate EMV Value Countywide 2020-2021: Residential** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/585v-6hdt
+  - **Type**: filter
+- **2010 to 2019 Building Permit Listing** (data.kcmo.org)
+  - **Link**: https://data.kcmo.org/d/jnga-5v37
+  - **Type**: dataset
+- **Value of New Commercial Construction** (citydata.mesaaz.gov)
+  - **Link**: https://citydata.mesaaz.gov/d/sx4m-xdqs
+  - **Type**: chart
+- **Assessor Estimated Market Value Totals Sorted by Property Type 2024-2025** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/kinm-nk5f
+  - **Type**: dataset
+- **Assessor Valuation All Property Types Aggregated by Countywide 2020-2021** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/f9hm-b4xc
+  - **Type**: dataset
+- **Total and Affordable Housing Units** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/rckt-8prm
+  - **Type**: dataset
+- **Maryland Real Property Assessments_Hidden Property Owner Names** (opendata.maryland.gov)
+  - **Link**: https://opendata.maryland.gov/d/ed4q-f8tm
+  - **Type**: dataset
+- **Assessor Valuation Aggregated by City/Suburb 2022-2023** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/83ss-azj3
+  - **Type**: dataset
+- **Assessor Estimated Market Value Totals Sorted by Property Type 2021-2022** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/pj93-ey7c
+  - **Type**: dataset
+- **Community Development Block Grant (CDBG) Contracts** (data.ny.gov)
+  - **Link**: https://data.ny.gov/d/n9bu-8eic
+  - **Type**: dataset
+- **Active Code Official Certifications** (data.ny.gov)
+  - **Link**: https://data.ny.gov/d/civu-giic
+  - **Type**: dataset
+- **Percent Change in Property Value by Tax Classification 2019-2020** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/raim-tf43
+  - **Type**: dataset
+- **Percent Change in Property Value by Jurisdiction 2020-2021** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/k3qp-c4jq
+  - **Type**: filter
+- **Percent Change in Aggregate EMV Value Countywide 2020-2021: Agricultural** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/5kdj-sgkb
+  - **Type**: filter
+- **Assessor Valuation Aggregated by City/Suburb 2023-2024** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/trpu-p9y6
+  - **Type**: dataset
+- **Assessor Valuation Aggregated by City/Suburb 2020-2021** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/gjty-n273
+  - **Type**: dataset
+- **2000-2009 Building Permit Listing** (data.kcmo.org)
+  - **Link**: https://data.kcmo.org/d/cvnj-fvgf
+  - **Type**: dataset
+- **Assessor Estimated Market Value Totals by Jurisdiction 2020-2021** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/e7ma-wrev
+  - **Type**: dataset
+- **Assessor Estimated Market Value Totals Sorted by Property Type 2020-2021** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/9n3z-i4ki
+  - **Type**: dataset
+- **Assessor Valuation All Property Types Aggregated by City/Suburb 2020-2021** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/jgy9-wwvi
+  - **Type**: dataset
+- **Local Law 44 - Building** (data.cityofnewyork.us)
+  - **Link**: https://data.cityofnewyork.us/d/hu6m-9cfi
+  - **Type**: dataset
+- **Percent Change in Aggregate EMV Value By City/Suburb 2020-2021: Apartment** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/riii-scb2
+  - **Type**: filter
+- **Assessor Valuation All Property Types Aggregated by City/Suburb 2022-2023** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/8npq-4jva
+  - **Type**: dataset
+- **Value of Commercial Permits** (citydata.mesaaz.gov)
+  - **Link**: https://citydata.mesaaz.gov/d/9nwg-9d3s
+  - **Type**: map
+- **Assessor Estimated Market Value Totals by Jurisdiction 2022-2023** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/8zwu-kn7e
+  - **Type**: dataset
+- **Assessor Estimated Market Value Totals by Jurisdiction 2023-2024** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/w455-p55w
+  - **Type**: dataset
+- **Assessor Estimated Market Value Totals Sorted by Property Type 2023-2024** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/euab-bdsb
+  - **Type**: dataset
+- **Percent Change in Aggregate EMV Value Countywide 2020-2021** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/iiuj-x6rv
+  - **Type**: dataset
+- **Percent Change in Aggregate EMV Value Countywide 2019-2020** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/rfux-7964
+  - **Type**: dataset
+- **Percent Change in Aggregate EMV Value Countywide 2022-2023: Apartments** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/s5jn-8umd
+  - **Type**: filter
+- **Percent Change in Property Value by Jurisdiction 2019-2020** (data.ramseycountymn.gov)
+  - **Link**: https://data.ramseycountymn.gov/d/33gc-6f56
+  - **Type**: dataset
+
+### CKAN / Data.gov (Federal/State/Gov)
+
+- No CKAN datasets found.
+
+## Category: Remodel Permits
+
+### Socrata & ArcGIS APIs (Local/State/City)
+
+- **Issued Construction Permits** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/3syk-w9eu
+  - **Type**: dataset
+- **Commercial Building Permits** (janesville.data.socrata.com)
+  - **Link**: https://janesville.data.socrata.com/d/qskr-bfe6
+  - **Type**: dataset
+- **Residential Building Permits** (performance.ci.janesville.wi.us)
+  - **Link**: https://performance.ci.janesville.wi.us/d/3fcg-j7bi
+  - **Type**: dataset
+- **Commercial Building Permits** (performance.ci.janesville.wi.us)
+  - **Link**: https://performance.ci.janesville.wi.us/d/7w9f-3n5s
+  - **Type**: dataset
+- **commercial building permit graph** (performance.ci.janesville.wi.us)
+  - **Link**: https://performance.ci.janesville.wi.us/d/jgtv-969s
+  - **Type**: dataset
+- **Issued Construction Permits for New construction and remodels since April 1, 2016** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/hw8f-smxh
+  - **Type**: filter
+- **Certificates Of Occupancy** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/f9mz-m6dy
+  - **Type**: filter
+- **Issued Building Permits with key word "Swimming" or "Pool"** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/vf2c-73pz
+  - **Type**: filter
+- **Currently Active Commercial Multifamily Construction Permits** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/hah9-7x5p
+  - **Type**: filter
+- **Building Permits Issued Jan 2014 - Jun 2016** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/u8mm-jazv
+  - **Type**: filter
+- **Single Family and Duplex Demolition Permits Issued in 2016** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/i3yb-4c5h
+  - **Type**: filter
+- **Building Permits Issued Jan 2014 - Jun 2016 with living units** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/ma7f-y5xc
+  - **Type**: filter
+- **Accessory Dwelling Unit Building Permits Issued** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/qsf3-fhnv
+  - **Type**: filter
+- **Building Permits** (www.dallasopendata.com)
+  - **Link**: https://www.dallasopendata.com/d/e7gq-4sah
+  - **Type**: dataset
+- **Building Permits Issued for "Accessory Dwelling Units"** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/687g-qcqy
+  - **Type**: filter
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/u8xs-sfb6
+  - **Type**: filter
+- **Approved TC B&S Permit Issuance** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/eb4c-zwrf
+  - **Type**: filter
+- **Building Permits Issued Jan 2014 - Jun 2016 with commercial space** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/6vnh-vqkq
+  - **Type**: filter
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/yrwh-n3zy
+  - **Type**: filter
+- **LADBS Permit Valuation - GOVSTAT** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/w53t-rwwp
+  - **Type**: filter
+- **Building and Safety - Building Permits Issued from 2020 to Present (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/pi9x-tg5x
+  - **Type**: dataset
+- **small lots** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/v38d-iucb
+  - **Type**: filter
+- **BuildingSafetyPermitInformation-91607** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/tntc-vi3z
+  - **Type**: filter
+- **LADBS-Permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/hbkd-qubn
+  - **Type**: filter
+- **Building Permits Issued since 1990 - SQFT and Valuation roll ups** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/svri-63gp
+  - **Type**: filter
+- **Plan Review Cases** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/n8ck-xkda
+  - **Type**: dataset
+- **ladbs_permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/t57t-h8jb
+  - **Type**: filter
+- **Building Permits for US Census (High Valuation)** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/rifm-ftf3
+  - **Type**: filter
+- **Building Permits: New Housing Units** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/cpkv-aajs
+  - **Type**: filter
+- **CD2-91607zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/mn7h-kt9r
+  - **Type**: filter
+- **Building Permits for Fiscal Year 2011 - 2012** (www.dallasopendata.com)
+  - **Link**: https://www.dallasopendata.com/d/azf5-sdcr
+  - **Type**: dataset
+- **Electrical** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/y3c3-hqwu
+  - **Type**: filter
+- **COMMERCIAL-BUILDINGANDSAFETYPERMITS** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/y4zb-t59m
+  - **Type**: filter
+- **Monthly housing permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/v6uy-4qqa
+  - **Type**: filter
+- **Building Permits for Fiscal Year 2017 - 2018** (www.dallasopendata.com)
+  - **Link**: https://www.dallasopendata.com/d/w2uy-zn9f
+  - **Type**: dataset
+- **New Commercial Building Permits over 100k** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/hhzr-9ttq
+  - **Type**: filter
+- **Food and Pool Plan Review** (data.montgomerycountymd.gov)
+  - **Link**: https://data.montgomerycountymd.gov/d/2zj7-irhh
+  - **Type**: dataset
+- **New Residential Building Permits over 100k** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/peyn-q7x3
+  - **Type**: filter
+- **Building Permits Feb'15-Present** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/6q2s-9pnn
+  - **Type**: filter
+- **Total Permits Issued LADBS\Search Term - Major Remodel** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/3xpx-f9cg
+  - **Type**: filter
+- **Building Permits Issued by Council District** (citydata.mesaaz.gov)
+  - **Link**: https://citydata.mesaaz.gov/d/xsew-tyz3
+  - **Type**: chart
+- **Total Permits Issued LADBS\CD2\ZipCode\91604** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/8244-zgpm
+  - **Type**: filter
+- **CD2-91605zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/3qjq-qviy
+  - **Type**: filter
+- **CD4-91403zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/87by-pr7h
+  - **Type**: filter
+- **COMMERCIAL-BUILDINGANDSAFETYPERMITS** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/fqjd-8bkh
+  - **Type**: filter
+- **Building Permits over 100K Valuation** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/y5ik-mwat
+  - **Type**: filter
+- **Electrical** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/5cy5-6te5
+  - **Type**: filter
+- **CD2-91606zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/dgdt-mqi4
+  - **Type**: filter
+- **Electricians** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/32cx-q9bj
+  - **Type**: filter
+- **New Building Commercial** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/msxg-ssda
+  - **Type**: filter
+
+### CKAN / Data.gov (Federal/State/Gov)
+
+- No CKAN datasets found.
+
+## Category: Renovation Permits
+
+### Socrata & ArcGIS APIs (Local/State/City)
+
+- **Development permit application processing times - review** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/3ij3-3hnj
+  - **Type**: dataset
+- **Development permit application processing times - intake** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/349u-zf72
+  - **Type**: dataset
+- **Building occupancy permit application processing times - intake** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/ca23-ipvd
+  - **Type**: dataset
+- **Development permits application counts** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/wbyv-ks6y
+  - **Type**: dataset
+- **Building permit application processing times - intake** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/b7w3-mxqk
+  - **Type**: dataset
+- **Building occupancy permit application processing times - review** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/bvcf-rthz
+  - **Type**: dataset
+- **Building permit application processing times - review** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/7azm-hfsm
+  - **Type**: dataset
+- **Building Permits** (data.framinghamma.gov)
+  - **Link**: https://data.framinghamma.gov/d/2vzw-yean
+  - **Type**: dataset
+- **Private Well Tracking System** (mydata.iowa.gov)
+  - **Link**: https://mydata.iowa.gov/d/hxac-9hzr
+  - **Type**: href
+- **Section B - Building permit data for Statistics Canada Building Permit Survey (BDP)** (www.thedatazone.ca)
+  - **Link**: https://www.thedatazone.ca/d/cd73-9dph
+  - **Type**: dataset
+- **Development Permit Applications, by Community** (data.calgary.ca)
+  - **Link**: https://data.calgary.ca/d/qekh-2qg6
+  - **Type**: map
+- **Dallas Market Value Analysis - Permit Points** (www.dallasopendata.com)
+  - **Link**: https://www.dallasopendata.com/d/xvhy-2xtn
+  - **Type**: map
+- **Sheet Metal Permits** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/cmy2-saf4
+  - **Type**: dataset
+- **Permit Points** (www.dallasopendata.com)
+  - **Link**: https://www.dallasopendata.com/d/6ik7-4gqj
+  - **Type**: dataset
+- **Performance Metrics - Buildings - Time to Issue Standard Plan Review Program Permits** (data.cityofchicago.org)
+  - **Link**: https://data.cityofchicago.org/d/4ygs-9x34
+  - **Type**: dataset
+- **Performance Metrics - Buildings - Time to Issue Developer Services Permits** (data.cityofchicago.org)
+  - **Link**: https://data.cityofchicago.org/d/ijdy-a94t
+  - **Type**: dataset
+- **Sign Permits** (data.cityofchicago.org)
+  - **Link**: https://data.cityofchicago.org/d/yrm5-pjgu
+  - **Type**: filter
+- **Building Permits: Addition/Alteration** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/qu2z-8suj
+  - **Type**: dataset
+- **Market Value Analysis (MVA) 2020** (data.kcmo.org)
+  - **Link**: https://data.kcmo.org/d/qhqc-4mi2
+  - **Type**: dataset
+- **Permit Application Data for the Office of Business and External Services** (data.nola.gov)
+  - **Link**: https://data.nola.gov/d/aib5-en5t
+  - **Type**: dataset
+- **Private Well Facilities** (mydata.iowa.gov)
+  - **Link**: https://mydata.iowa.gov/d/eka9-33vv
+  - **Type**: href
+- **Seasonal Patios** (data.winnipeg.ca)
+  - **Link**: https://data.winnipeg.ca/d/cd49-nk9h
+  - **Type**: dataset
+- **Mechanical Permits** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/4rb4-q8tj
+  - **Type**: dataset
+- **Uniform Code Annual Report Submissions: Beginning 2007** (data.ny.gov)
+  - **Link**: https://data.ny.gov/d/kpkx-452i
+  - **Type**: dataset
+- **Building Permits: 1 and 2 Family - DEPRECATED** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/52p4-36ct
+  - **Type**: dataset
+- **City of Cincinnati- Residential Tax Abatements** (data.cincinnati-oh.gov)
+  - **Link**: https://data.cincinnati-oh.gov/d/6ck4-ukva
+  - **Type**: dataset
+- **1. Map of Rental Property (Buffalo, NY)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/recw-dzua
+  - **Type**: map
+- **7. Rental Property (NORTH)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/s58p-wbj5
+  - **Type**: map
+- **4. Rental Proptery (LOVEJOY)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/j37g-pbd4
+  - **Type**: map
+- **2. Rental Property (UNIVERSITY)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/7i3y-bjsk
+  - **Type**: map
+- **10. Rental Property (MASTEN)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/ptxv-fpr7
+  - **Type**: map
+- **Rent_Occupied_units** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/xctd-4tnc
+  - **Type**: map
+- **6. Rental Property (NIAGARA)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/t5hk-8j3j
+  - **Type**: map
+- **9. Rental Property (FILLMORE)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/psm6-tk27
+  - **Type**: map
+- **3. Rental Property (DELAWARE)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/jkci-gx5p
+  - **Type**: map
+- **8. Rental Property (SOUTH)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/6uxf-fd62
+  - **Type**: map
+- **Energy Code Annual Report Submissions: Beginning 2007** (data.ny.gov)
+  - **Link**: https://data.ny.gov/d/vfqs-vuqv
+  - **Type**: dataset
+- **5. Rental Property (ELLICOTT)** (data.buffalony.gov)
+  - **Link**: https://data.buffalony.gov/d/b7xp-i8c2
+  - **Type**: map
+- **Article 22 Green Building Review Projects** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/ay64-ymwq
+  - **Type**: dataset
+- **Unreinforced Masonry Buildings (URM)** (cos-data.seattle.gov)
+  - **Link**: https://cos-data.seattle.gov/d/jgaf-27y2
+  - **Type**: federated_href
+- **Plumbing Permits** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/8793-tet2
+  - **Type**: dataset
+- **NYC Building Energy and Water Data Disclosure for Local Law 84 2023 to Present (Data for Calendar Year 2022-Present)** (data.cityofnewyork.us)
+  - **Link**: https://data.cityofnewyork.us/d/5zyy-y8am
+  - **Type**: dataset
+
+### CKAN / Data.gov (Federal/State/Gov)
+
+- No CKAN datasets found.
+
+## Category: Adu
+
+### Socrata & ArcGIS APIs (Local/State/City)
+
+- **ADU Potential** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/8t39-xck5
+  - **Type**: file
+- **ADU Projects Approved** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/pumr-4967
+  - **Type**: chart
+- **ADU permits 7/1/17-12/31/17(JB2)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/r9zn-9ttc
+  - **Type**: filter
+- **Additional Dwelling Unit Preapprovals Issued** (data.cityofchicago.org)
+  - **Link**: https://data.cityofchicago.org/d/pzvt-tadb
+  - **Type**: filter
+- **Additional Dwelling Unit Preapproval Applications** (data.cityofchicago.org)
+  - **Link**: https://data.cityofchicago.org/d/xbwc-ntpx
+  - **Type**: dataset
+- **Additional Dwelling Unit Areas** (data.cityofchicago.org)
+  - **Link**: https://data.cityofchicago.org/d/ttjb-ayff
+  - **Type**: dataset
+- **Parcels Web** (data.bayareametro.gov)
+  - **Link**: https://data.bayareametro.gov/d/4cz8-dvtg
+  - **Type**: dataset
+- **Global Tobacco Surveillance System (GTSS) - Global Adult Tobacco Survey (GATS)** (data.cdc.gov)
+  - **Link**: https://data.cdc.gov/d/4xf6-nrwk
+  - **Type**: dataset
+- **Count of Building Permits Applications within the last 3 months** (datainsights.encinitasca.gov)
+  - **Link**: https://datainsights.encinitasca.gov/d/e6td-3huy
+  - **Type**: chart
+- **Assessor's Parcel** (data.bayareametro.gov)
+  - **Link**: https://data.bayareametro.gov/d/c252-zdg8
+  - **Type**: dataset
+- **Global Tobacco Surveillance System (GTSS) - Global Adult Tobacco Survey (GATS)** (datahub.hhs.gov)
+  - **Link**: https://datahub.hhs.gov/d/eg5i-973a
+  - **Type**: href
+- **Affordable Housing Inventory** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/ifzc-3xz8
+  - **Type**: dataset
+- **Assessor - Single and Multi-Family Improvement Characteristics** (datacatalog.cookcountyil.gov)
+  - **Link**: https://datacatalog.cookcountyil.gov/d/x54s-btds
+  - **Type**: dataset
+- **Detached Accessory Dwelling Units (DADUs)** (cos-data.seattle.gov)
+  - **Link**: https://cos-data.seattle.gov/d/62j7-rb93
+  - **Type**: federated_href
+- **Attached Accessory Dwelling Units (AADUs)** (cos-data.seattle.gov)
+  - **Link**: https://cos-data.seattle.gov/d/7wzr-sner
+  - **Type**: federated_href
+- **App Major Transit Stop Buffer** (datainsights.encinitasca.gov)
+  - **Link**: https://datainsights.encinitasca.gov/d/ipmq-qqvh
+  - **Type**: href
+- **survey** (data.bayareametro.gov)
+  - **Link**: https://data.bayareametro.gov/d/8zju-nq2z
+  - **Type**: dataset
+
+### CKAN / Data.gov (Federal/State/Gov)
+
+- No CKAN datasets found.
+
+## Category: Plumbing Permits
+
+### Socrata & ArcGIS APIs (Local/State/City)
+
+- **Plumbing Permits and Inspections** (data.calgary.ca)
+  - **Link**: https://data.calgary.ca/d/5pvv-k7hn
+  - **Type**: dataset
+- **Plumbing Permits** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/8793-tet2
+  - **Type**: dataset
+- **Building, Electrical, Fire, Grading, Mechanical, Plumbing & Sign Permits** (opendata.howardcountymd.gov)
+  - **Link**: https://opendata.howardcountymd.gov/d/kvz2-j5cj
+  - **Type**: dataset
+- **Issued Construction Permits** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/3syk-w9eu
+  - **Type**: dataset
+- **Town Permit Processing Time** (data.dumfriesva.gov)
+  - **Link**: https://data.dumfriesva.gov/d/76tz-5d55
+  - **Type**: dataset
+- **Comm New Bldg Permits > 7/1/2015** (opendata.howardcountymd.gov)
+  - **Link**: https://opendata.howardcountymd.gov/d/8j57-6xkc
+  - **Type**: filter
+- **New Residential Units : Summary by Calendar Year and Type** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/2y79-8diw
+  - **Type**: chart
+- **LADBS Permit Valuation - GOVSTAT** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/w53t-rwwp
+  - **Type**: filter
+- **Construction Permits Issued since 2010** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/d792-2sc3
+  - **Type**: map
+- **Construction Permits Issued in the last 30 days** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/xzui-3qup
+  - **Type**: map
+- **Demolition Permits - Summary by Zipcode and Type** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/yiii-tj7t
+  - **Type**: chart
+- **Average Permit Approval Time** (data.dumfriesva.gov)
+  - **Link**: https://data.dumfriesva.gov/d/x6et-hppq
+  - **Type**: measure
+- **New Residential Units: Summary by Zip Code and Type** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/pm3h-84dq
+  - **Type**: chart
+- **Permits_West_of_Mopac_vw** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/f6jy-jni6
+  - **Type**: map
+- **New Residential Units : Summary by Council District and Type** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/wj54-aeaf
+  - **Type**: chart
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/u8xs-sfb6
+  - **Type**: filter
+- **Number of Permits Issued by Type** (data.dumfriesva.gov)
+  - **Link**: https://data.dumfriesva.gov/d/5zzg-3esz
+  - **Type**: chart
+- **Approved TC B&S Permit Issuance** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/eb4c-zwrf
+  - **Type**: filter
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/yrwh-n3zy
+  - **Type**: filter
+- **Average processing time (days) by permit types** (data.dumfriesva.gov)
+  - **Link**: https://data.dumfriesva.gov/d/mh4w-9ezb
+  - **Type**: chart
+- **Housing Unit Counts from Building Permits Issued Jan 2014 - Jun 2016** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/k9jf-mg7g
+  - **Type**: filter
+- **Issued Construction Permits for New construction and remodels since April 1, 2016** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/hw8f-smxh
+  - **Type**: filter
+- **Building Permits Issued in the last 30 days** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/enku-zhee
+  - **Type**: map
+- **Residential Building Permits issued in Last 5 years by work type** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/cjw6-pk3p
+  - **Type**: chart
+- **Development Permits** (data.fortworthtexas.gov)
+  - **Link**: https://data.fortworthtexas.gov/d/quz7-xnsy
+  - **Type**: dataset
+- **Heat Map of Construction Permits Issued since 2010** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/cc88-62x4
+  - **Type**: map
+- **BuildingSafetyPermitInformation-91607** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/tntc-vi3z
+  - **Type**: filter
+- **Building Permits Issued in 2015** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/ayav-qckq
+  - **Type**: map
+- **Certificates Of Occupancy** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/f9mz-m6dy
+  - **Type**: filter
+- **Monthly housing permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/v6uy-4qqa
+  - **Type**: filter
+- **small lots** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/v38d-iucb
+  - **Type**: filter
+- **Building Permits for US Census (High Valuation)** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/rifm-ftf3
+  - **Type**: filter
+- **Chart of Issued Building Permits by Fiscal Year** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/jacw-mn5u
+  - **Type**: chart
+- **Currently Active Commercial Multifamily Construction Permits** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/hah9-7x5p
+  - **Type**: filter
+- **Building Permits Issued Jan 2014 - Jun 2016 with living units** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/ma7f-y5xc
+  - **Type**: filter
+- **Building Permits Issued Jan 2014 - Jun 2016** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/u8mm-jazv
+  - **Type**: filter
+- **LADBS-Permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/hbkd-qubn
+  - **Type**: filter
+- **Demolition Permits - Summary by Calendar Year and Type** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/bhfs-8x8v
+  - **Type**: chart
+- **Commercial SQFT on Building Permits Issued from Jan 2014 - Jun 2016** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/3q77-vdpb
+  - **Type**: filter
+- **Issued Construction Permits by Fiscal Year and Type** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/ubpr-dcer
+  - **Type**: filter
+- **Single Family and Duplex Demolition Permits Issued in 2016** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/i3yb-4c5h
+  - **Type**: filter
+- **ladbs_permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/t57t-h8jb
+  - **Type**: filter
+- **CD2-91607zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/mn7h-kt9r
+  - **Type**: filter
+- **Chart of Construction Permits Issued in the last 30 days** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/j2yg-yxic
+  - **Type**: chart
+- **New Demolition Sq. Feet** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/r6ar-9jbn
+  - **Type**: chart
+- **Residential Building Permits Since 1980** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/e7se-4evh
+  - **Type**: chart
+- **New Residential Development** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/vrcg-xkx5
+  - **Type**: chart
+- **Commercial (New Construction) Building Permits Issued since 2010** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/d3mw-y7vr
+  - **Type**: chart
+- **CD4-91403zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/87by-pr7h
+  - **Type**: filter
+- **Issued Construction Permits since 2010, By Calendar Year and Permit Type** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/iqui-mz9x
+  - **Type**: chart
+
+### CKAN / Data.gov (Federal/State/Gov)
+
+- No CKAN datasets found.
+
+## Category: Electrical Permits
+
+### Socrata & ArcGIS APIs (Local/State/City)
+
+- **Electrical Permits** (cos-data.seattle.gov)
+  - **Link**: https://cos-data.seattle.gov/d/c4tj-daue
+  - **Type**: dataset
+- **Electrical Permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/k5qd-jg2c
+  - **Type**: filter
+- **Electrical Permits and Inspections** (data.calgary.ca)
+  - **Link**: https://data.calgary.ca/d/vxgy-id5s
+  - **Type**: dataset
+- **DOB NOW: Electrical Permit Applications** (data.cityofnewyork.us)
+  - **Link**: https://data.cityofnewyork.us/d/dm9a-ab7w
+  - **Type**: dataset
+- **Electrical Permits** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/hvtc-3ab9
+  - **Type**: dataset
+- **DOB NOW: Electrical Permit Details** (data.cityofnewyork.us)
+  - **Link**: https://data.cityofnewyork.us/d/xmmq-y7za
+  - **Type**: dataset
+- **Electrical Permits Nov 1, 2014-Nov 1, 2015** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/khck-ifxu
+  - **Type**: filter
+- **Building and Safety - Electrical Permits Issued from 2020 to Present (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/ysqd-apz7
+  - **Type**: dataset
+- **Building and Safety - Electrical Permits Submitted from 2020 to Present (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/9k3p-zrda
+  - **Type**: dataset
+- **Building and Safety - Electrical Permits Issued Between 2010 and 2019 (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/yaaf-cyfa
+  - **Type**: dataset
+- **Building and Safety - Electrical Permits Submitted Before 2010 (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/7ts7-nh4y
+  - **Type**: dataset
+- **Building and Safety - Electrical Permits Issued Before 2010 (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/h8me-eag6
+  - **Type**: dataset
+- **Building and Safety - Electrical Permits Submitted Between 2010 and 2019 (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/9i2c-csvn
+  - **Type**: dataset
+- **Open Data - BZ - FY2005 - Building, Plumbing, And Electrical Permits Applied For-- Locator** (datacatalog.cookcountyil.gov)
+  - **Link**: https://datacatalog.cookcountyil.gov/d/iiq4-y58u
+  - **Type**: dataset
+- **Building, Electrical, Fire, Grading, Mechanical, Plumbing & Sign Permits** (opendata.howardcountymd.gov)
+  - **Link**: https://opendata.howardcountymd.gov/d/kvz2-j5cj
+  - **Type**: dataset
+- **Building and Zoning - Building, Plumbing, And Electrical Permits Applied For - Fiscal Year 2005 through part of Fiscal Year 2011** (datacatalog.cookcountyil.gov)
+  - **Link**: https://datacatalog.cookcountyil.gov/d/6myv-3m4t
+  - **Type**: dataset
+- **DOB NOW: Build – Approved Permits** (data.cityofnewyork.us)
+  - **Link**: https://data.cityofnewyork.us/d/rbx6-tga4
+  - **Type**: dataset
+- **Town Permit Processing Time** (data.dumfriesva.gov)
+  - **Link**: https://data.dumfriesva.gov/d/76tz-5d55
+  - **Type**: dataset
+- **Comm New Bldg Permits > 7/1/2015** (opendata.howardcountymd.gov)
+  - **Link**: https://opendata.howardcountymd.gov/d/8j57-6xkc
+  - **Type**: filter
+- **LADBS Permit Valuation - GOVSTAT** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/w53t-rwwp
+  - **Type**: filter
+- **Electrical Building Permits** (data.montgomerycountymd.gov)
+  - **Link**: https://data.montgomerycountymd.gov/d/qxie-8qnp
+  - **Type**: dataset
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/u8xs-sfb6
+  - **Type**: filter
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/yrwh-n3zy
+  - **Type**: filter
+- **Approved TC B&S Permit Issuance** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/eb4c-zwrf
+  - **Type**: filter
+- **Building and Safety - Building Permits Issued from 2020 to Present (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/pi9x-tg5x
+  - **Type**: dataset
+- **BuildingSafetyPermitInformation-91607** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/tntc-vi3z
+  - **Type**: filter
+- **Average Permit Approval Time** (data.dumfriesva.gov)
+  - **Link**: https://data.dumfriesva.gov/d/x6et-hppq
+  - **Type**: measure
+- **small lots** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/v38d-iucb
+  - **Type**: filter
+- **Monthly housing permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/v6uy-4qqa
+  - **Type**: filter
+- **LADBS-Permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/hbkd-qubn
+  - **Type**: filter
+- **Issued Construction Permits** (datahub.austintexas.gov)
+  - **Link**: https://datahub.austintexas.gov/d/3syk-w9eu
+  - **Type**: dataset
+- **Number of Permits Issued by Type** (data.dumfriesva.gov)
+  - **Link**: https://data.dumfriesva.gov/d/5zzg-3esz
+  - **Type**: chart
+- **ladbs_permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/t57t-h8jb
+  - **Type**: filter
+- **CD2-91607zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/mn7h-kt9r
+  - **Type**: filter
+- **Electrical** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/y3c3-hqwu
+  - **Type**: filter
+- **Average processing time (days) by permit types** (data.dumfriesva.gov)
+  - **Link**: https://data.dumfriesva.gov/d/mh4w-9ezb
+  - **Type**: chart
+- **Building Permits: New Housing Units** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/cpkv-aajs
+  - **Type**: filter
+- **CD2-91605zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/3qjq-qviy
+  - **Type**: filter
+- **CD4-91403zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/87by-pr7h
+  - **Type**: filter
+- **Electrical** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/5cy5-6te5
+  - **Type**: filter
+- **Group of Permits Issued in 90033** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/jgkn-wzne
+  - **Type**: filter
+- **Building and Safety - Building Permits Submitted from 2020 to Present (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/gwh9-jnip
+  - **Type**: dataset
+- **Building and Safety - Building Permits Issued Between 2010 and 2019 (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/dyxf-7hc4
+  - **Type**: dataset
+- **CD2-91606zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/dgdt-mqi4
+  - **Type**: filter
+- **COMMERCIAL-BUILDINGANDSAFETYPERMITS** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/y4zb-t59m
+  - **Type**: filter
+- **New Commercial Building Permits over 100k** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/hhzr-9ttq
+  - **Type**: filter
+- **New Residential Building Permits over 100k** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/peyn-q7x3
+  - **Type**: filter
+- **Trade Licenses** (opendata.howardcountymd.gov)
+  - **Link**: https://opendata.howardcountymd.gov/d/qa5k-m2n2
+  - **Type**: dataset
+- **Building Permits Feb'15-Present** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/6q2s-9pnn
+  - **Type**: filter
+- **DOB NOW: Build – Job Application Filings** (data.cityofnewyork.us)
+  - **Link**: https://data.cityofnewyork.us/d/w9ak-ipjd
+  - **Type**: dataset
+
+### CKAN / Data.gov (Federal/State/Gov)
+
+- No CKAN datasets found.
+
+## Category: Solar Permits
+
+### Socrata & ArcGIS APIs (Local/State/City)
+
+- **Solar Permits** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/pj9s-n7wb
+  - **Type**: filter
+- **Annual Solar Permits Issued** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/3fkn-8zgn
+  - **Type**: chart
+- **Residential Solar Permits** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/fni7-vf9e
+  - **Type**: measure
+- **Solar Permits by Sector** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/8b6h-t2v3
+  - **Type**: chart
+- **Solar Permits with Census Tracts** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/dis2-tkjv
+  - **Type**: filter
+- **Cumulative Residential Solar Permits** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/najc-antf
+  - **Type**: measure
+- **Solar Permits Issued in 2019** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/7myx-y6j5
+  - **Type**: measure
+- **2024 E-2.3 Solar PV on Homes** (internal-sandiegocounty.data.socrata.com)
+  - **Link**: https://internal-sandiegocounty.data.socrata.com/d/et96-4a7s
+  - **Type**: dataset
+- **Residential Solar Permits Turnaround Time** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/sufu-fpqj
+  - **Type**: measure
+- **Residential Solar Permits Issued in Richmond/Permisos solares residenciales emitidos en Richmond** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/jukh-68mq
+  - **Type**: measure
+- **LADBS Permit Valuation - GOVSTAT** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/w53t-rwwp
+  - **Type**: filter
+- **Building and Safety - Building Permits Issued from 2020 to Present (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/pi9x-tg5x
+  - **Type**: dataset
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/yrwh-n3zy
+  - **Type**: filter
+- **Eastside Building Permits 2018** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/u8xs-sfb6
+  - **Type**: filter
+- **small lots** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/v38d-iucb
+  - **Type**: filter
+- **Approved TC B&S Permit Issuance** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/eb4c-zwrf
+  - **Type**: filter
+- **COMMERCIAL-BUILDINGANDSAFETYPERMITS** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/y4zb-t59m
+  - **Type**: filter
+- **BuildingSafetyPermitInformation-91607** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/tntc-vi3z
+  - **Type**: filter
+- **New Commercial Building Permits over 100k** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/hhzr-9ttq
+  - **Type**: filter
+- **ladbs_permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/t57t-h8jb
+  - **Type**: filter
+- **Building Permits: New Housing Units** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/cpkv-aajs
+  - **Type**: filter
+- **Electrical** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/y3c3-hqwu
+  - **Type**: filter
+- **LADBS-Permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/hbkd-qubn
+  - **Type**: filter
+- **Building and Safety - Electrical Permits Issued from 2020 to Present (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/ysqd-apz7
+  - **Type**: dataset
+- **Building Permits Feb'15-Present** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/6q2s-9pnn
+  - **Type**: filter
+- **Building and Safety - Building Permits Issued Between 2010 and 2019 (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/dyxf-7hc4
+  - **Type**: dataset
+- **Monthly housing permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/v6uy-4qqa
+  - **Type**: filter
+- **Residential Solar Permits in the TCC Project Area/Permisos solares residenciales emitidos en el área del proyecto TCC** (www.transparentrichmond.org)
+  - **Link**: https://www.transparentrichmond.org/d/np75-sang
+  - **Type**: measure
+- **CD2-91607zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/mn7h-kt9r
+  - **Type**: filter
+- **New Residential Building Permits over 100k** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/peyn-q7x3
+  - **Type**: filter
+- **COMMERCIAL-BUILDINGANDSAFETYPERMITS** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/fqjd-8bkh
+  - **Type**: filter
+- **CD2-91606zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/dgdt-mqi4
+  - **Type**: filter
+- **Building Permits over 100K Valuation** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/y5ik-mwat
+  - **Type**: filter
+- **Electrical** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/5cy5-6te5
+  - **Type**: filter
+- **CD4-91403zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/87by-pr7h
+  - **Type**: filter
+- **Building and Safety - Building Permits Submitted from 2020 to Present (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/gwh9-jnip
+  - **Type**: dataset
+- **Building and Safety - Building Permits Issued Before 2010 (N)** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/e67z-kt2n
+  - **Type**: dataset
+- **roofing permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/8guu-8f5m
+  - **Type**: filter
+- **New Building Commercial** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/msxg-ssda
+  - **Type**: filter
+- **Solar Installations** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/5a85-fb2s
+  - **Type**: dataset
+- **LA BUILD PERMITS** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/xnhu-aczu
+  - **Type**: filter
+- **Solar Installation Permits** (data.cambridgema.gov)
+  - **Link**: https://data.cambridgema.gov/d/whpw-w55x
+  - **Type**: dataset
+- **Electrical Permits** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/k5qd-jg2c
+  - **Type**: filter
+- **CD2-91605zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/3qjq-qviy
+  - **Type**: filter
+- **Electricians** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/32cx-q9bj
+  - **Type**: filter
+- **Building Permits - January 1, 2005 through June 30, 2025** (data.honolulu.gov)
+  - **Link**: https://data.honolulu.gov/d/4vab-c87q
+  - **Type**: dataset
+- **New Construction Permits 2015** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/cv5a-dwmc
+  - **Type**: filter
+- **CD4-91411zip** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/7uzm-ezds
+  - **Type**: filter
+- **Demolition permit** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/fsgi-y87k
+  - **Type**: filter
+- **New Construction in Boyle Heights** (data.lacity.org)
+  - **Link**: https://data.lacity.org/d/fsxs-qr67
+  - **Type**: filter
+
+### CKAN / Data.gov (Federal/State/Gov)
+
+- No CKAN datasets found.
+

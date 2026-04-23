@@ -1,0 +1,21 @@
+User-agent: *
+Allow: /
+Allow: /pricing
+Allow: /portal
+Allow: /contractors
+Allow: /login
+Allow: /signup
+Allow: /forgot-password
+
+# Block authenticated/private routes
+Disallow: /dashboard
+Disallow: /dashboard/
+Disallow: /settings
+Disallow: /settings/
+Disallow: /homeowner
+Disallow: /homeowner/
+Disallow: /onboarding
+Disallow: /onboarding/
+Disallow: /api/
+
+Sitemap: https://henriapp.com/sitemap.xml

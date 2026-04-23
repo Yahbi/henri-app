@@ -1,0 +1,112 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+
+/**
+ * GET /api/intake/[id]
+ *
+ * Returns the homeowner-facing view of a single intake, for the dedicated
+ * post-intake project page at `/homeowner/intakes/[id]`. Companion to
+ * `/api/intake/[id]/matches` which returns the match list only.
+ *
+ * Access is scoped to:
+ *   - The homeowner whose email is on the intake
+ *   - Any contractor that is either the `matched_contractor_id` or listed
+ *     in `intake_matches` for this intake
+ *
+ * No internal scoring factors are exposed.
+ */
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id: intakeId } = await params;
+    if (!intakeId) {
+      return NextResponse.json({ error: "Intake ID is required" }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: intake, error: intakeErr } = await supabase
+      .from("homeowner_intakes")
+      .select(
+        "id, zip, trade, timeline, budget_range, description, refinement_answers, photos, contact_name, contact_phone, contact_email, henri_score, matched_contractor_id, matched_lead_id, status, created_at",
+      )
+      .eq("id", intakeId)
+      .single();
+
+    if (intakeErr || !intake) {
+      return NextResponse.json({ error: "Intake not found" }, { status: 404 });
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role, email")
+      .eq("id", user.id)
+      .single();
+
+    const isHomeowner =
+      profile?.role === "homeowner" && profile?.email === intake.contact_email;
+
+    const { data: matchRecord } = await supabase
+      .from("intake_matches")
+      .select("contractor_id")
+      .eq("intake_id", intakeId)
+      .eq("contractor_id", user.id)
+      .maybeSingle();
+
+    const isMatchedContractor =
+      profile?.role === "contractor" &&
+      (matchRecord !== null || intake.matched_contractor_id === user.id);
+
+    if (!isHomeowner && !isMatchedContractor) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // Redact contact info when the viewer is a contractor who hasn't yet
+    // been assigned. Primary contractor sees everything so they can call
+    // the homeowner; other matched contractors see masked fields.
+    const primaryForViewer =
+      isMatchedContractor && intake.matched_contractor_id === user.id;
+
+    const body = {
+      id: intake.id,
+      zip: intake.zip,
+      trade: intake.trade,
+      timeline: intake.timeline,
+      budget_range: intake.budget_range,
+      description: intake.description,
+      refinement_answers: intake.refinement_answers ?? [],
+      photos: Array.isArray(intake.photos) ? intake.photos : [],
+      henri_score: intake.henri_score,
+      status: intake.status,
+      created_at: intake.created_at,
+      matched_contractor_id: intake.matched_contractor_id,
+      matched_lead_id: intake.matched_lead_id,
+      contact: isHomeowner || primaryForViewer
+        ? {
+            name: intake.contact_name,
+            phone: intake.contact_phone,
+            email: intake.contact_email,
+          }
+        : {
+            name: null,
+            phone: null,
+            email: null,
+          },
+    };
+
+    return NextResponse.json(body);
+  } catch (error) {
+    console.error("Intake detail GET error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
