@@ -22,10 +22,12 @@ import { cn } from "@/lib/utils/cn";
 import { useEnrichment } from "@/hooks/useEnrichment";
 import { usePermitHistory } from "@/hooks/usePermitHistory";
 import { usePermitDetail } from "@/hooks/usePermitDetail";
+import { useLeadContext } from "@/hooks/useLeadContext";
 import { FocusTrap } from "@/components/ui/focus-trap";
 import { ScoreSignalBreakdown } from "./ScoreSignalBreakdown";
 import { PermitTimeline } from "./PermitTimeline";
 import { PermitHistorySection } from "./PermitHistorySection";
+import { PropertyContextSection } from "./PropertyContextSection";
 import { CrossTradeOpportunities } from "./CrossTradeOpportunities";
 import { ApplicantBadge } from "./ApplicantBadge";
 import type { LeadData } from "./LeadCard";
@@ -225,6 +227,16 @@ export function LeadDetailDrawer({
         }
       : null,
   );
+
+  /* ── Property context (Phase 0 free-tier expansion) ──
+   * Pulls roof / HVAC / pool / solar / panel age (derived from permit
+   * history at this address), neighborhood permit-activity count, and
+   * any recent storm event in the same ZIP. All three layers compose
+   * data Henri already has on hand; no vendor calls fire. Renders as
+   * a compact section between the score breakdown and permit history.
+   * Graceful-degrades silently if the views (migration 00055) aren't
+   * applied yet or the API errors. */
+  const { data: contextData, isLoading: contextLoading } = useLeadContext(lead?.id);
 
   /* ── On-demand permit detail (description, applicant, dates) ──
    * The dashboard list fetch in god-mode skips the heavy `permits(...)`
@@ -678,6 +690,13 @@ export function LeadDetailDrawer({
            * New breakdown reads `score_signals` jsonb + falls back to
            * legacy numeric columns for un-migrated rows. */}
           <ScoreSignalBreakdown lead={lead} />
+
+          {/* ── Property Context (Phase 0 free-tier expansion) ──
+           * Derived equipment ages (roof/HVAC/pool/solar/panel),
+           * adjacent-permit count, and storm proximity. Pure dormant-
+           * data unlock — no vendor calls, no scoring change. Section
+           * hides itself entirely when no signals are available. */}
+          <PropertyContextSection data={contextData} isLoading={contextLoading} />
 
           {/* ── Permit History at this Property ──
            * Three-tier layout to kill repetition:
