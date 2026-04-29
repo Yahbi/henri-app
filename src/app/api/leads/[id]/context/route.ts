@@ -61,7 +61,7 @@ interface ContextResponse {
 }
 
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -90,8 +90,15 @@ export async function GET(
      *    50 rows). This drives the derived calculations — roof age
      *    needs the latest roof permit, HVAC age the latest HVAC,
      *    etc. Mirrors the address-prefix strategy already proven in
-     *    `/api/permits/history`. */
-    const lead = leadRow as Lead;
+     *    `/api/permits/history`.
+     *
+     *    The `leadRow` type from Supabase's narrow select doesn't fully
+     *    overlap with the `Lead` interface (we only fetched ~12 of its
+     *    40+ fields), so we cast via `unknown` to satisfy the
+     *    DerivationContext contract. The derived functions only read
+     *    `address`, `zip`, `year_built`, `permit_description`, and
+     *    `trade` — all explicitly in our select. */
+    const lead = leadRow as unknown as Lead;
     let history: AddressPermitHistory | null = null;
     const street = (lead.address ?? "").split(",")[0].trim();
     if (street && lead.zip) {
@@ -104,20 +111,32 @@ export async function GET(
         .eq("zip", String(lead.zip).slice(0, 5))
         .ilike("address", `${street}%`)
         .limit(50);
-      const rows = histRows ?? [];
+      // Cast to Record<string, unknown>[] — Supabase's typed-select
+      // generic returns `GenericStringError` when the column list isn't
+      // backed by generated DB types. Same pattern as
+      // `/api/permits/history` (line 71). The bracket-access below
+      // narrows each field with typeof checks so we never trust raw
+      // values.
+      const rows = (histRows ?? []) as unknown as Array<
+        Record<string, unknown>
+      >;
       if (rows.length > 0) {
         const sorted = [...rows].sort((a, b) => {
-          const ad = String(a.issued_date ?? a.applied_date ?? "");
-          const bd = String(b.issued_date ?? b.applied_date ?? "");
+          const ad = String(a["issued_date"] ?? a["applied_date"] ?? "");
+          const bd = String(b["issued_date"] ?? b["applied_date"] ?? "");
           return bd.localeCompare(ad);
         });
         const trades = Array.from(
           new Set(
             sorted
-              .map((p) => (typeof p.trade === "string" ? p.trade : null))
+              .map((p) =>
+                typeof p["trade"] === "string" ? (p["trade"] as string) : null,
+              )
               .filter((t): t is string => t !== null && t.length > 0),
           ),
         );
+        const firstAppliedDate = sorted[sorted.length - 1]?.["applied_date"];
+        const lastAppliedDate = sorted[0]?.["applied_date"];
         history = {
           address_norm: street.toLowerCase(),
           address: lead.address ?? street,
@@ -127,26 +146,44 @@ export async function GET(
           permit_count: sorted.length,
           total_value: null,
           first_permit_date:
-            (sorted[sorted.length - 1]?.applied_date as string | null) ?? null,
+            typeof firstAppliedDate === "string" ? firstAppliedDate : null,
           last_permit_date:
-            (sorted[0]?.applied_date as string | null) ?? null,
+            typeof lastAppliedDate === "string" ? lastAppliedDate : null,
           trades,
           permits: sorted.map(
             (p): HistoryPermit => ({
               permit_number:
-                typeof p.permit_number === "string" ? p.permit_number : undefined,
+                typeof p["permit_number"] === "string"
+                  ? (p["permit_number"] as string)
+                  : undefined,
               permit_type:
-                typeof p.permit_type === "string" ? p.permit_type : undefined,
+                typeof p["permit_type"] === "string"
+                  ? (p["permit_type"] as string)
+                  : undefined,
               applied_date:
-                typeof p.applied_date === "string" ? p.applied_date : undefined,
+                typeof p["applied_date"] === "string"
+                  ? (p["applied_date"] as string)
+                  : undefined,
               issued_date:
-                typeof p.issued_date === "string" ? p.issued_date : undefined,
+                typeof p["issued_date"] === "string"
+                  ? (p["issued_date"] as string)
+                  : undefined,
               value:
-                typeof p.estimated_value === "number" ? p.estimated_value : undefined,
-              status: typeof p.status === "string" ? p.status : undefined,
-              trade: typeof p.trade === "string" ? p.trade : undefined,
+                typeof p["estimated_value"] === "number"
+                  ? (p["estimated_value"] as number)
+                  : undefined,
+              status:
+                typeof p["status"] === "string"
+                  ? (p["status"] as string)
+                  : undefined,
+              trade:
+                typeof p["trade"] === "string"
+                  ? (p["trade"] as string)
+                  : undefined,
               description:
-                typeof p.description === "string" ? p.description : undefined,
+                typeof p["description"] === "string"
+                  ? (p["description"] as string)
+                  : undefined,
             }),
           ),
         };
