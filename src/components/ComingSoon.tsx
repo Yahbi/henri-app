@@ -32,7 +32,7 @@ export function ComingSoon({
           Back to leads
         </Link>
         <a
-          href="mailto:founder@henri.app?subject=Early access request"
+          href="mailto:founder@meethenri.com?subject=Early access request"
           className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
         >
           Request early access

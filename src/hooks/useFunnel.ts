@@ -56,7 +56,6 @@ export function useFunnel(): UseFunnelReturn {
       (byStatus[l.status] ??= []).push(l);
     }
 
-    const newCount = (byStatus["new"]?.length ?? 0);
     const contactedCount = (byStatus["contacted"]?.length ?? 0);
     const quotedCount = (byStatus["quoted"]?.length ?? 0) + (byStatus["proposal"]?.length ?? 0);
     const wonCount = (byStatus["won"]?.length ?? 0);

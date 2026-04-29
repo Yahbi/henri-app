@@ -1,0 +1,28 @@
+{
+  "name": "Henri.",
+  "short_name": "Henri.",
+  "description": "Permit intelligence for contractors. Hot leads scored from public construction permits, exclusivity-locked per trade.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#D4886A",
+  "background_color": "#0d0c0a",
+  "categories": ["business", "productivity"],
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

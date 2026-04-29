@@ -20,7 +20,7 @@ export default function AuthError({
   }, [error]);
 
   const supportMailto =
-    "mailto:support@henri.app?subject=" +
+    "mailto:support@meethenri.com?subject=" +
     encodeURIComponent(`Auth error${error?.digest ? ` (${error.digest})` : ""}`) +
     "&body=" +
     encodeURIComponent(

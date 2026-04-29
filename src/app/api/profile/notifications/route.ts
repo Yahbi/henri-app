@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   DEFAULT_NOTIFICATION_PREFS,
-  NOTIFICATION_PREF_KEYS,
 } from "@/types/profile";
 import type { NotificationPrefs } from "@/types/profile";
+import {
+  NotificationPrefsPatchBodySchema,
+  parseBody,
+} from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/profile/notifications — return notification preferences ─── */
 export async function GET() {
@@ -27,7 +31,7 @@ export async function GET() {
       .single();
 
     if (error) {
-      console.error("Notification prefs fetch error:", error);
+      logger.error("Notification prefs fetch error", { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
         { error: "Failed to fetch notification preferences" },
         { status: 500 }
@@ -43,7 +47,7 @@ export async function GET() {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error("Notification prefs GET error:", err);
+    logger.error("Notification prefs GET error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -65,13 +69,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
+    const raw = await request.json();
+    const parsed = parseBody(NotificationPrefsPatchBodySchema, raw);
+    if (parsed.response) return parsed.response;
 
-    /* Validate: only allow known pref keys with boolean values */
+    /* Strict schema → drop undefined keys so we only persist fields the
+     * caller actually asked to change. The schema's `.strict()` already
+     * rejects unknown keys at the validation layer. */
     const incomingUpdate: Partial<NotificationPrefs> = {};
-    for (const key of NOTIFICATION_PREF_KEYS) {
-      if (key in body && typeof body[key] === "boolean") {
-        incomingUpdate[key] = body[key];
+    for (const [key, value] of Object.entries(parsed.data)) {
+      if (typeof value === "boolean") {
+        (incomingUpdate as Record<string, boolean>)[key] = value;
       }
     }
 
@@ -103,7 +111,7 @@ export async function PATCH(request: NextRequest) {
       .eq("id", user.id);
 
     if (updateError) {
-      console.error("Notification prefs update error:", updateError);
+      logger.error("Notification prefs update error", { error: updateError instanceof Error ? updateError.message : String(updateError) });
       return NextResponse.json(
         { error: "Failed to update notification preferences" },
         { status: 500 }
@@ -112,7 +120,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ prefs: merged });
   } catch (err) {
-    console.error("Notification prefs PATCH error:", err);
+    logger.error("Notification prefs PATCH error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

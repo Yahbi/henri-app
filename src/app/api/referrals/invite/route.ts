@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /* ─── POST /api/referrals/invite — send referral invite email ─── */
 export async function POST(req: Request) {
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
   });
 
   const referralCode = (codeResult as string) ?? `HENRI-${user.id.slice(0, 6).toUpperCase()}`;
-  const referralLink = `https://henri.app/signup?ref=${referralCode}`;
+  const referralLink = `https://meethenri.com/signup?ref=${referralCode}`;
 
   /* Get user profile for personalization */
   const { data: profile } = await supabase
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: "Henri <noreply@henri.app>",
+          from: "Henri <noreply@meethenri.com>",
           to: [email],
           subject: `${senderName} invited you to Henri`,
           html: `
@@ -85,7 +86,7 @@ export async function POST(req: Request) {
     }
   } catch (emailError) {
     /* Non-blocking: invite is recorded even if email fails */
-    console.error("Referral invite email error:", emailError);
+    logger.error("Referral invite email error", { error: emailError instanceof Error ? emailError.message : String(emailError) });
   }
 
   return NextResponse.json({

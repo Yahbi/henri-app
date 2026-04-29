@@ -1,9 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { findMatches, incrementAssignment } from "@/lib/matching/engine";
 import { notifyAllMatches } from "@/lib/matching/notify";
 import { sendIntakeConfirmation } from "@/lib/resend/intake-confirmation-email";
-import type { LeadData } from "@/types/leads";
+import { logger } from "@/lib/logger";
+
+/* Zod schema — homeowner intake submission. Per the 2026-04-26 audit
+ * ([04-api-surface.md F1] + [05-security.md F1]) this route was the
+ * highest-risk unvalidated user-input edge in the app: `description`,
+ * `trade`, `budget_range`, `timeline` flow into the matching engine and
+ * a database insert. Validation is fail-loud — malformed bodies produce
+ * a 400 with a structured field list, not a 500.
+ *
+ * Field rules:
+ *   - `zip` must be a US 5-digit string
+ *   - `trade` is the canonical trade slug enum
+ *   - `description` is bounded at 4000 chars (defense-in-depth against
+ *     pathological prompt-injection payloads — see LLM safety in the audit)
+ *   - All contact fields are optional (homeowner may submit anonymously)
+ *   - `henri_score` is bounded 0–100 to match the scoring engine output */
+const IntakeBody = z.object({
+  zip: z.string().regex(/^\d{5}$/, "zip must be a 5-digit US ZIP code"),
+  trade: z.string().min(1).max(100),
+  timeline: z.string().max(100).optional(),
+  budget_range: z.string().max(100).optional(),
+  description: z.string().max(4000).optional(),
+  refinement_answers: z.array(z.unknown()).optional(),
+  photos: z.array(z.string()).optional(),
+  contact_name: z.string().max(200).optional(),
+  contact_phone: z.string().max(40).optional(),
+  contact_email: z.string().email().max(200).optional(),
+  henri_score: z.number().min(0).max(100).optional(),
+});
 
 /* ── Simple in-memory rate limiter (max 5 submissions per IP per hour) ── */
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -44,16 +73,21 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
+    let parsed;
+    try {
+      parsed = IntakeBody.parse(await req.json());
+    } catch (zodErr) {
+      const issues = zodErr instanceof z.ZodError ? zodErr.issues : [];
+      return NextResponse.json(
+        { error: "Invalid intake body", issues },
+        { status: 400 },
+      );
+    }
     const {
       zip, trade, timeline, budget_range, description,
       refinement_answers, photos, contact_name, contact_phone,
       contact_email, henri_score,
-    } = body;
-
-    if (!zip || !trade) {
-      return NextResponse.json({ error: "ZIP and trade are required" }, { status: 400 });
-    }
+    } = parsed;
 
     const supabase = await createClient();
 
@@ -91,7 +125,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (intakeError) {
-      console.error("Intake insert error:", intakeError);
+      logger.error("Intake insert error", { error: intakeError instanceof Error ? intakeError.message : String(intakeError) });
       return NextResponse.json({ error: "Failed to save intake" }, { status: 500 });
     }
 
@@ -119,9 +153,6 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (permit) {
-        const urgency =
-          (henri_score ?? 70) >= 75 ? "hot" : (henri_score ?? 70) >= 50 ? "warm" : (henri_score ?? 70) >= 25 ? "cool" : "cold";
-
         /* Score using the new engine for proper sub-scores */
         const { buildSignals, calculateScore } = await import("@/lib/scoring");
         const signals = buildSignals({
@@ -202,7 +233,7 @@ export async function POST(req: NextRequest) {
 
         if (matchInsertError) {
           /* Non-fatal: log but continue. The table may not exist yet. */
-          console.error("intake_matches insert error (non-fatal):", matchInsertError);
+          logger.error("intake_matches insert error (non-fatal)", { error: matchInsertError instanceof Error ? matchInsertError.message : String(matchInsertError) });
         }
 
         /* ── 5. Notify all matched contractors (creates quotes + notifications + SMS/email) ── */
@@ -214,7 +245,7 @@ export async function POST(req: NextRequest) {
           contact_name,
           budget_range,
           henri_score,
-        }).catch((err) => console.error("Notification dispatch error:", err));
+        }).catch((err) => logger.error("Notification dispatch error", { error: err instanceof Error ? err.message : String(err) }));
       }
     }
 
@@ -232,7 +263,7 @@ export async function POST(req: NextRequest) {
         });
 
       if (reviewError) {
-        console.error("Manual review notification error:", reviewError);
+        logger.error("Manual review notification error", { error: reviewError instanceof Error ? reviewError.message : String(reviewError) });
       }
     }
 
@@ -259,7 +290,7 @@ export async function POST(req: NextRequest) {
         }),
         appUrl,
       }).catch((err) => {
-        console.error("Intake confirmation email error:", err);
+        logger.error("Intake confirmation email error", { error: err instanceof Error ? err.message : String(err) });
       });
     }
 
@@ -286,7 +317,7 @@ export async function POST(req: NextRequest) {
       })),
     });
   } catch (error) {
-    console.error("Intake API error:", error);
+    logger.error("Intake API error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

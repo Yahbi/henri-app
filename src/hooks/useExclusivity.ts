@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ExclusivityLockSummary } from "@/lib/exclusivity/locks";
+import type { ExclusivityLeadSummary } from "@/lib/exclusivity/locks";
 
 /**
  * Fetch exclusivity-lock summaries for a set of lead IDs.
  *
- * Returns a map keyed by lead_id. When the migration isn't applied or
- * the endpoint fails, returns an empty map — calling components will
- * simply not render lock badges, which is the correct fallback.
+ * Each value is an `ExclusivityLeadSummary` — a lock record merged with
+ * the coarse "other contractors watching" bucket from wedge contract #6.
+ *
+ * When the migration isn't applied or the endpoint fails, returns an
+ * empty map — calling components will simply not render lock badges,
+ * which is the correct fallback.
  *
  * Dedup + debounce: we key on the sorted-and-joined lead-id list so
  * rapidly re-rendering the leads panel doesn't spam the endpoint. 60s
@@ -16,10 +19,14 @@ import type { ExclusivityLockSummary } from "@/lib/exclusivity/locks";
  * hammering the server.
  */
 export function useExclusivity(leadIds: string[] | undefined | null) {
-  const [locks, setLocks] = useState<Record<string, ExclusivityLockSummary>>({});
+  const [locks, setLocks] = useState<Record<string, ExclusivityLeadSummary>>({});
   const lastKey = useRef<string | null>(null);
 
   useEffect(() => {
+    // Wedge-critical fetch effect — reset-on-empty + async lock fetch (Phase 0a).
+    // Behavior change would affect lock-badge rendering; intentionally keeping
+    // setState-in-effect pattern. See CLAUDE.md "Wedge contract".
+    /* eslint-disable react-hooks/set-state-in-effect */
     const ids = (leadIds ?? []).filter(Boolean);
     if (ids.length === 0) {
       setLocks({});
@@ -44,7 +51,7 @@ export function useExclusivity(leadIds: string[] | undefined | null) {
           return;
         }
         const body = (await res.json()) as {
-          locks: Record<string, ExclusivityLockSummary>;
+          locks: Record<string, ExclusivityLeadSummary>;
         };
         if (!cancelled) {
           lastKey.current = key;
@@ -55,6 +62,7 @@ export function useExclusivity(leadIds: string[] | undefined | null) {
       }
     })();
     return () => { cancelled = true; };
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [leadIds?.length, leadIds?.[0], leadIds?.[leadIds.length - 1]]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { locks };

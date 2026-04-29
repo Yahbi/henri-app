@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendEstimateEmail } from "@/lib/resend/estimate-email";
 import { hasResend } from "@/lib/env";
+import { EstimatePatchBodySchema, parseBody } from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/estimates/[id] — single estimate detail ─── */
 export async function GET(
@@ -53,7 +55,7 @@ export async function GET(
 
     return NextResponse.json({ estimate });
   } catch (err) {
-    console.error("Estimate GET error:", err);
+    logger.error("Estimate GET error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -96,23 +98,16 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const body = await req.json();
-    const allowedFields = [
-      "tiers",
-      "amount",
-      "status",
-      "contact_name",
-      "contact_email",
-      "contact_phone",
-      "scope_notes",
-      "description",
-    ];
+    const raw = await req.json();
+    const parsed = parseBody(EstimatePatchBodySchema, raw);
+    if (parsed.response) return parsed.response;
 
+    /* The schema is strict + every field optional, so `parsed.data`
+     * is already a tight whitelist. Drop undefined keys before sending
+     * to Supabase so we don't accidentally null-out untouched fields. */
     const updates: Record<string, unknown> = {};
-    for (const key of allowedFields) {
-      if (key in body) {
-        updates[key] = body[key];
-      }
+    for (const [key, value] of Object.entries(parsed.data)) {
+      if (value !== undefined) updates[key] = value;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -147,7 +142,7 @@ export async function PATCH(
       .single();
 
     if (updateErr) {
-      console.error("Estimate update error:", updateErr);
+      logger.error("Estimate update error", { error: updateErr instanceof Error ? updateErr.message : String(updateErr) });
       return NextResponse.json(
         { error: "Failed to update estimate" },
         { status: 500 }
@@ -156,7 +151,7 @@ export async function PATCH(
 
     return NextResponse.json({ estimate: updated });
   } catch (err) {
-    console.error("Estimate PATCH error:", err);
+    logger.error("Estimate PATCH error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

@@ -15,7 +15,18 @@
 
 # next.js
 /.next/
+/.next.*/
 /out/
+
+# Tailwind v4 + Turbopack 16.2.3 scans the whole project root for
+# class strings. Worktree archives or stale build dirs left at the
+# root can re-introduce arbitrary-value classes that trip a parser bug
+# on `shadow-[hsl(var(--…)/X)]` patterns. Keep them out of scan range.
+# (See docs/audits/2026-04-27 / preview-launch session notes.)
+/.claude/worktrees/
+/.claude/worktrees.*/
+/scripts/.import-state.json
+/scripts/.import-log.txt
 
 # production
 /build

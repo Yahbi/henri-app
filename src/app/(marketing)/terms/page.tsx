@@ -380,10 +380,10 @@ export default function TermsOfServicePage() {
             <p className="mt-3">
               If you have questions about these Terms, please contact us at{" "}
               <a
-                href="mailto:legal@henri.app"
+                href="mailto:legal@meethenri.com"
                 className="text-[#D4886A] underline underline-offset-2"
               >
-                legal@henri.app
+                legal@meethenri.com
               </a>
               .
             </p>

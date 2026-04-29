@@ -87,10 +87,15 @@ ALTER TABLE lead_exclusivity_locks ENABLE ROW LEVEL SECURITY;
 -- A contractor can see their own locks. Read-only from client; the
 -- API route (/api/exclusivity) holds the service role key and runs
 -- the acquire/release logic with its own validation.
-CREATE POLICY excl_locks_select_self ON lead_exclusivity_locks
-  FOR SELECT
-  TO authenticated
-  USING (contractor_id = auth.uid());
+-- Wrapped in DO so re-runs after partial application don't error on
+-- duplicate-object (Postgres < 17 has no `CREATE POLICY IF NOT EXISTS`).
+DO $$ BEGIN
+  CREATE POLICY excl_locks_select_self ON lead_exclusivity_locks
+    FOR SELECT
+    TO authenticated
+    USING (contractor_id = auth.uid());
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 /* ────────────────────────────────────────────────────────────────────
    Permit lifecycle events (pain #5: no intent signal)
@@ -116,10 +121,13 @@ CREATE INDEX IF NOT EXISTS idx_permit_events_type_time
 -- public-to-authenticated rule.
 ALTER TABLE permit_events ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY permit_events_select_all ON permit_events
-  FOR SELECT
-  TO authenticated
-  USING (true);
+DO $$ BEGIN
+  CREATE POLICY permit_events_select_all ON permit_events
+    FOR SELECT
+    TO authenticated
+    USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 /* ────────────────────────────────────────────────────────────────────
    Missed-call log (pain #6: speed-to-lead)
@@ -142,10 +150,13 @@ CREATE INDEX IF NOT EXISTS idx_missed_call_contractor_time
 
 ALTER TABLE missed_call_events ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY missed_call_select_self ON missed_call_events
-  FOR SELECT
-  TO authenticated
-  USING (contractor_id = auth.uid());
+DO $$ BEGIN
+  CREATE POLICY missed_call_select_self ON missed_call_events
+    FOR SELECT
+    TO authenticated
+    USING (contractor_id = auth.uid());
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 /* ────────────────────────────────────────────────────────────────────
    Additive columns on existing tables

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /* GET /api/intake/[id]/matches -- returns matched contractors for an intake */
 export async function GET(
@@ -77,7 +78,7 @@ export async function GET(
       .order("rank", { ascending: true });
 
     if (matchError) {
-      console.error("Match fetch error:", matchError);
+      logger.error("Match fetch error", { error: matchError instanceof Error ? matchError.message : String(matchError) });
       return NextResponse.json({ error: "Failed to fetch matches" }, { status: 500 });
     }
 
@@ -148,7 +149,7 @@ export async function GET(
       matches: results,
     });
   } catch (error) {
-    console.error("Matches GET error:", error);
+    logger.error("Matches GET error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

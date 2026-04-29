@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { logger } from "@/lib/logger";
 import type { LeadData } from "@/types/leads";
 
 function getResend() {
@@ -9,7 +10,7 @@ function getResend() {
 // is used only for local dev / tests; production must set this via env
 // so email isn't sent from an unverified domain (Resend silently
 // suppresses such sends and the contractor never gets their lead email).
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "henri@henri.app";
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "henri@meethenri.com";
 
 /** Escape HTML special characters to prevent injection via permit data */
 function escapeHtml(str: string): string {
@@ -112,13 +113,17 @@ export async function sendLeadEmail(
     });
 
     if (error) {
-      console.error("Resend email error:", error);
+      logger.error("Resend email error", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return { success: false, emailId: null };
     }
 
     return { success: true, emailId: data?.id ?? null };
   } catch (error) {
-    console.error("Resend email error:", error);
+    logger.error("Resend email error", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return { success: false, emailId: null };
   }
 }

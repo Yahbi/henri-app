@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { QuotePatchBodySchema, parseBody } from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/quotes/[id] — single quote detail ─── */
 export async function GET(
@@ -49,7 +51,7 @@ export async function GET(
 
     return NextResponse.json({ quote });
   } catch (err) {
-    console.error("Quote GET error:", err);
+    logger.error("Quote GET error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -98,11 +100,17 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const body = await req.json();
+    const raw = await req.json();
+    const parsed = parseBody(QuotePatchBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const body = parsed.data;
     const updates: Record<string, unknown> = {};
 
     if (isContractor) {
-      /* Contractor-allowed fields */
+      /* Contractor-allowed fields — Zod has already shape-checked each
+       * value. Role-side enforcement of which `status` values a contractor
+       * can set lives here, since the schema covers both sides of the
+       * conversation. */
       const contractorFields = [
         "tier_good",
         "tier_better",
@@ -110,19 +118,18 @@ export async function PATCH(
         "status",
         "message",
         "financing_available",
-      ];
+      ] as const;
 
       for (const key of contractorFields) {
-        if (key in body) {
-          /* Only allow contractors to set status to 'sent' */
-          if (key === "status" && body[key] !== "sent") {
-            return NextResponse.json(
-              { error: "Contractors can only set status to 'sent'" },
-              { status: 400 }
-            );
-          }
-          updates[key] = body[key];
+        const value = body[key];
+        if (value === undefined) continue;
+        if (key === "status" && value !== "sent") {
+          return NextResponse.json(
+            { error: "Contractors can only set status to 'sent'" },
+            { status: 400 }
+          );
         }
+        updates[key] = value;
       }
 
       if (updates.status === "sent") {
@@ -136,26 +143,25 @@ export async function PATCH(
         "status",
         "selected_tier",
         "decline_reason",
-      ];
+      ] as const;
 
       for (const key of homeownerFields) {
-        if (key in body) {
-          /* Only allow homeowners to set status to 'accepted' or 'declined' */
-          if (
-            key === "status" &&
-            body[key] !== "accepted" &&
-            body[key] !== "declined"
-          ) {
-            return NextResponse.json(
-              {
-                error:
-                  "Homeowners can only set status to 'accepted' or 'declined'",
-              },
-              { status: 400 }
-            );
-          }
-          updates[key] = body[key];
+        const value = body[key];
+        if (value === undefined) continue;
+        if (
+          key === "status" &&
+          value !== "accepted" &&
+          value !== "declined"
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "Homeowners can only set status to 'accepted' or 'declined'",
+            },
+            { status: 400 }
+          );
         }
+        updates[key] = value;
       }
 
       if (updates.status === "accepted") {
@@ -183,7 +189,7 @@ export async function PATCH(
       .single();
 
     if (updateErr) {
-      console.error("Quote update error:", updateErr);
+      logger.error("Quote update error", { error: updateErr instanceof Error ? updateErr.message : String(updateErr) });
       return NextResponse.json(
         { error: "Failed to update quote" },
         { status: 500 }
@@ -216,7 +222,7 @@ export async function PATCH(
 
     return NextResponse.json({ quote: updated });
   } catch (err) {
-    console.error("Quote PATCH error:", err);
+    logger.error("Quote PATCH error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

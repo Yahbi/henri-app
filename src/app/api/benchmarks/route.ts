@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 export async function GET(request: NextRequest) {
   try {
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (err) {
-    console.error("Error fetching benchmarks:", err);
+    logger.error("Error fetching benchmarks", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to fetch benchmarks" },
       { status: 500 }

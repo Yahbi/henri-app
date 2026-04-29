@@ -249,7 +249,7 @@ function scoreConversion(signals: ScoringSignals, factors: string[]): number {
   const zipRate = signals.zipConversionRate ?? NATIONAL_BASELINE;
   const tradeRate = signals.tradeConversionRate ?? NATIONAL_BASELINE;
 
-  let score = zipRate * 7.5 + tradeRate * 7.5;
+  const score = zipRate * 7.5 + tradeRate * 7.5;
 
   if (signals.zipConversionRate != null && signals.zipConversionRate >= 0.3) {
     factors.push(`Strong ZIP conversion history (${Math.round(signals.zipConversionRate * 100)}%)`);
@@ -346,8 +346,17 @@ export function buildSignals(params: {
 }): ScoringSignals {
   const now = Date.now();
 
-  /* Permit age: days since the permit was filed */
-  let permitAge = 0;
+  /* Permit age: days since the permit was filed.
+   *
+   * Bug fix (audit B2, 2026-04-27): when `issue_date` is null, the prior
+   * code left `permitAge = 0`, which then fell into the `age < 1` branch
+   * of `Math.min(permitAge, daysSinceCreated)` and gave 20/20 freshness
+   * (max signal) on EVERY permit with a missing issue_date. Live data
+   * has ~38% of permits without `issued_date`, so >1/3 of leads were
+   * receiving falsely-maxed freshness. Now: when `issue_date` is null,
+   * set `permitAge = +Infinity` so `Math.min` falls through to
+   * `daysSinceCreated` only (the genuinely-known signal). */
+  let permitAge = Number.POSITIVE_INFINITY;
   if (params.permit.issue_date) {
     const filed = new Date(params.permit.issue_date).getTime();
     permitAge = Math.max(0, (now - filed) / (1000 * 60 * 60 * 24));

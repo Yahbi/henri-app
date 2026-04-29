@@ -60,7 +60,7 @@ export function HowItWorks() {
             return (
               <Card
                 key={step.number}
-                variant="glass"
+                variant="translucent"
                 className="relative z-10 text-center"
               >
                 <CardContent className="flex flex-col items-center gap-4 p-8">

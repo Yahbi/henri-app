@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Sans, Fraunces } from "next/font/google";
 import { Suspense } from "react";
 import "./globals.css";
@@ -7,6 +7,8 @@ import { ReactQueryProvider } from "@/components/ReactQueryProvider";
 import { GodModeSwitcher } from "@/components/dev/GodModeSwitcher";
 import { ToastProvider } from "@/components/ui/toast";
 import { RedirectReasonToast } from "@/components/RedirectReasonToast";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const dmSans = DM_Sans({
   variable: "--font-dm-sans",
@@ -21,7 +23,7 @@ const fraunces = Fraunces({
   style: ["normal", "italic"],
 });
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://henri.app";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://meethenri.com";
 
 export const metadata: Metadata = {
   title: {
@@ -71,6 +73,36 @@ export const metadata: Metadata = {
       follow: true,
     },
   },
+  // PWA manifest + iOS metadata (P1-10/11).
+  // The manifest at /manifest.json declares Henri. as installable.
+  // theme-color is exported via `viewport` below (Next 14+ deprecated
+  // the metadata.themeColor field).
+  manifest: "/manifest.json",
+  appleWebApp: {
+    title: "Henri.",
+    statusBarStyle: "default",
+    capable: true,
+  },
+  icons: {
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+  },
+};
+
+/* Viewport export (Next 14+).
+ * `themeColor` makes iOS Safari and Android Chrome tint their browser
+ * chrome to brand `#D4886A` when the app is open. The light/dark media
+ * query preserves the chosen color across both color schemes. */
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#D4886A" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d0c0a" },
+  ],
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -98,6 +130,13 @@ export default function RootLayout({
           </ToastProvider>
         </ThemeProvider>
         {process.env.NODE_ENV !== "production" && <GodModeSwitcher />}
+        {/* Vercel Analytics + Speed Insights (P1-13). First-party scripts
+         * served from cdn.vercel.sh — already allowed by our CSP. They
+         * auto-no-op outside production / preview, so dev builds aren't
+         * affected. CSP `connect-src` allows *.vercel-insights.com so the
+         * beacon POSTs land. */}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );

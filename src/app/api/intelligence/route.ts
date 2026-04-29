@@ -39,6 +39,13 @@ export async function GET() {
   const lastYearEnd = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
     .toISOString()
     .split("T")[0];
+  // Permit-activity windows use `issued_date` instead of `applied_date`.
+  // In our catalog, applied_date is populated for ~1% of rows
+  // (Socrata NYC-shape), while issued_date hits ~62% across all
+  // sources. Filtering on applied_date dropped this page to near-zero
+  // permit activity in 99% of territories. issued_date is the better
+  // recency signal for pay-permit / issued-permit data anyway — that's
+  // the event a contractor actually cares about.
   const [
     { data: recentPermits, count: recentPermitCount },
     { count: priorPermitCount },
@@ -47,16 +54,16 @@ export async function GET() {
   ] = await Promise.all([
     supabase
       .from("permits")
-      .select("id, permit_type, estimated_value, applied_date, zip", { count: "exact" })
+      .select("id, permit_type, estimated_value, issued_date, zip", { count: "exact" })
       .in("zip", zips)
-      .gte("applied_date", thirtyDaysAgo.split("T")[0])
+      .gte("issued_date", thirtyDaysAgo.split("T")[0])
       .limit(5000),
     supabase
       .from("permits")
       .select("id", { count: "exact", head: true })
       .in("zip", zips)
-      .gte("applied_date", sixtyDaysAgo.split("T")[0])
-      .lt("applied_date", thirtyDaysAgo.split("T")[0]),
+      .gte("issued_date", sixtyDaysAgo.split("T")[0])
+      .lt("issued_date", thirtyDaysAgo.split("T")[0]),
     supabase
       .from("leads")
       .select(
@@ -69,8 +76,8 @@ export async function GET() {
       .from("permits")
       .select("id", { count: "exact", head: true })
       .in("zip", zips)
-      .gte("applied_date", lastYearStart)
-      .lt("applied_date", lastYearEnd),
+      .gte("issued_date", lastYearStart)
+      .lt("issued_date", lastYearEnd),
   ]);
 
   const leads = recentLeads ?? [];

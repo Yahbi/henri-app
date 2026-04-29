@@ -9,6 +9,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 import type { PermitSource } from "./sources";
 
 export interface DBPermitSource extends PermitSource {
@@ -30,7 +31,7 @@ export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
     .limit(limit);
 
   if (error) {
-    console.error("Failed to load permit sources from DB:", error.message);
+    logger.error("Failed to load permit sources from DB", { error: error.message });
     return [];
   }
 

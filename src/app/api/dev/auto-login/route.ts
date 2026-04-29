@@ -10,18 +10,31 @@ import { logApiError } from "@/lib/log";
  * profiles row exists as a contractor with onboarding completed, then signs
  * the user in by exchanging the password for a session.
  *
- * Gated on `NEXT_PUBLIC_ENABLE_DEV_LOGIN=1` — matches the gate on the
- * /login button. Returns 404 when the flag isn't set so real Vercel
- * deployments (where the flag is never set) can't be hit via direct POST,
- * AND so local production builds (`next start`) still work as long as
- * the user has set the flag in `.env.local`.
+ * Defense-in-depth gating (P0-1):
+ *   1. `NEXT_PUBLIC_ENABLE_DEV_LOGIN=1` — matches the gate on the /login UI.
+ *   2. NOT in production (`NODE_ENV !== "production"`) — even if a Vercel
+ *      env mis-config sets ENABLE_DEV_LOGIN=1, the production NODE_ENV
+ *      blocks the route. Both gates must hold.
+ *   3. NOT on a Vercel-managed deployment (`VERCEL_ENV` unset). Vercel
+ *      sets VERCEL_ENV=production|preview|development for every deploy.
+ *      Local pnpm dev leaves it unset, so the route only opens locally.
+ *
+ * If any of the three checks fails, return 404 — same shape as a non-
+ * existent route, so attackers can't fingerprint the gate.
  */
 
 const DEV_EMAIL = "y.abismuth@gmail.com";
 const DEV_PASSWORD = "DevLogin!2026";
 
+function devLoginAllowed(): boolean {
+  if (process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN !== "1") return false;
+  if (process.env.NODE_ENV === "production") return false;
+  if (process.env.VERCEL_ENV) return false; // any Vercel env (incl. preview) is off-limits
+  return true;
+}
+
 export async function POST() {
-  if (process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN !== "1") {
+  if (!devLoginAllowed()) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

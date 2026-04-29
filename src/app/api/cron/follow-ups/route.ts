@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendLeadSMS } from "@/lib/twilio/sms";
-import { sendLeadEmail } from "@/lib/resend/email";
 import {
   processDueSteps,
   startSequence,
@@ -157,7 +155,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
           const resend = new Resend(process.env.RESEND_API_KEY!);
 
           const fromEmail =
-            process.env.RESEND_FROM_EMAIL ?? "leads@henri.app";
+            process.env.RESEND_FROM_EMAIL ?? "leads@meethenri.com";
 
           const { data: emailData, error: emailError } = await resend.emails.send({
             from: fromEmail,

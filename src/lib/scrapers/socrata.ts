@@ -1,6 +1,7 @@
 import type { PermitSource } from "./sources";
 import type { ScrapeResult } from "@/types/permits";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 import {
   classifyPermitType,
   normalizeStatus,
@@ -66,7 +67,11 @@ export async function scrapeSocrataSource(
       const response = await fetchWithRetry(url);
       records = await response.json();
     } catch (err) {
-      console.error(`Socrata fetch error [${source.city}] page ${page}:`, err);
+      logger.error("Socrata fetch error", {
+        city: source.city,
+        page,
+        error: err instanceof Error ? err.message : String(err),
+      });
       result.errors++;
       break;
     }
@@ -147,7 +152,10 @@ export async function scrapeSocrataSource(
 
       if (error) {
         result.errors += batch.length;
-        console.error(`Upsert error for ${source.city}:`, error.message);
+        logger.error("Socrata upsert error", {
+          city: source.city,
+          error: error.message,
+        });
       } else {
         // Supabase upsert does not distinguish insert vs update in response,
         // so we count all successful rows as updates for simplicity

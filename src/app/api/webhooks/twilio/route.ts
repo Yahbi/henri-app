@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Twilio from "twilio";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { wasProcessed, markProcessed } from "@/lib/webhooks/idempotency";
 
 /**
  * Twilio Status Callback Webhook
@@ -48,6 +49,24 @@ export async function POST(request: NextRequest) {
     const supabase = createAdminClient();
     const now = new Date().toISOString();
 
+    // Audit priority #7 (2026-04-28): event-ID idempotency. Twilio
+    // redelivers webhooks on 5xx and on its own retry timer; without
+    // dedup we'd double-update outreach_queue rows, fire duplicate
+    // notifications, and pollute the activity log. The compound key
+    // is (MessageSid, MessageStatus) because Twilio sends one webhook
+    // per status transition (queued → sent → delivered → read), and
+    // each transition is a distinct event.
+    const idempotencyKey = `${messageSid}:${messageStatus}`;
+    const seen = await wasProcessed(supabase, "twilio", idempotencyKey);
+    if (seen) {
+      return NextResponse.json({
+        ok: true,
+        skipped: "duplicate",
+        messageSid,
+        messageStatus,
+      });
+    }
+
     // Map Twilio status to our tracking columns
     const updates: Record<string, unknown> = {};
 
@@ -82,6 +101,14 @@ export async function POST(request: NextRequest) {
     if (error) {
       logger.error("Twilio webhook DB update error", { error: error.message });
     }
+
+    // Mark processed AFTER the DB update so a failed update lets the
+    // next redelivery retry. If the mark itself fails we just log; the
+    // worst case is a duplicate downstream update on the next replay.
+    await markProcessed(supabase, "twilio", idempotencyKey, {
+      event_type: messageStatus,
+      raw_meta: { messageSid, messageStatus, errorCode: errorCode ?? null },
+    });
 
     return NextResponse.json({ status: "ok", messageSid, messageStatus });
   } catch (err) {

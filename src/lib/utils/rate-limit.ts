@@ -2,7 +2,31 @@
  * IP-keyed, in-memory rate limiting for API routes.
  * Each serverless instance maintains its own window — this provides
  * per-instance burst protection, not globally distributed rate limiting.
- * For production global limits, use Vercel's KV-backed rate limiting.
+ *
+ * ## Upgrade path to distributed rate limiting (Phase 5+)
+ *
+ * The in-memory store is per-serverless-instance, so an attacker can
+ * spread burst traffic across cold starts and evade the local limit.
+ * For globally-consistent rate limiting we have two options:
+ *
+ *   1. **@upstash/ratelimit** — Redis-backed sliding window, runs on
+ *      Vercel Edge. Drop-in replacement: install the package, instantiate
+ *      a `Ratelimit` with an Upstash Redis client, and swap the
+ *      `checkRateLimit` function body to `ratelimit.limit(identifier)`.
+ *      Free tier supports up to 10k requests/day.
+ *
+ *   2. **Vercel KV** — Vercel's own key-value store, sliding-window
+ *      recipe in their docs. Tighter integration with Vercel but slightly
+ *      more bespoke — you build the sliding-window math yourself.
+ *
+ * Both require adding an env var (`UPSTASH_REDIS_REST_URL` etc.) and a
+ * small init cost. Until then the in-memory version below is a sensible
+ * default for Vercel's serverless model — most realistic abusers don't
+ * juggle their traffic across regions to defeat per-instance limits.
+ *
+ * When the upgrade lands: keep this file's signatures exactly. All API
+ * routes import `checkRateLimit(ip, config)` — swap the implementation
+ * without touching any call site. Tests pin the behavior contract.
  * ────────────────────────────────────────────────────────────────────────── */
 
 interface RateLimitEntry {

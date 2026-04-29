@@ -10,6 +10,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PERMIT_SOURCES } from "@/lib/permits/sources";
 import { fetchPermits, type NormalizedPermit } from "@/lib/permits/fetcher";
+import { extractContactWithProvenance } from "@/lib/ingest/extract-contact";
+import { normalizeStatus } from "@/lib/scrapers/normalizer";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // 5 min — enough for 25 sources
@@ -72,7 +74,26 @@ export async function GET(request: NextRequest) {
   const results: SourceResult[] = [];
   let totalInserted = 0;
 
+  // Audit priority #8 (2026-04-28): inline 280s deadline. The per-source
+  // loop runs ~25 sources sequentially and each can take 5-15s on slow
+  // jurisdictions. Without this check Vercel kills at 300s mid-source
+  // and we lose the ones that were halfway through. Now we exit cleanly
+  // and the response includes the partial results.
+  const t0 = Date.now();
+  const deadlineMs = t0 + 280_000;
+
   for (const source of PERMIT_SOURCES) {
+    if (Date.now() > deadlineMs) {
+      results.push({
+        id: source.id,
+        city: source.city,
+        fetched: 0,
+        inserted: 0,
+        skipped: 0,
+        errors: ["skipped — cron deadline reached"],
+      });
+      continue;
+    }
     const result: SourceResult = {
       id: source.id,
       city: source.city,
@@ -153,7 +174,33 @@ export async function GET(request: NextRequest) {
       for (let i = 0; i < newPermits.length; i += 50) {
         const batch = newPermits.slice(i, i + 50);
         const rows = batch.map((p) => {
-          const ownerName = [p.owner_first, p.owner_last].filter(Boolean).join(" ") || null;
+          // First pass: combined name from the structured first/last the
+          // upstream Socrata parser set on the record itself.
+          const combined = [p.owner_first, p.owner_last].filter(Boolean).join(" ").trim();
+          // Fallback: pull applicant/owner/contractor from raw_data with
+          // the multi-city extractor. Many Socrata feeds ship the owner
+          // as `ownername` / `applicant_name` / `owner_s_business_name`
+          // — none of which the upstream parser maps. Backfill-from-raw
+          // audit (2026-04-22) showed ~37% of permits have a non-null
+          // owner field in raw_json that was never being persisted.
+          //
+          // We still call extractContactWithProvenance here (rather than
+          // relying solely on fetcher's p.contact_source) because we need
+          // the full ExtractedContact to resolve applicant_name + contractor_name,
+          // not just the provenance tags. The fetcher's provenance fields
+          // are used as the canonical stamp because they reflect the
+          // raw-blob read that actually populated owner_first/owner_last.
+          //
+          // Provenance columns (migration 00039):
+          //   contact_source       — which upstream shape the blob came from
+          //   contact_confidence   — 0-1 heuristic quality score
+          //   contact_extracted_at — when we pulled it
+          const fromRaw = extractContactWithProvenance(p.raw_data);
+          const applicantName = combined || fromRaw.applicant_name || fromRaw.owner_name || null;
+          // Only stamp provenance when we actually pulled a contact
+          // field — blank rows shouldn't get a "confidence" badge.
+          const wroteContact = !!(applicantName || fromRaw.contractor_name);
+          const nowIso = new Date().toISOString();
           return {
             source_city: sourceCity,
             source_id: p.permit_number
@@ -163,19 +210,50 @@ export async function GET(request: NextRequest) {
             city: p.city,
             state: p.state,
             address: p.address,
-            zip: p.zip,
+            // permits.zip is varchar(5); upstream sources sometimes
+            // ship ZIP+4 strings ("60601-1234") which overflow.
+            // Extract the first 5 digits, drop anything that isn't a
+            // valid 5-digit ZIP.
+            zip: ((): string | null => {
+              const raw = (p.zip ?? "").trim();
+              if (!raw) return null;
+              const m = raw.match(/^(\d{5})/);
+              return m ? m[1] : null;
+            })(),
             latitude: p.latitude,
             longitude: p.longitude,
             permit_type: mapPermitType(p.permit_type),
-            status: "issued" as const,
+            // Map upstream status string to the DB enum. Was hardcoded
+            // `"issued"` until 2026-04-27 audit B1 — that lied about
+            // every permit's actual lifecycle (submitted/approved/
+            // expired/revoked all collapsed to "issued"). Read from the
+            // raw blob in priority order; fall back to "submitted" so
+            // we never write an invalid enum.
+            status: normalizeStatus(
+              String(
+                (p.raw_data as Record<string, unknown> | null)?.status ??
+                  (p.raw_data as Record<string, unknown> | null)?.permit_status ??
+                  (p.raw_data as Record<string, unknown> | null)?.workflow_status ??
+                  (p.raw_data as Record<string, unknown> | null)?.current_status ??
+                  ""
+              )
+            ),
             description: p.description,
             estimated_value: p.estimated_value,
-            applicant_name: ownerName,
+            applicant_name: applicantName,
+            contractor_name: fromRaw.contractor_name,
+            // Prefer the fetcher's provenance (reflects the raw-blob read
+            // inside fetchPermits) and fall back to our re-extraction.
+            contact_source: wroteContact ? (p.contact_source ?? fromRaw.source) : null,
+            contact_confidence: wroteContact
+              ? (p.contact_confidence ?? fromRaw.confidence)
+              : null,
+            contact_extracted_at: wroteContact ? nowIso : null,
             issued_date: p.applied_date,
             source_type: "socrata",
             raw_json: p.raw_data,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
+            created_at: nowIso,
+            updated_at: nowIso,
           };
         });
 

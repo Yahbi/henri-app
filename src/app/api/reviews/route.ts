@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { generateResponseDraft } from "@/lib/reviews/response-generator";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/reviews — list reviews for a contractor (public) ─── */
 export async function GET(request: NextRequest) {
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
       .limit(limit);
 
     if (error) {
-      console.error("Reviews fetch error:", error);
+      logger.error("Reviews fetch error", { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
         { error: "Failed to fetch reviews" },
         { status: 500 }
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
       total: count ?? 0,
     });
   } catch (err) {
-    console.error("Reviews GET error:", err);
+    logger.error("Reviews GET error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -219,7 +220,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (insertErr) {
-      console.error("Review insert error:", insertErr);
+      logger.error("Review insert error", { error: insertErr instanceof Error ? insertErr.message : String(insertErr) });
       return NextResponse.json(
         { error: "Failed to submit review" },
         { status: 500 }
@@ -253,7 +254,7 @@ export async function POST(req: NextRequest) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              from: "Henri <noreply@henri.app>",
+              from: "Henri <noreply@meethenri.com>",
               to: [contractorProfile.email],
               subject: `New ${rating}-star review from ${reviewer_name}`,
               html: `
@@ -270,7 +271,7 @@ export async function POST(req: NextRequest) {
                   <p style="color: #666; line-height: 1.6; background: #f5f5f5; padding: 12px 16px; border-radius: 8px; font-style: italic;">
                     ${aiResponse}
                   </p>
-                  <a href="${process.env.NEXT_PUBLIC_APP_URL ?? "https://henri.app"}/dashboard/reputation"
+                  <a href="${process.env.NEXT_PUBLIC_APP_URL ?? "https://meethenri.com"}/dashboard/reputation"
                      style="display: inline-block; background: #D4886A; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 16px 0;">
                     View in Dashboard
                   </a>
@@ -281,15 +282,16 @@ export async function POST(req: NextRequest) {
           if (!emailRes.ok) {
             // Don't throw — email failure must not invalidate a saved review.
             // Logged so ops can see rate-limit / invalid-key issues.
-            console.warn(
-              `Resend notification failed: ${emailRes.status} ${await emailRes.text().catch(() => "")}`,
-            );
+            logger.warn("Resend notification failed", {
+              status: emailRes.status,
+              body: await emailRes.text().catch(() => ""),
+            });
           }
         }
       }
     } catch (notifyErr) {
       /* Non-blocking: review is saved even if notification fails */
-      console.error("Contractor notification error:", notifyErr);
+      logger.error("Contractor notification error", { error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr) });
     }
 
     /* Refresh contractor stats via RPC */
@@ -299,7 +301,7 @@ export async function POST(req: NextRequest) {
       });
     } catch (rpcErr) {
       /* Non-blocking: review is saved even if stats refresh fails */
-      console.error("refresh_contractor_stats RPC error:", rpcErr);
+      logger.error("refresh_contractor_stats RPC error", { error: rpcErr instanceof Error ? rpcErr.message : String(rpcErr) });
     }
 
     return NextResponse.json(
@@ -307,7 +309,7 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    console.error("Reviews POST error:", err);
+    logger.error("Reviews POST error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

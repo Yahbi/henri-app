@@ -6,6 +6,7 @@ import {
   acquireLock,
   releaseLock,
   summarizeLocksForContractor,
+  summarizeWatchersByLead,
   type ExclusivityReleaseReason,
 } from "@/lib/exclusivity/locks";
 import { z } from "zod";
@@ -13,14 +14,18 @@ import { z } from "zod";
 /**
  * /api/exclusivity — per-permit lock CRUD for contractors.
  *
- *   GET  ?lead_ids=a,b,c     → summary map {lead_id, held_by_caller, ms_remaining}
+ *   GET  ?lead_ids=a,b,c     → summary map per lead:
+ *                                { lead_id, held_by_caller, ms_remaining,
+ *                                  window_end, watchers_bucket }
+ *                              watchers_bucket is the coarse competitive
+ *                              intel from wedge contract #6: "1-2" /
+ *                              "3-5" / "5+" / "0", never a raw count.
  *   POST { lead_id, trade? } → acquire (idempotent)
  *   DELETE ?lead_id=&reason= → release
  *
  * Contractor-gated. Graceful-degrades when migration 00031 hasn't been
- * applied (table missing → empty summary; acquire returns `ok: false,
- * migrationPending: true`). Never hard-fails a lead-list render just
- * because locks aren't live yet.
+ * applied (table missing → watchers bucket "0" + held_by_caller false).
+ * Never hard-fails a lead-list render just because locks aren't live yet.
  */
 
 export async function GET(request: NextRequest) {
@@ -35,9 +40,27 @@ export async function GET(request: NextRequest) {
     const leadIds = raw.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 500);
     if (leadIds.length === 0) return NextResponse.json({ locks: {} });
 
-    const map = await summarizeLocksForContractor(supabase, user.id, leadIds);
+    // Run the two summarisers in parallel — they hit the same table but
+    // with different filters (caller-specific vs all-contractors). At
+    // 500 leads the round-trip dominates; parallelising saves ~40ms.
+    const [lockMap, watcherMap] = await Promise.all([
+      summarizeLocksForContractor(supabase, user.id, leadIds),
+      summarizeWatchersByLead(supabase, user.id, leadIds),
+    ]);
+
     const out: Record<string, unknown> = {};
-    for (const [lid, summary] of map) out[lid] = summary;
+    for (const lid of leadIds) {
+      const lock = lockMap.get(lid);
+      const watchers = watcherMap.get(lid);
+      out[lid] = {
+        lead_id: lid,
+        held_by_caller: lock?.held_by_caller ?? false,
+        ms_remaining: lock?.ms_remaining ?? 0,
+        window_end: lock?.window_end ?? null,
+        // Coarse bucket only — wedge contract #6 forbids raw counts.
+        watchers_bucket: watchers?.bucket ?? "0",
+      };
+    }
     return NextResponse.json({ locks: out });
   } catch (err) {
     logApiError("exclusivity.get", err);

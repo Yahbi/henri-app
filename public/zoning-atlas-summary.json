@@ -1,0 +1,74 @@
+{
+  "total_zones": 6264,
+  "states": {
+    "HI": {
+      "zone_count": 262,
+      "jurisdiction_count": 4,
+      "zoning_types": {
+        "Nonresidential": 89,
+        "Mixed with Residential": 87,
+        "null": 21,
+        "Primarily Residential": 65
+      },
+      "region": "Hawaii"
+    },
+    "MT": {
+      "zone_count": 535,
+      "jurisdiction_count": 62,
+      "zoning_types": {
+        "Mixed with Residential": 170,
+        "Nonresidential": 139,
+        "null": 5,
+        "Primarily Residential": 221
+      },
+      "region": "Montana"
+    },
+    "NH": {
+      "zone_count": 1723,
+      "jurisdiction_count": 1,
+      "zoning_types": {
+        "": 1723
+      },
+      "region": "New Hampshire"
+    },
+    "TN": {
+      "zone_count": 627,
+      "jurisdiction_count": 32,
+      "zoning_types": {
+        "Primarily Residential": 214,
+        "Mixed with Residential": 224,
+        "Nonresidential": 152,
+        "null": 37
+      },
+      "region": "Middle Tennessee"
+    },
+    "VA": {
+      "zone_count": 992,
+      "jurisdiction_count": 23,
+      "zoning_types": {
+        "": 471,
+        "Overlay": 62,
+        "Primarily Residential": 189,
+        "Nonresidential": 106,
+        "Mixed with Residential": 164
+      },
+      "region": "Hampton Roads"
+    },
+    "CO": {
+      "zone_count": 334,
+      "jurisdiction_count": 1,
+      "zoning_types": {
+        "": 334
+      },
+      "region": "Denver Metro"
+    },
+    "TX": {
+      "zone_count": 1791,
+      "jurisdiction_count": 1,
+      "zoning_types": {
+        "": 1791
+      },
+      "region": "DFW"
+    }
+  }
+}

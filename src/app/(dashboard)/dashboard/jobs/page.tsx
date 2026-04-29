@@ -5,6 +5,7 @@ import { useLeads, useUpdateLeadStatus } from "@/hooks/useLeads";
 import { formatCurrency } from "@/types/lead";
 import type { Lead, LeadStatus } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils/cn";
 import { Loader2, CalendarDays } from "lucide-react";
 
@@ -18,27 +19,33 @@ interface JobColumnDef {
   description: string;
 }
 
+/* Job-stage column dotColors — fed to inline `style={{ background:
+ * col.dotColor }}`. Migrated to `var()` references on 2026-04-25 per
+ * design-system audit priority action #4. The "Punch List" purple has
+ * no semantic token (no `--purple` in palette) so stays as a literal. */
 const JOB_COLUMNS: JobColumnDef[] = [
-  { id: "scheduled", label: "Scheduled", dotColor: "#D4886A", description: "Date set, work pending" },
-  { id: "in_progress", label: "In Progress", dotColor: "#D4A24A", description: "Crew on site" },
-  { id: "punch_list", label: "Punch List", dotColor: "#8B5CF6", description: "Final items outstanding" },
-  { id: "complete", label: "Complete", dotColor: "#3D9970", description: "Work finished" },
-  { id: "invoiced", label: "Invoiced", dotColor: "#4A7FC0", description: "Invoice sent / paid" },
+  { id: "scheduled",   label: "Scheduled",   dotColor: "var(--hot)",            description: "Date set, work pending" },
+  { id: "in_progress", label: "In Progress", dotColor: "var(--warm)",           description: "Crew on site" },
+  { id: "punch_list",  label: "Punch List",  dotColor: "#8B5CF6",               description: "Final items outstanding" },
+  { id: "complete",    label: "Complete",    dotColor: "hsl(var(--success))",   description: "Work finished" },
+  { id: "invoiced",    label: "Invoiced",    dotColor: "var(--cool)",           description: "Invoice sent / paid" },
 ];
 
+/* Trade pill colours — same pattern as KanbanBoard / LeadCard. Each
+ * Henri trade has matching `--trade-*-fg` + `--trade-*-tint` tokens. */
 const TRADE_COLORS: Record<string, { bg: string; text: string }> = {
-  roofing:          { bg: "bg-[rgba(212,136,106,0.15)]", text: "text-[#D4886A]" },
-  hvac:             { bg: "bg-[rgba(74,127,192,0.15)]",  text: "text-[#4A7FC0]" },
-  plumbing:         { bg: "bg-[rgba(61,153,112,0.15)]",  text: "text-[#3D9970]" },
-  electrical:       { bg: "bg-[rgba(212,162,74,0.15)]",  text: "text-[#D4A24A]" },
-  solar:            { bg: "bg-[rgba(245,166,35,0.15)]",  text: "text-[#F5A623]" },
-  adu:              { bg: "bg-[rgba(139,92,246,0.15)]",   text: "text-[#8B5CF6]" },
-  "general remodel":{ bg: "bg-[rgba(107,114,128,0.15)]", text: "text-[#6B7280]" },
+  roofing:           { bg: "bg-trade-roofing-tint",    text: "text-trade-roofing" },
+  hvac:              { bg: "bg-trade-hvac-tint",       text: "text-trade-hvac" },
+  plumbing:          { bg: "bg-trade-plumbing-tint",   text: "text-trade-plumbing" },
+  electrical:        { bg: "bg-trade-electrical-tint", text: "text-trade-electrical" },
+  solar:             { bg: "bg-trade-solar-tint",      text: "text-trade-solar" },
+  adu:               { bg: "bg-trade-adu-tint",        text: "text-trade-adu" },
+  "general remodel": { bg: "bg-trade-general-tint",    text: "text-trade-general" },
 };
 
 function tradeBadgeColors(trade: string): { bg: string; text: string } {
   const key = trade.toLowerCase();
-  return TRADE_COLORS[key] ?? { bg: "bg-[rgba(107,114,128,0.12)]", text: "text-[#6B7280]" };
+  return TRADE_COLORS[key] ?? { bg: "bg-trade-general-tint", text: "text-trade-general" };
 }
 
 // Read job stage with a tiny migration path:
@@ -81,7 +88,7 @@ function JobCard({ lead, onMoveStage, isMoving }: {
   const cityState = [lead.city, lead.state].filter(Boolean).join(", ");
 
   return (
-    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+    <Card className="p-3 space-y-2">
       {/* Address */}
       <p className="text-sm font-semibold text-foreground line-clamp-1">{lead.address}</p>
 
@@ -139,7 +146,7 @@ function JobCard({ lead, onMoveStage, isMoving }: {
           Move to {JOB_COLUMNS.find((c) => c.id === nextStage)?.label}
         </button>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -152,12 +159,12 @@ function ColSkeleton() {
       </div>
       <div className="p-2 space-y-2">
         {[...Array(2)].map((_, i) => (
-          <div key={i} className="bg-card border border-border rounded-xl p-3 space-y-2">
+          <Card key={i} className="p-3 space-y-2">
             <Skeleton className="h-4 w-32" />
             <Skeleton className="h-3 w-20" />
             <Skeleton className="h-3 w-28" />
             <Skeleton className="h-3 w-16" />
-          </div>
+          </Card>
         ))}
       </div>
     </div>
@@ -168,10 +175,10 @@ function StatsSkeleton() {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 px-6 pt-4">
       {[...Array(4)].map((_, i) => (
-        <div key={i} className="rounded-lg border border-border bg-card p-4 space-y-2">
+        <Card key={i} className="p-4 space-y-2">
           <Skeleton className="h-4 w-24" />
           <Skeleton className="h-8 w-12" />
-        </div>
+        </Card>
       ))}
     </div>
   );
@@ -249,10 +256,10 @@ export default function JobsPage() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 px-6 pt-4">
           {stats.map((stat) => (
-            <div key={stat.label} className="rounded-lg border border-border bg-card p-4">
+            <Card key={stat.label} className="p-4">
               <p className="text-sm text-muted-foreground">{stat.label}</p>
               <p className="text-2xl font-heading font-normal text-foreground mt-1">{stat.value}</p>
-            </div>
+            </Card>
           ))}
         </div>
       )}

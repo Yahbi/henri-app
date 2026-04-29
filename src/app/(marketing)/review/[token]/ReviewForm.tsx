@@ -50,8 +50,8 @@ function StarRating({
             <svg
               className={`h-10 w-10 transition-colors ${
                 filled
-                  ? "text-[#D4886A]"
-                  : "text-border group-hover:text-[#D4886A]/30"
+                  ? "text-primary"
+                  : "text-border group-hover:text-primary/30"
               }`}
               viewBox="0 0 20 20"
               fill="currentColor"
@@ -150,9 +150,9 @@ export function ReviewForm({
   if (submitted) {
     return (
       <div className="w-full max-w-md text-center">
-        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-[#D4886A]/10">
+        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
           <svg
-            className="h-8 w-8 text-[#D4886A]"
+            className="h-8 w-8 text-primary"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -227,7 +227,7 @@ export function ReviewForm({
             disabled={submitting}
             placeholder="Summarize your experience"
             maxLength={120}
-            className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-[#D4886A] focus:outline-none focus:ring-2 focus:ring-[#D4886A]/20 disabled:opacity-50"
+            className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
           />
         </div>
 
@@ -253,7 +253,7 @@ export function ReviewForm({
             disabled={submitting}
             placeholder="Tell us about your experience..."
             rows={4}
-            className="w-full resize-none rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-[#D4886A] focus:outline-none focus:ring-2 focus:ring-[#D4886A]/20 disabled:opacity-50"
+            className="w-full resize-none rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
           />
           <p
             className={`mt-1 text-right text-xs ${
@@ -277,7 +277,7 @@ export function ReviewForm({
         <button
           type="submit"
           disabled={submitting || rating === 0}
-          className="w-full rounded-lg bg-[#D4886A] px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#C47A5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D4886A] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? "Submitting..." : "Submit Review"}
         </button>

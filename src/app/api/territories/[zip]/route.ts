@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getZipAvailability } from "@/lib/territory/ziplock";
 import { releaseTerritory } from "@/lib/territory/ziplock";
+import { logger } from "@/lib/logger";
 
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ zip: string }> }
 ) {
   try {
@@ -21,7 +22,7 @@ export async function GET(
 
     return NextResponse.json(availability);
   } catch (err) {
-    console.error("Error getting ZIP availability:", err);
+    logger.error("Error getting ZIP availability", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to get ZIP availability" },
       { status: 500 }
@@ -30,7 +31,7 @@ export async function GET(
 }
 
 export async function DELETE(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ zip: string }> }
 ) {
   try {
@@ -65,7 +66,7 @@ export async function DELETE(
 
     return NextResponse.json({ released: true });
   } catch (err) {
-    console.error("Error releasing territory:", err);
+    logger.error("Error releasing territory", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to release territory" },
       { status: 500 }

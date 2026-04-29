@@ -4,6 +4,7 @@
  * Supabase query details).
  *
  * Use this in catch blocks of API routes instead of `console.error("…:", err)`.
+ * Forwards through `@/lib/logger` so the error reaches the Sentry sink.
  *
  * Example:
  *   } catch (err) {
@@ -11,6 +12,8 @@
  *     return NextResponse.json({ error: "…" }, { status: 500 });
  *   }
  */
+import { logger } from "@/lib/logger";
+
 export function logApiError(
   operation: string,
   err: unknown,
@@ -21,7 +24,7 @@ export function logApiError(
     err && typeof err === "object" && "code" in err
       ? String((err as { code?: unknown }).code)
       : undefined;
-  console.error(`${operation} failed`, {
+  logger.error(`${operation} failed`, {
     message,
     ...(code ? { code } : {}),
     ...(extra ?? {}),

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
+import { isGodModeEmail } from "@/lib/auth/god-mode";
 import { fetchAllTerritoryZips } from "@/lib/territories/fetch-all";
+import { logger } from "@/lib/logger";
 
 export async function GET(request: NextRequest) {
   try {
@@ -29,9 +31,13 @@ export async function GET(request: NextRequest) {
 
     // Get user's territories to scope leads (paginated — PostgREST caps
     // unbounded selects at 1000 rows; founder has 5,601 claimed ZIPs).
-    const userZips = await fetchAllTerritoryZips(supabase, user.id);
+    // God-mode (founder/dev allowlist) skips the territory-zero short-
+    // circuit and the contractor_id filter below — they see EVERY lead
+    // in the account regardless of subscription tier.
+    const godMode = isGodModeEmail(user.email);
+    const userZips = godMode ? [] : await fetchAllTerritoryZips(supabase, user.id);
 
-    if (userZips.length === 0) {
+    if (!godMode && userZips.length === 0) {
       return NextResponse.json({ leads: [], total: 0 });
     }
 
@@ -71,9 +77,13 @@ export async function GET(request: NextRequest) {
         // close enough for pagination + the "X of Y" UI hint.
         { count: "estimated" }
       )
-      .eq("contractor_id", user.id)
       .order("score", { ascending: false })
       .range(offset, offset + limit - 1);
+
+    // Subscription tiers cap by contractor_id; god-mode sees everything.
+    if (!godMode) {
+      query = query.eq("contractor_id", user.id);
+    }
 
     // Apply filters
     if (urgency) {
@@ -117,7 +127,7 @@ export async function GET(request: NextRequest) {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error("leads.get failed", {
+    logger.error("leads.get failed", {
       message: err instanceof Error ? err.message : "unknown",
     });
     return NextResponse.json(

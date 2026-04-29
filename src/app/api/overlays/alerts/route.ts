@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 
 /**
  * GET /api/overlays/alerts
@@ -15,7 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
  * NWS's verbose property shape.
  */
 const NWS_API = "https://api.weather.gov/alerts/active";
-const USER_AGENT = "Henri App (contractor lead-gen platform, contact@henri.app)";
+const USER_AGENT = "Henri App (contractor lead-gen platform, contact@meethenri.com)";
 
 export async function GET(_request: NextRequest) {
   try {
@@ -71,7 +72,7 @@ export async function GET(_request: NextRequest) {
       { headers: { "Cache-Control": "public, max-age=60" } },
     );
   } catch (err) {
-    console.error("alerts overlay fetch failed:", err);
+    logger.error("alerts overlay fetch failed", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { type: "FeatureCollection", features: [] },
       { status: 200 },

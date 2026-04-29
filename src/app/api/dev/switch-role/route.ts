@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
 import { isGodModeEmail } from "@/lib/auth/god-mode";
+
+/* Zod schema — fail-loud on malformed body. Even dev-only routes benefit
+ * from explicit validation per the 2026-04-26 audit ([04 F3]). */
+const SwitchRoleBody = z.object({
+  role: z.enum(["contractor", "homeowner"]),
+});
 
 /**
  * DEV-ONLY: Flip the signed-in user's role between `contractor` and
@@ -33,8 +40,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { role } = (await request.json()) as { role?: string };
-    if (role !== "contractor" && role !== "homeowner") {
+    let role: "contractor" | "homeowner";
+    try {
+      const parsed = SwitchRoleBody.parse(await request.json());
+      role = parsed.role;
+    } catch {
       return NextResponse.json(
         { error: "role must be 'contractor' or 'homeowner'" },
         { status: 400 }

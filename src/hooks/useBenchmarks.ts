@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { logger } from "@/lib/logger";
 
 export interface Benchmark {
   id: string;
@@ -70,7 +71,7 @@ export function useBenchmarks(
         setZipPrefix(data.zip_prefix ?? searchZip.slice(0, 3));
       } catch (err) {
         if (currentId !== requestIdRef.current) return;
-        console.error("useBenchmarks error:", err);
+        logger.error("useBenchmarks error", { error: err instanceof Error ? err.message : String(err) });
         setError(err instanceof Error ? err.message : "Unknown error");
         setBenchmarks([]);
       } finally {

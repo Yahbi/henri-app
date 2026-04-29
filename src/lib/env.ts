@@ -38,11 +38,13 @@ interface EnvConfig {
 const isDev = process.env.NODE_ENV !== "production";
 const INSECURE_CRON_SECRETS = ["dev_cron_secret_change_in_production", "change_me", "secret", "test"];
 
+import { logger } from "@/lib/logger";
+
 function requireEnv(key: string, fallback = ""): string {
   const value = process.env[key];
   if (!value) {
     if (isDev) {
-      console.warn(`[Henri] Missing env var: ${key} — running in dev mode with fallback`);
+      logger.warn("Missing env var — running in dev mode with fallback", { key });
       return fallback;
     }
     throw new Error(`[Henri] Required environment variable missing: ${key}`);

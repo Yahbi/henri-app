@@ -42,14 +42,20 @@ export interface ProbeResult {
 const PERMIT_KEYWORDS = [
   "permit", "license", "licens",
   "build", "bldg", "construct",
-  "code_enf", "codeenforce", "code-enforce",
+  // Space-separated forms appear in catalog names ("Code Enforcement All Cases")
+  // — the underscore variants alone missed them.
+  "code_enf", "codeenforce", "code-enforce", "code enforce", "enforcement",
   "inspection", "violation",
-  "develop", "land_use", "landuse",
+  "develop", "land_use", "landuse", "land use",
   "zoning", "rezone",
   "demolition", "demo_", "teardown",
-  "dob", "dept_of_build", "dept-of-build",
-  "plan_review", "plancheck", "plan_check",
-  "application", "case_", "record",
+  "dob", "dept_of_build", "dept-of-build", "dept of build",
+  "plan_review", "plancheck", "plan_check", "plan review",
+  "application", "case_", "case management", "record",
+  // Trade-specific keywords that flag permit-adjacent datasets.
+  "roofing", "roof ",
+  "electrical permit", "plumbing permit", "mechanical permit",
+  "hvac permit",
 ];
 
 function looksLikePermitTopic(
@@ -135,8 +141,12 @@ function inferMapping(
     date_field: pick(idx, [
       "issue_date", "issued_date", "issuedate", "issue_dat", "permit_date",
       "applied_date", "application_date", "applied", "filing_date",
-      "open_date", "opened", "statusdate", "status_date", "created_dt",
-      "created_at", "created", "appld_date",
+      // "stat_date" / "statdate" shows up on NOLA's code-enforcement
+      // datasets; "opendate" / "date_opened" on KCMO demolition.
+      "open_date", "opened", "date_opened", "opendate",
+      "close_date", "closedate", "closed_date",
+      "statusdate", "status_date", "stat_date", "statdate",
+      "created_dt", "created_at", "created", "appld_date",
     ]),
     value_field: pick(idx, [
       "estimated_cost", "estimated_value", "job_value", "permit_value",
@@ -162,7 +172,48 @@ function inferMapping(
   return matched;
 }
 
+/**
+ * Detect an ArcGIS Hub / AGOL *landing* URL — these are HTML portal
+ * pages, not REST endpoints. Shape: `https://X.maps.arcgis.com` or
+ * `https://X.arcgis.com` with no `/rest/services/` path segment. The
+ * `?f=json` probe returns HTML against these, which manifested as a
+ * 99.7% failure rate during the first bulk-probe sweep (997 of 1000
+ * ArcGIS failures). Flag them permanently so the scanner moves on.
+ *
+ * A future enhancement could query the Hub search API to *discover*
+ * FeatureServers under each org, but that's a different ingester,
+ * not a probe. For now, fail loudly and skip.
+ */
+function isArcGISHubLanding(endpoint: string): boolean {
+  try {
+    const u = new URL(endpoint);
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname;
+    const looksLikeArcgisHost =
+      host.endsWith(".arcgis.com") ||
+      host.endsWith(".maps.arcgis.com") ||
+      host === "opendata.arcgis.com" ||
+      host === "hub.arcgis.com";
+    // A real FeatureServer/MapServer path always contains this segment.
+    const hasRestPath = /\/rest\/services\//i.test(path);
+    return looksLikeArcgisHost && !hasRestPath;
+  } catch {
+    return false;
+  }
+}
+
 async function probeArcGIS(endpoint: string): Promise<ProbeResult> {
+  // Short-circuit: landing URLs with no REST path can't be probed.
+  if (isArcGISHubLanding(endpoint)) {
+    return {
+      ok: false,
+      reachable: false,
+      row_count: null,
+      fields: {},
+      error: "platform-unprobeable: arcgis-hub-landing (not a FeatureServer)",
+    };
+  }
+
   // ArcGIS layer URL → schema via ?f=json, row count via /query?where=1=1&returnCountOnly=true
   const base = endpoint.replace(/\/query\/?$/, "");
   const ctrl = new AbortController();
@@ -175,6 +226,21 @@ async function probeArcGIS(endpoint: string): Promise<ProbeResult> {
     clearTimeout(timeout);
 
     if (!schemaRes.ok) return { ok: false, reachable: false, row_count: null, fields: {}, error: `schema ${schemaRes.status}` };
+
+    // Some hosts return 200 with an HTML error / landing page when the
+    // given URL isn't a valid service. Detect and mark unprobeable so
+    // it doesn't churn the retry budget.
+    const ctHeader = schemaRes.headers.get("content-type") ?? "";
+    if (ctHeader.includes("text/html")) {
+      return {
+        ok: false,
+        reachable: false,
+        row_count: null,
+        fields: {},
+        error: "platform-unprobeable: returned-html (not a JSON endpoint)",
+      };
+    }
+
     const schema = (await schemaRes.json()) as {
       fields?: Array<{ name: string; alias?: string }>;
       error?: unknown;
@@ -225,14 +291,53 @@ async function probeArcGIS(endpoint: string): Promise<ProbeResult> {
   }
 }
 
-async function probeSocrata(endpoint: string): Promise<ProbeResult> {
+/**
+ * Normalize Socrata endpoint variants to the canonical SODA resource
+ * shape. Catalogs ship URLs in several incompatible forms:
+ *
+ *   OK  {host}/resource/{id}.json
+ *   OK  {host}/resource/{id}.json?$limit=5
+ *   FIX {host}/api/views/{id}/rows.json?accessType=DOWNLOAD  (CSV export shape)
+ *   FIX {host}/api/views/{id}.json                          (metadata-only)
+ *   FIX {host}/d/{id}                                        (dataset landing page)
+ *
+ * Everything is rewritten to `{host}/resource/{id}.json` which is the
+ * SODA row-query endpoint SODA-compliant clients expect.
+ */
+function normalizeSocrataEndpoint(endpoint: string): string {
+  try {
+    const u = new URL(endpoint);
+    // Already canonical
+    if (/\/resource\/[a-z0-9-]+\.json$/i.test(u.pathname)) {
+      return `${u.origin}${u.pathname}`;
+    }
+    // /api/views/{id}/rows.json or /api/views/{id}.json
+    const viewsMatch = u.pathname.match(/\/api\/views\/([a-z0-9-]+)(?:\/|\.)/i);
+    if (viewsMatch) {
+      return `${u.origin}/resource/${viewsMatch[1]}.json`;
+    }
+    // /d/{id} dataset landing
+    const dMatch = u.pathname.match(/^\/d\/([a-z0-9-]+)/i);
+    if (dMatch) {
+      return `${u.origin}/resource/${dMatch[1]}.json`;
+    }
+    return endpoint;
+  } catch {
+    return endpoint;
+  }
+}
+
+async function probeSocrata(endpoint: string, datasetName?: string): Promise<ProbeResult> {
+  // Rewrite non-canonical Socrata URL variants first — see normalize doc.
+  const target = normalizeSocrataEndpoint(endpoint);
+
   // Socrata `.json` endpoint — sample first row to see fields
   const ctrl = new AbortController();
   const timeout = setTimeout(() => ctrl.abort(), 12_000);
   try {
-    const sampleUrl = endpoint.includes("?")
-      ? `${endpoint}&$limit=1`
-      : `${endpoint}?$limit=1`;
+    const sampleUrl = target.includes("?")
+      ? `${target}&$limit=1`
+      : `${target}?$limit=1`;
     const res = await fetch(sampleUrl, { signal: ctrl.signal, headers: { Accept: "application/json" } });
     clearTimeout(timeout);
     if (!res.ok) return { ok: false, reachable: false, row_count: null, fields: {}, error: `socrata ${res.status}` };
@@ -248,7 +353,12 @@ async function probeSocrata(endpoint: string): Promise<ProbeResult> {
       mapping.id_field &&
       (mapping.type_field || mapping.status_field || mapping.desc_field)
     );
-    const topical = looksLikePermitTopic(endpoint, names);
+    // Pass the dataset name through the topical gate — catalog entries
+    // often say "Code Enforcement All Cases" or "$10M Demolition List"
+    // but the endpoint URL itself is a cryptic `resource/abc-xyz.json`
+    // with no hint of topic. Without this, 35% of reachable-no-mapping
+    // Socrata rows were permit-related but being rejected.
+    const topical = looksLikePermitTopic(endpoint, names, datasetName);
     return {
       ok: (hasSpatialOrTemporal || hasIdAndPermitShape) && topical,
       reachable: true,
@@ -299,13 +409,32 @@ async function probeCKAN(endpoint: string): Promise<ProbeResult> {
     if (!j.success || !j.result?.resources?.length) {
       return { ok: false, reachable: true, row_count: null, fields: {}, error: "CKAN dataset has no resources" };
     }
-    // Prefer datastore-active CSV; fall back to first resource.
+    // Resource picker, tightened after Phase 1 landing-page audit caught
+    // three CKAN rows passing the probe by falling through to
+    // `resources[0]` — a PDF readme, a shape-file, and a GeoJSON boundary
+    // with no permit columns. Priority now requires an actual probeable
+    // data resource:
+    //   1. datastore_active=true AND CSV format — canonical CKAN data API
+    //   2. URL pointing to a .csv / .json / .geojson file we can parse
+    // If neither matches, mark reachable-but-unprobeable so the scanner
+    // skips it cleanly rather than inventing a mapping from a PDF header.
+    const isDataResource = (r: { url?: string; format?: string; datastore_active?: boolean }): boolean => {
+      if (!r.url) return false;
+      const fmt = (r.format ?? "").toLowerCase();
+      const url = r.url.toLowerCase();
+      return /csv|json|geojson/.test(fmt) || /\.(csv|json|geojson)(\?|$)/.test(url);
+    };
     const pick =
       j.result.resources.find((r) => r.datastore_active && /csv/i.test(r.format ?? "")) ??
-      j.result.resources.find((r) => /csv|json/i.test(r.format ?? "")) ??
-      j.result.resources[0];
+      j.result.resources.find(isDataResource);
     if (!pick?.url) {
-      return { ok: false, reachable: true, row_count: null, fields: {}, error: "no resource URL in CKAN package" };
+      return {
+        ok: false,
+        reachable: true,
+        row_count: null,
+        fields: {},
+        error: "CKAN package has no datastore_active or probeable CSV/JSON resource",
+      };
     }
     return probeCSV(pick.url);
   } catch (e) {
@@ -361,14 +490,21 @@ async function probeCSV(endpoint: string): Promise<ProbeResult> {
 /**
  * Probe an endpoint based on source_type. Returns a uniform result shape
  * so the admin API can update the row consistently.
+ *
+ * `datasetName` is the `permit_sources.name` column — optional, but when
+ * present it's routed into the topical-keyword gate. Catalogs frequently
+ * encode the topic in the name ("Code Enforcement All Cases") rather
+ * than in the endpoint URL, so this keeps field-shape-plus-topic gating
+ * honest for platforms where the URL alone is a cryptic id.
  */
 export async function probeSource(
   sourceType: string,
   endpoint: string,
+  datasetName?: string,
 ): Promise<ProbeResult> {
   const t = sourceType.toLowerCase();
   if (t === "arcgis") return probeArcGIS(endpoint);
-  if (t === "socrata") return probeSocrata(endpoint);
+  if (t === "socrata") return probeSocrata(endpoint, datasetName);
   if (t === "ckan") return probeCKAN(endpoint);
   if (t === "csv") return probeCSV(endpoint);
   // Accela / eTrakit / Tyler / custom — HTML-scrape portals that can't

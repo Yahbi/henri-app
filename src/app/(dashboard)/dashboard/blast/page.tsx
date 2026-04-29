@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Send, CheckCircle } from "lucide-react";
 import { useLeads } from "@/hooks/useLeads";
 import { useUser } from "@/hooks/useUser";
 import { createClient } from "@/lib/supabase/client";
 import type { Lead } from "@/types/lead";
 import { ComingSoon, STUBS_ENABLED } from "@/components/ComingSoon";
+import { Card } from "@/components/ui/card";
 
 interface BlastRecord {
   id: string;
@@ -49,16 +50,20 @@ function BlastPageInner() {
   const [estimateSource, setEstimateSource] = useState<"data" | "density">("density");
   const [estimateLoading, setEstimateLoading] = useState(false);
 
-  const won: Lead[] = wonLeads ?? [];
+  const won: Lead[] = useMemo(() => wonLeads ?? [], [wonLeads]);
   const selectedLead = won.find((l) => l.id === selectedLeadId) ?? won[0];
 
   // Initialize selection
   useEffect(() => {
+    // Initial lead selection after fetch settles; needs effect because won arrives async
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (won.length > 0 && !selectedLeadId) setSelectedLeadId(won[0].id);
   }, [won, selectedLeadId]);
 
   // Fetch dynamic home count estimate when lead or radius changes
   useEffect(() => {
+    // Reset-on-dep-change plus async fetch; state drives loading / estimate UI
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (!selectedLead) { setHomeCount(0); return; }
     const lat = (selectedLead as Lead & { latitude?: number }).latitude;
     const lng = (selectedLead as Lead & { longitude?: number }).longitude;
@@ -73,6 +78,7 @@ function BlastPageInner() {
       })
       .catch(() => setHomeCount(0))
       .finally(() => setEstimateLoading(false));
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedLead, radius]);
 
   const loadBlasts = useCallback(async () => {
@@ -87,6 +93,8 @@ function BlastPageInner() {
     setPastBlasts((data ?? []) as BlastRecord[]);
   }, [user]);
 
+  // Load past blasts on mount + when user changes (data fetch, not derived state)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadBlasts(); }, [loadBlasts]);
 
   async function handleSend() {
@@ -118,7 +126,7 @@ function BlastPageInner() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Setup */}
-        <div className="rounded-lg border border-border bg-card p-6 space-y-5">
+        <Card className="p-6 space-y-5">
           <h2 className="text-lg font-heading font-normal text-foreground">Blast Setup</h2>
 
           {/* Job selector */}
@@ -174,11 +182,11 @@ function BlastPageInner() {
               ))}
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* Preview */}
         <div className="space-y-4">
-          <div className="rounded-lg border border-border bg-card p-5 text-center space-y-1">
+          <Card className="p-5 text-center space-y-1">
             {estimateLoading ? (
               <div className="h-9 w-20 mx-auto rounded bg-bg-subtle animate-pulse" />
             ) : (
@@ -189,9 +197,9 @@ function BlastPageInner() {
             <p className="text-sm text-muted-foreground">
               homes in blast radius{estimateSource === "density" ? " (est.)" : ""}
             </p>
-          </div>
+          </Card>
 
-          <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+          <Card className="p-5 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Message Preview</h3>
             <div className="rounded-md bg-bg-subtle p-4 text-sm text-foreground leading-relaxed">
               <p>Hi neighbor!</p>
@@ -203,7 +211,7 @@ function BlastPageInner() {
               </p>
               <p className="mt-2">Reply YES for a free estimate.</p>
             </div>
-          </div>
+          </Card>
 
           {sent ? (
             <div className="w-full flex items-center justify-center gap-2 rounded-md bg-green-600 px-5 py-2.5 text-sm font-medium text-white">
@@ -227,7 +235,7 @@ function BlastPageInner() {
       {pastBlasts.length > 0 && (
         <div>
           <h2 className="text-lg font-heading font-normal text-foreground mb-3">Past Campaigns</h2>
-          <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <Card className="overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-bg-subtle">
@@ -256,7 +264,7 @@ function BlastPageInner() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
         </div>
       )}
     </div>

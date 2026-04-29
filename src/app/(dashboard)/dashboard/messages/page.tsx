@@ -52,7 +52,9 @@ export default function MessagesPage() {
   const messages = useMemo(() => parseNotes(selected?.notes), [selected]);
 
   useEffect(() => {
+    // Init selection once leads fetch settles; derived state depends on async data
     if (contactedLeads.length > 0 && !selectedId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedId(contactedLeads[0].id);
     }
   }, [contactedLeads, selectedId]);

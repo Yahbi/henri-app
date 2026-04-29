@@ -282,15 +282,15 @@ export default function HomeownerIntakePage() {
             </div>
           </div>
           <p className="mt-4 rounded-md bg-bg-subtle p-3 text-xs text-muted-foreground">
-            Expected contact by <strong>{expectedLabel}</strong>. You'll get an
+            Expected contact by <strong>{expectedLabel}</strong>. You&apos;ll get an
             email and SMS when they reach out.
           </p>
         </section>
       ) : (
         <section className="mt-8 rounded-xl border border-dashed border-border bg-card p-6 text-center">
           <p className="text-sm text-muted-foreground">
-            We're still matching your project with a local contractor.
-            You'll get an email within 24 hours.
+            We&apos;re still matching your project with a local contractor.
+            You&apos;ll get an email within 24 hours.
           </p>
         </section>
       )}

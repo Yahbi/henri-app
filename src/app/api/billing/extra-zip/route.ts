@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe/client";
 import { logApiError } from "@/lib/log";
+import { ExtraZipBodySchema, parseBody } from "@/lib/schemas/api";
 
 /**
  * POST /api/billing/extra-zip
@@ -17,8 +18,11 @@ import { logApiError } from "@/lib/log";
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json().catch(() => ({}))) as { quantity?: number };
-    const quantity = Math.max(1, Math.min(100, Number(body.quantity) || 1));
+    const raw = await req.json().catch(() => ({}));
+    const parsed = parseBody(ExtraZipBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    /* Schema clamps to 1..100; default to 1 when omitted. */
+    const quantity = parsed.data.quantity ?? 1;
 
     const priceId = process.env.STRIPE_EXTRA_ZIP_PRICE_ID;
     if (!priceId) {

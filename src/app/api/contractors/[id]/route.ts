@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/contractors/[id] — single contractor public profile ─── */
 export async function GET(
@@ -104,7 +105,7 @@ export async function GET(
       },
     });
   } catch (err) {
-    console.error("Contractor profile error:", err);
+    logger.error("Contractor profile error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

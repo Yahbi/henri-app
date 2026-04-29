@@ -6,23 +6,26 @@ import { useLeads } from "@/hooks/useLeads";
 import { formatCurrency } from "@/types/lead";
 import type { Lead } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils/cn";
 import { ComingSoon, STUBS_ENABLED } from "@/components/ComingSoon";
 
+/* Trade pill colours — same `--trade-*-fg` / `--trade-*-tint` token set
+ * as KanbanBoard / LeadCard / jobs. Migrated from raw hex 2026-04-25. */
 const TRADE_COLORS: Record<string, { bg: string; text: string }> = {
-  roofing:          { bg: "bg-[rgba(212,136,106,0.15)]", text: "text-[#D4886A]" },
-  hvac:             { bg: "bg-[rgba(74,127,192,0.15)]",  text: "text-[#4A7FC0]" },
-  plumbing:         { bg: "bg-[rgba(61,153,112,0.15)]",  text: "text-[#3D9970]" },
-  electrical:       { bg: "bg-[rgba(212,162,74,0.15)]",  text: "text-[#D4A24A]" },
-  solar:            { bg: "bg-[rgba(245,166,35,0.15)]",  text: "text-[#F5A623]" },
-  adu:              { bg: "bg-[rgba(139,92,246,0.15)]",   text: "text-[#8B5CF6]" },
-  "general remodel":{ bg: "bg-[rgba(107,114,128,0.15)]", text: "text-[#6B7280]" },
+  roofing:           { bg: "bg-trade-roofing-tint",    text: "text-trade-roofing" },
+  hvac:              { bg: "bg-trade-hvac-tint",       text: "text-trade-hvac" },
+  plumbing:          { bg: "bg-trade-plumbing-tint",   text: "text-trade-plumbing" },
+  electrical:        { bg: "bg-trade-electrical-tint", text: "text-trade-electrical" },
+  solar:             { bg: "bg-trade-solar-tint",      text: "text-trade-solar" },
+  adu:               { bg: "bg-trade-adu-tint",        text: "text-trade-adu" },
+  "general remodel": { bg: "bg-trade-general-tint",    text: "text-trade-general" },
 };
 
 function tradeBadge(trade: string | null | undefined) {
   if (!trade) return null;
   const key = trade.toLowerCase();
-  const colors = TRADE_COLORS[key] ?? { bg: "bg-[rgba(107,114,128,0.12)]", text: "text-[#6B7280]" };
+  const colors = TRADE_COLORS[key] ?? { bg: "bg-trade-general-tint", text: "text-trade-general" };
   return (
     <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium capitalize", colors.bg, colors.text)}>
       {trade}
@@ -38,12 +41,14 @@ function priorityBadge(score: number) {
   return <span className="inline-flex items-center rounded-full bg-zinc-500/10 px-2 py-0.5 text-xs font-medium text-muted-foreground">Low</span>;
 }
 
+/* Score-tier pill — uses the canonical `--hot`/`--warm`/`--cool` tokens
+ * via the `color-mix` pattern. Same as KanbanBoard.scoreColor. */
 function scoreBadge(score: number) {
   const color = score >= 75
-    ? "text-[#D4886A] bg-[rgba(212,136,106,0.12)]"
+    ? "text-hot  bg-[color-mix(in_srgb,var(--hot)_12%,transparent)]"
     : score >= 50
-    ? "text-[#D4A24A] bg-[rgba(212,162,74,0.12)]"
-    : "text-[#4A7FC0] bg-[rgba(74,127,192,0.12)]";
+    ? "text-warm bg-[color-mix(in_srgb,var(--warm)_12%,transparent)]"
+    : "text-cool bg-[color-mix(in_srgb,var(--cool)_12%,transparent)]";
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
       {score}
@@ -154,19 +159,19 @@ function CanvassPageInner() {
       {isLoading ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="rounded-lg border border-border bg-card p-4 space-y-2">
+            <Card key={i} className="p-4 space-y-2">
               <Skeleton className="h-4 w-24" />
               <Skeleton className="h-8 w-12" />
-            </div>
+            </Card>
           ))}
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {stats.map((stat) => (
-            <div key={stat.label} className="rounded-lg border border-border bg-card p-4">
+            <Card key={stat.label} className="p-4">
               <p className="text-sm text-muted-foreground">{stat.label}</p>
               <p className="text-2xl font-heading font-normal text-foreground mt-1">{stat.value}</p>
-            </div>
+            </Card>
           ))}
         </div>
       )}
@@ -186,7 +191,7 @@ function CanvassPageInner() {
         </div>
 
         {isLoading ? (
-          <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <Card className="overflow-hidden">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="px-4 py-3 border-b border-border flex gap-4">
                 <Skeleton className="h-4 flex-1" />
@@ -197,14 +202,14 @@ function CanvassPageInner() {
                 <Skeleton className="h-4 w-24" />
               </div>
             ))}
-          </div>
+          </Card>
         ) : targets.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 border border-dashed border-border rounded-xl text-center">
             <p className="text-sm font-semibold text-foreground">No canvass targets yet</p>
             <p className="text-xs text-muted-foreground mt-1">Leads in your territory will appear here.</p>
           </div>
         ) : (
-          <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <Card className="overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-bg-subtle">
@@ -243,7 +248,7 @@ function CanvassPageInner() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
         )}
       </div>
     </div>

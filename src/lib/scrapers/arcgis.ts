@@ -11,6 +11,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 import {
   classifyPermitType,
   normalizeStatus,
@@ -96,13 +97,20 @@ export async function scrapeArcGISSource(
     try {
       data = await fetchArcGISPage(source.endpoint, offset);
     } catch (err) {
-      console.error(`ArcGIS fetch error [${source.source_key}] page ${page}:`, err);
+      logger.error("ArcGIS fetch error", {
+        source_key: source.source_key,
+        page,
+        error: err instanceof Error ? err.message : String(err),
+      });
       result.errors++;
       break;
     }
 
     if (data.error) {
-      console.error(`ArcGIS API error [${source.source_key}]:`, data.error.message);
+      logger.error("ArcGIS API error", {
+        source_key: source.source_key,
+        error: data.error.message,
+      });
       break;
     }
 
@@ -191,7 +199,10 @@ export async function scrapeArcGISSource(
 
       if (error) {
         result.errors += batch.length;
-        console.error(`ArcGIS upsert error [${source.source_key}]:`, error.message);
+        logger.error("ArcGIS upsert error", {
+          source_key: source.source_key,
+          error: error.message,
+        });
       } else {
         result.updated += upserted?.length ?? 0;
       }

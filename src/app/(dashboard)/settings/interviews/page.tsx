@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Plus, Trash2, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { Card } from "@/components/ui/card";
 
 /**
  * Phase 0a validation-interview mini-CRM.
@@ -212,7 +213,7 @@ function InterviewRow({
   const topComplaint = (interview.ranked_complaints ?? []).find((c) => c.rank === 1);
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <Card className="overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -307,7 +308,7 @@ function InterviewRow({
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 

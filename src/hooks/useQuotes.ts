@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { logger } from "@/lib/logger";
 
 export interface Quote {
   id: string;
@@ -70,7 +71,7 @@ export function useQuotes(): UseQuotesReturn {
       const data = await res.json();
       setQuotes(data.quotes ?? []);
     } catch (err) {
-      console.error("useQuotes fetch error:", err);
+      logger.error("useQuotes fetch error", { error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setIsLoading(false);

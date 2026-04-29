@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PERMIT_SOURCES } from "@/lib/permits/sources";
 import { fetchPermits, type NormalizedPermit } from "@/lib/permits/fetcher";
+import { PermitScraperBodySchema, parseBody } from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /**
  * Permit Scraper Agent
@@ -18,10 +20,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json().catch(() => ({}));
-    const sourceIds: string[] | undefined = body.source_ids;
-    const daysBack: number = body.days_back ?? 30;
-    const limit: number = body.limit ?? 100;
+    const raw = await request.json().catch(() => ({}));
+    const parsed = parseBody(PermitScraperBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const sourceIds = parsed.data.source_ids;
+    const daysBack: number = parsed.data.days_back ?? 30;
+    const limit: number = parsed.data.limit ?? 100;
 
     // Select sources
     let sources = PERMIT_SOURCES;
@@ -90,7 +94,7 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    console.error("[permit-scraper] Error:", err);
+    logger.error("[permit-scraper] Error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { status: "error", message: "Scraping failed" },
       { status: 500 },

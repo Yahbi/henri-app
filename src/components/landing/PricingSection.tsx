@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Check } from "lucide-react";
+import { Check, Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -25,6 +25,10 @@ interface Plan {
   popular?: boolean;
   badge?: string;
   ctaVariant?: "primary" | "glow" | "outline";
+  /** Scarcity banner — when present, renders as a warm-gold stripe
+   *  across the top of the card. Reserved for the Founder plan where
+   *  the 100-slot cap is a load-bearing part of the offer. */
+  scarcity?: { remaining: number; total: number };
 }
 
 const plans: Plan[] = [
@@ -33,7 +37,11 @@ const plans: Plan[] = [
     price: "$149",
     period: "/mo",
     description: "Beta pricing. Locked forever for early supporters.",
-    badge: "Beta \u00b7 87 of 100 left",
+    /* `badge` retained as a fallback for scan-readers + the scarcity
+     * banner below it; primary emphasis is the banner. Keep the copy
+     * in sync if the count updates. */
+    badge: "Beta",
+    scarcity: { remaining: 87, total: 100 },
     features: [
       "3 ZIP territories",
       "AI-scored permit leads",
@@ -121,11 +129,33 @@ export function PricingSection() {
               key={plan.name}
               variant="default"
               className={cn(
-                "flex flex-col",
-                plan.popular &&
-                  "ring-2 ring-primary shadow-[0_0_30px_hsl(var(--primary)/0.15)]"
+                "flex flex-col overflow-hidden",
+                // Named shadow-glow-primary token replaces the inline
+                // arbitrary-value form to dodge a Tailwind v4 + Turbopack
+                // 16.2.3 parser bug. Same pixel output (the token is
+                // defined as `0 0 30px hsl(var(--primary) / 0.15)`).
+                plan.popular && "ring-2 ring-primary shadow-glow-primary",
+                plan.scarcity &&
+                  "ring-1 ring-[rgba(212,162,74,0.4)]"
               )}
             >
+              {/* Scarcity banner — warm-gold stripe with live-style count.
+               * Replaces the old subtle Badge that rendered the same info
+               * at the same weight as "24-hour free trial". Gives Founder
+               * urgency its own visual lane without drowning out "Most
+               * Popular" on Pro. Only renders for plans that actually
+               * have a slot cap (Founder today). */}
+              {plan.scarcity && (
+                <div className="flex items-center justify-between gap-2 bg-[rgba(212,162,74,0.12)] border-b border-[rgba(212,162,74,0.35)] px-4 py-2 text-[11px] font-semibold text-warm">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Flame className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    Only {plan.scarcity.remaining} of {plan.scarcity.total} spots left
+                  </span>
+                  <span className="text-[10px] font-normal text-warm/80 tracking-wide uppercase">
+                    Price locked forever
+                  </span>
+                </div>
+              )}
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-xl">{plan.name}</CardTitle>
@@ -133,6 +163,10 @@ export function PricingSection() {
                     <Badge variant="default">Most Popular</Badge>
                   )}
                 </div>
+                {/* Secondary badge — retained for the "Beta" tag on
+                 * Founder (without the count, which now lives in the
+                 * banner above). Keeps the badge slot available for
+                 * other plans in the future (e.g. "Reservation only"). */}
                 {plan.badge && (
                   <Badge variant="warning" className="w-fit text-xs">
                     {plan.badge}

@@ -105,6 +105,13 @@ export interface LeadQueryParams {
    * with `filters.geocoded_only` so the planner can use the latitude index
    * without being forced into a score-sort scan (23× speedup on 100k+ leads). */
   skip_sort?: boolean;
+  /** When true, omit the heavy `permits(...)` embed from the SELECT and
+   * read the denormalized permit fields off `leads` instead (migration
+   * 00019: address, city, state, zip, permit_type, permit_value). Enables
+   * god-mode pulls past the 3,000-row Supabase statement-timeout ceiling.
+   * Heavier permit fields (description, applicant_name, dates) load on
+   * demand via `usePermitDetail` when the drawer opens. */
+  skip_permits_join?: boolean;
 }
 
 /* ── Mutation payloads ── */

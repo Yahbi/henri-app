@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/utils/rate-limit";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/contractors/search — public contractor search for homeowners ─── */
 export async function GET(request: NextRequest) {
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
       .eq("status", "active");
 
     if (tErr) {
-      console.error("Territory lookup error:", tErr);
+      logger.error("Territory lookup error", { error: tErr instanceof Error ? tErr.message : String(tErr) });
       return NextResponse.json(
         { error: "Failed to search contractors" },
         { status: 500 }
@@ -95,7 +96,7 @@ export async function GET(request: NextRequest) {
     const { data: contractors, error, count } = await query;
 
     if (error) {
-      console.error("Contractor search error:", error);
+      logger.error("Contractor search error", { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
         { error: "Failed to search contractors" },
         { status: 500 }
@@ -107,7 +108,7 @@ export async function GET(request: NextRequest) {
       total: count ?? 0,
     });
   } catch (err) {
-    console.error("Contractor search error:", err);
+    logger.error("Contractor search error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

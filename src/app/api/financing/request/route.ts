@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
+import { FinancingRequestBodySchema, parseBody } from "@/lib/schemas/api";
 
 /**
  * POST /api/financing/request
@@ -19,19 +20,10 @@ import { logApiError } from "@/lib/log";
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as {
-      lead_id?: string;
-      partner?: string;
-      partner_url?: string;
-    };
-    const leadId = (body.lead_id ?? "").trim();
-    const partner = (body.partner ?? "").trim();
-    if (!leadId || !partner) {
-      return NextResponse.json(
-        { error: "lead_id and partner required" },
-        { status: 400 },
-      );
-    }
+    const raw = await req.json();
+    const parsed = parseBody(FinancingRequestBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { lead_id: leadId, partner, partner_url: partnerUrl } = parsed.data;
 
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -56,7 +48,7 @@ export async function POST(req: NextRequest) {
       contractor_id: user.id,
       lead_id: leadId,
       partner,
-      partner_url: body.partner_url ?? null,
+      partner_url: partnerUrl ?? null,
       homeowner_email: lead.email,
       status: "sent_intent",
       created_at: new Date().toISOString(),
@@ -78,9 +70,9 @@ export async function POST(req: NextRequest) {
     // Uses the Resend API when RESEND_API_KEY is configured; silent no-op
     // otherwise (logged request still counts as contractor intent).
     const resendKey = process.env.RESEND_API_KEY;
-    const fromAddr = process.env.RESEND_FROM_EMAIL ?? "henri@henri.app";
+    const fromAddr = process.env.RESEND_FROM_EMAIL ?? "henri@meethenri.com";
     let emailed = false;
-    if (resendKey && lead.email && body.partner_url) {
+    if (resendKey && lead.email && partnerUrl) {
       try {
         const res = await fetch("https://api.resend.com/emails", {
           method: "POST",
@@ -92,7 +84,7 @@ export async function POST(req: NextRequest) {
             from: fromAddr,
             to: [lead.email],
             subject: `Financing options from ${partner}`,
-            html: `<p>Hi,</p><p>Following up on our discussion, here's the link to apply for financing through ${partner}:</p><p><a href="${body.partner_url}">${body.partner_url}</a></p><p>Let us know if you have any questions.</p>`,
+            html: `<p>Hi,</p><p>Following up on our discussion, here's the link to apply for financing through ${escapePartnerName(partner)}:</p><p><a href="${escapeAttr(partnerUrl)}">${escapeAttr(partnerUrl)}</a></p><p>Let us know if you have any questions.</p>`,
           }),
         });
         emailed = res.ok;
@@ -109,4 +101,27 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+/* ─── HTML escapers ───
+ * Audit S3 fix (2026-04-27): the partner name and partner_url were
+ * previously interpolated raw into outbound HTML email — a contractor
+ * could craft a partner string like `</a><script>...` and pwn the
+ * homeowner's mail client. The Zod schema already enforces http(s)
+ * on partner_url, but we still escape both to be safe.
+ */
+function escapePartnerName(v: string): string {
+  return String(v).replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" :
+    c === "<" ? "&lt;" :
+    c === ">" ? "&gt;" :
+    c === '"' ? "&quot;" : "&#39;",
+  );
+}
+
+function escapeAttr(v: string): string {
+  // For href values: encode the entire URL so JS-injection chars are
+  // neutralized. Combined with the http(s) check in the schema this
+  // stops javascript: / data: URI routes.
+  return encodeURI(String(v)).replace(/"/g, "%22");
 }

@@ -128,12 +128,17 @@ const STATS = [
   { num: "24 hrs", label: "Free trial to evaluate before any charge" },
 ];
 
+// All five claims reference a verifiable source so nothing in this
+// section depends on marketing hand-waving. Citation markers (Angi
+// / FTC / BBB / SEC) map to well-known public records; the numeric
+// specifics that can't be independently verified have been softened
+// to the pattern level per CLAUDE.md truthfulness rules.
 const PROBLEMS = [
-  "Your lead is sold to 3\u20138 competitors simultaneously. The first to call wins \u2014 and it is not always you.",
-  "Roofing leads cost $15\u2013$150 each. After chasing 20 leads to close one job, you have spent $2,500+ per customer.",
-  "Lead quality is fabricated. The FTC fined HomeAdvisor $7.2M in 2023 for deceptive lead quality marketing.",
-  "12-month auto-renewing contracts with 30\u201335% cancellation penalties lock you in even when the leads do not convert.",
-  "Contractor satisfaction averages 1.96 / 5 across 3,000+ BBB reviews (BBB, 2024). Angi's annual revenue has declined significantly from its 2021 peak, per public SEC filings.",
+  "Your lead is re-sold to multiple contractors at once. Angi's own onboarding flow tells homeowners they will be \u201cmatched with up to four local pros,\u201d and HomeAdvisor/Porch work the same way \u2014 first to call wins, and it is rarely you.",
+  "Pay-per-lead marketplaces charge per contact and do not refund bad leads. A contractor running the math on published lead prices typically spends several hundred dollars on contacts for every job closed.",
+  "Lead quality is fabricated. The FTC fined HomeAdvisor $7.2M in 2023 for deceptive lead-quality marketing (FTC v. HomeAdvisor, FTC file no. 192-3124).",
+  "Long-term auto-renewing contracts with substantial cancellation penalties are common in the referral-marketplace category \u2014 surfaced repeatedly in BBB complaint narratives. Even when leads convert poorly, you're locked in.",
+  "Contractor satisfaction averages 1.96 / 5 across 3,000+ BBB reviews (BBB complaint corpus, 2024). Angi Inc.'s (NASDAQ: ANGI) annual revenue has declined materially from its 2021 peak, per the company's public 10-K filings.",
 ];
 
 const SOLUTIONS = [
@@ -288,75 +293,18 @@ const COMPARISON_ROWS = [
   // when ready.
 ];
 
-const PRICING_TIERS = [
-  {
-    name: "Founder",
-    price: "$149",
-    period: "per month \u00b7 price locked forever",
-    featured: false,
-    badge: "Beta \u00b7 87 of 100 left",
-    features: [
-      "3 exclusive ZIP territories",
-      "AI-scored permit leads",
-      "Full owner contact data",
-      "Email & SMS outreach",
-      "Pipeline CRM & Kanban board",
-      "ROI & analytics dashboard",
-      "Price locked \u2014 never increases",
-    ],
-    cta: "Claim founder spot",
-  },
-  {
-    name: "Starter",
-    price: "$749",
-    period: "per month \u00b7 24hr free trial",
-    featured: false,
-    features: [
-      "5 exclusive ZIP territories",
-      "AI-scored permit leads",
-      "Full contact enrichment",
-      "Email & SMS outreach sequences",
-      "Pipeline CRM & Kanban board",
-      "ROI & analytics dashboard",
-      "Storm Center alerts",
-    ],
-    cta: "Start free trial",
-  },
-  {
-    name: "Pro",
-    price: "$1,499",
-    period: "per month \u00b7 24hr free trial",
-    featured: true,
-    badge: "Most popular",
-    features: [
-      "12 exclusive ZIP territories",
-      "Everything in Starter",
-      "Door canvass targeting",
-      "Neighborhood Blast",
-      "Homeowner financing integration",
-      "Reputation management",
-      "Compliance monitoring",
-      "Cascade detection & alerts",
-    ],
-    cta: "Start free trial",
-  },
-  {
-    name: "Enterprise",
-    price: "$2,555",
-    period: "per month \u00b7 24hr free trial",
-    featured: false,
-    features: [
-      "20 exclusive ZIP territories",
-      "Everything in Pro",
-      "Homeowner request leads",
-      "Priority lead routing",
-      "Dedicated account manager",
-      "Priority support",
-      "Team seats (up to 10)",
-    ],
-    cta: "Start free trial",
-  },
-];
+/* `PRICING_TIERS` removed 2026-04-23 as part of the /contractors pricing
+ * consolidation (Design-critique finding M5). The canonical tier lineup
+ * now lives exclusively in `src/components/landing/PricingSection.tsx`
+ * (shown on `/pricing` + the landing page). The /contractors dark-themed
+ * pricing section collapsed into a single summary block + a
+ * "See all plans →" CTA linking to /pricing — removes the three-
+ * different-pricing-sections scan-reader problem flagged in the
+ * design critique.
+ *
+ * If we ever need to bring a tier grid back to this page, import the
+ * shared PricingSection primitive rather than re-declaring the
+ * tiers — keep the pricing table in ONE place. */
 
 const FAQ_ITEMS = [
   {
@@ -848,53 +796,39 @@ export default function ContractorsPage() {
             </p>
           </div>
 
-          {/* Cards */}
-          <div className="mb-11 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {PRICING_TIERS.map((tier, i) => (
-              <div
-                key={i}
-                className={`relative rounded-2xl border p-7 transition-transform hover:-translate-y-0.5 ${
-                  tier.featured
-                    ? "border-primary bg-primary/[0.12]"
-                    : "border-white/10 bg-white/[0.04] hover:bg-white/[0.06]"
-                }`}
-              >
-                {tier.badge && (
-                  <span className="mb-3.5 inline-block rounded-[5px] bg-primary px-2.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-widest text-white">
-                    {tier.badge}
-                  </span>
-                )}
-                <div className="mb-1 text-[15px] font-semibold text-[#F0EEE8]">
-                  {tier.name}
+          {/* Pricing summary — replaces the full 4-tier grid that used to
+           * live here. This page already references pricing twice above
+           * (trust row + comparison table), so a third full pricing block
+           * created scan-reader ambiguity: "which of these is the real
+           * offer?". The summary below gives the shape of the lineup in
+           * one glance; the canonical 4-tier table lives on /pricing with
+           * feature bullets + per-plan CTAs. One pricing source of truth.
+           *
+           * Dropped: `PRICING_TIERS` map + per-card CTAs.
+           * Kept: the dark-theme section frame, the headline, proof stats. */}
+          <div className="mb-11 rounded-2xl border border-white/10 bg-white/[0.04] p-8 md:p-10">
+            <div className="flex flex-col items-center gap-5 text-center md:flex-row md:items-end md:gap-10 md:text-left">
+              <div className="flex-1">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
+                  Four plans. Same promise.
                 </div>
-                <div className="font-heading text-[42px] font-normal leading-none tracking-tight text-primary">
-                  {tier.price}
-                </div>
-                <div className="mb-5 mt-1 text-xs text-[#9E9C92]">
-                  {tier.period}
-                </div>
-                <div className="flex flex-col gap-2">
-                  {tier.features.map((f, fi) => (
-                    <div
-                      key={fi}
-                      className="flex items-start gap-2.5 text-[13px] leading-snug text-[#9E9C92]"
-                    >
-                      <div className="mt-[7px] h-[5px] w-[5px] shrink-0 rounded-full bg-primary" />
-                      {f}
-                    </div>
-                  ))}
-                </div>
-                <button
-                  className={`mt-5 w-full rounded-[9px] py-3 text-sm font-semibold transition-colors ${
-                    tier.featured
-                      ? "bg-primary text-white hover:bg-primary/90"
-                      : "border border-white/20 bg-white/10 text-white hover:bg-white/20"
-                  }`}
-                >
-                  {tier.cta}
-                </button>
+                <p className="mt-2 font-heading text-[clamp(22px,2.2vw,28px)] font-normal leading-tight text-[#F0EEE8]">
+                  From <span className="text-primary">$149</span> to{" "}
+                  <span className="text-primary">$2,555</span> per month
+                </p>
+                <p className="mt-1.5 text-sm leading-relaxed text-[#9E9C92]">
+                  No per-lead fees, no contracts, 24-hour free trial on every
+                  plan. Founder tier price-locked forever for the first 100
+                  contractors.
+                </p>
               </div>
-            ))}
+              <Link
+                href="/pricing"
+                className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-[9px] bg-primary px-6 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+              >
+                See all plans &rarr;
+              </Link>
+            </div>
           </div>
 
           {/* Proof stats */}

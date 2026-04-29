@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
+import { EstimateSendBodySchema, parseBody } from "@/lib/schemas/api";
 
 /**
  * POST /api/estimates/send
@@ -21,18 +22,10 @@ import { logApiError } from "@/lib/log";
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as {
-      estimate_id?: string;
-      to_email?: string;
-      message?: string;
-    };
-    const estimateId = (body.estimate_id ?? "").trim();
-    if (!estimateId) {
-      return NextResponse.json(
-        { error: "estimate_id required" },
-        { status: 400 },
-      );
-    }
+    const raw = await req.json();
+    const parsed = parseBody(EstimateSendBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { estimate_id: estimateId, to_email: toEmail, message } = parsed.data;
 
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -59,7 +52,7 @@ export async function POST(req: NextRequest) {
       address?: string | null;
       notes?: string | null;
     } | null;
-    const recipient = (body.to_email ?? lead?.email ?? "").trim();
+    const recipient = (toEmail ?? lead?.email ?? "").trim();
     if (!recipient) {
       return NextResponse.json(
         { error: "No recipient email. Provide `to_email` or set the lead's email." },
@@ -81,7 +74,7 @@ export async function POST(req: NextRequest) {
 
     const html = [
       `<p>Hi ${escapeHtml(customerName)},</p>`,
-      body.message ? `<p>${escapeHtml(body.message)}</p>` : "",
+      message ? `<p>${escapeHtml(message)}</p>` : "",
       `<p>Here's the estimate for the work at <strong>${escapeHtml(addr)}</strong>:</p>`,
       `<p style="font-size:24px;font-weight:600;color:#D4886A">$${amount.toLocaleString()}</p>`,
       estimate.description
@@ -93,7 +86,7 @@ export async function POST(req: NextRequest) {
 
     // Email via Resend if configured; stubbed no-op otherwise.
     const resendKey = process.env.RESEND_API_KEY;
-    const fromAddr = process.env.RESEND_FROM_EMAIL ?? "henri@henri.app";
+    const fromAddr = process.env.RESEND_FROM_EMAIL ?? "henri@meethenri.com";
     let emailSent = false;
     let providerError: string | null = null;
     if (resendKey) {

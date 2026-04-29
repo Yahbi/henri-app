@@ -74,7 +74,13 @@ describe("env validation", () => {
 
   describe("getEnv in production", () => {
     it("throws when required env var is missing", async () => {
-      process.env.NODE_ENV = "production";
+      // `@types/node` ≥ 20 makes `process.env.NODE_ENV` read-only in TS —
+      // assigning to it produces TS2540. vitest's `vi.stubEnv()` uses
+      // Object.defineProperty under the hood, which the TS types accept
+      // because it goes through a function. Semantically identical; it
+      // also auto-resets between tests when afterEach triggers the
+      // restore path (we reassign process.env anyway, so no extra cleanup).
+      vi.stubEnv("NODE_ENV", "production");
       // Clear all env vars that getEnv() needs
       delete process.env.NEXT_PUBLIC_SUPABASE_URL;
       const { getEnv } = await import("../env");
@@ -82,7 +88,7 @@ describe("env validation", () => {
     });
 
     it("throws when CRON_SECRET is an insecure default", async () => {
-      process.env.NODE_ENV = "production";
+      vi.stubEnv("NODE_ENV", "production");
       // Set all required vars
       process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "key";
@@ -99,7 +105,7 @@ describe("env validation", () => {
       process.env.RESEND_API_KEY = "re_123";
       process.env.OPENAI_API_KEY = "sk-123";
       process.env.NEXT_PUBLIC_MAPBOX_TOKEN = "pk.123";
-      process.env.NEXT_PUBLIC_APP_URL = "https://henri.app";
+      process.env.NEXT_PUBLIC_APP_URL = "https://meethenri.com";
       process.env.CRON_SECRET = "dev_cron_secret_change_in_production";
 
       const { getEnv } = await import("../env");
@@ -109,7 +115,7 @@ describe("env validation", () => {
 
   describe("getEnv in development", () => {
     it("uses fallback values without throwing", async () => {
-      process.env.NODE_ENV = "development";
+      vi.stubEnv("NODE_ENV", "development");
       // Clear env vars
       delete process.env.NEXT_PUBLIC_SUPABASE_URL;
       delete process.env.STRIPE_SECRET_KEY;
@@ -119,5 +125,12 @@ describe("env validation", () => {
       const env = getEnv();
       expect(env.supabaseUrl).toBe("");
     });
+  });
+
+  // Belt-and-suspenders: vi.unstubAllEnvs() at the describe root ensures
+  // NODE_ENV overrides don't leak between test files when they happen to
+  // run in the same worker.
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 });

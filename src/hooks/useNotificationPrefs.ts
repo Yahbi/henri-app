@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { logger } from "@/lib/logger";
 import type { NotificationPrefs } from "@/types/profile";
 
 interface UseNotificationPrefsReturn {
@@ -35,7 +36,7 @@ export function useNotificationPrefs(): UseNotificationPrefsReturn {
       const data = await res.json();
       setPrefs(data.prefs ?? null);
     } catch (err) {
-      console.error("useNotificationPrefs fetch error:", err);
+      logger.error("useNotificationPrefs fetch error", { error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setIsLoading(false);

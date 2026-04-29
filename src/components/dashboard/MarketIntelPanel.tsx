@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { TrendingUp, TrendingDown, Loader2, MapPin } from "lucide-react";
+import { Loader2, MapPin } from "lucide-react";
 import { useMarketIntel, type MarketIntelTrade } from "@/hooks/useMarketIntel";
 import { cn } from "@/lib/utils/cn";
 

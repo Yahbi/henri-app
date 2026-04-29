@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /**
  * GET /api/territories/analytics
@@ -42,7 +43,7 @@ export async function GET() {
       .eq("status", "active");
 
     if (terrError) {
-      console.error("Territory fetch error:", terrError);
+      logger.error("Territory fetch error", { error: terrError instanceof Error ? terrError.message : String(terrError) });
       return NextResponse.json(
         { error: "Failed to load territories" },
         { status: 500 }
@@ -248,7 +249,7 @@ export async function GET() {
       { headers: { "Cache-Control": "private, max-age=300" } }
     );
   } catch (error) {
-    console.error("Territory analytics error:", error);
+    logger.error("Territory analytics error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to compute territory analytics" },
       { status: 500 }

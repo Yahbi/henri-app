@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
 import { PLAN_ZIP_LIMITS } from "@/lib/plans/constants";
+import { ZipLockBodySchema, parseBody } from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /**
  * ZipLock Agent — Territory Exclusivity Manager
@@ -20,15 +22,14 @@ export async function POST(request: NextRequest) {
     const auth = await requireContractor(supabase);
     if (auth.response) return auth.response;
 
-    const body = await request.json().catch(() => ({}));
-    const { action, zip, contractor_id } = body;
-
-    if (!action || !zip) {
-      return NextResponse.json(
-        { status: "error", message: "action and zip are required" },
-        { status: 400 },
-      );
-    }
+    const raw = await request.json().catch(() => ({}));
+    const parsed = parseBody(ZipLockBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { action, zip } = parsed.data;
+    /* contractor_id is required by the discriminated-union schema for
+     * "claim" / "release"; for "check" it's optional and may be undefined. */
+    const contractor_id =
+      "contractor_id" in parsed.data ? parsed.data.contractor_id : undefined;
 
     // Check current claim status
     if (action === "check") {
@@ -170,7 +171,7 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   } catch (err) {
-    console.error("[ziplock] Error:", err);
+    logger.error("[ziplock] Error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { status: "error", message: "ZipLock operation failed" },
       { status: 500 },

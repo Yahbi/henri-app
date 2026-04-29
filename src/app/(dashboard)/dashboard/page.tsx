@@ -28,6 +28,12 @@ import { useFEMAFlood, useCensusOverlay, useWeatherAlerts } from "@/hooks/useOve
 import { useToast } from "@/components/ui/toast";
 import { formatCurrency } from "@/types/lead";
 import type { Lead } from "@/types/lead";
+import {
+  LEFT_PANEL_DEFAULT,
+  LEFT_PANEL_MAX,
+  LEFT_PANEL_COLLAPSED,
+  BOTTOM_PANEL_DEFAULT,
+} from "@/lib/constants/layout";
 
 const MapDashboard = dynamic(() => import("@/components/map/MapDashboard"), {
   ssr: false,
@@ -38,14 +44,11 @@ const MapDashboard = dynamic(() => import("@/components/map/MapDashboard"), {
   ),
 });
 
-/* ── Panel size constants ── */
+/* ── Panel size constants ──
+ * Most live in `src/lib/constants/layout.ts` now; `LEFT_PANEL_MIN` stays
+ * local because 240 is the practical reading-width floor for the virtual
+ * list and is unlikely to be reused elsewhere. */
 const LEFT_PANEL_MIN = 240;
-// Widened so the user can stretch the leads panel to almost half the
-// screen when they want a wide card-like list on large monitors.
-// Previously capped at 600 which felt cramped on 1440+ displays.
-const LEFT_PANEL_MAX = 900;
-const LEFT_PANEL_DEFAULT = 320;
-const BOTTOM_PANEL_DEFAULT = 240;
 
 /* ── Map Lead (Supabase) → LeadData (UI card shape) ── */
 function mapLead(lead: Lead): LeadData {
@@ -107,6 +110,33 @@ function mapLead(lead: Lead): LeadData {
     lat: lead.latitude  ?? null,
     lng: lead.longitude ?? null,
     cityState: cityState || undefined,
+
+    // Extended enrichment fields (migration 00044). Each may be NULL on
+    // the row — the cast through Record<string,unknown> avoids needing
+    // to extend the Lead type for fields that aren't yet universal in
+    // the DB schema across all envs. The drawer renders each only when
+    // present so older envs without the migration applied are unaffected.
+    employer: ((lead as unknown as Record<string, unknown>).employer as string | undefined),
+    occupation: ((lead as unknown as Record<string, unknown>).occupation as string | undefined),
+    businessPhone: ((lead as unknown as Record<string, unknown>).business_phone as string | undefined),
+    businessStatus: ((lead as unknown as Record<string, unknown>).business_status as string | undefined),
+    businessWebsite: ((lead as unknown as Record<string, unknown>).business_website as string | undefined),
+    licenseNumber: ((lead as unknown as Record<string, unknown>).license_number as string | undefined),
+    licenseStatus: ((lead as unknown as Record<string, unknown>).license_status as string | undefined),
+    naicsCode: ((lead as unknown as Record<string, unknown>).naics_code as string | undefined),
+    contactSource: ((lead as unknown as Record<string, unknown>).contact_source as string | undefined),
+    contactConfidence: ((lead as unknown as Record<string, unknown>).contact_confidence as number | undefined),
+
+    // Phase 1.2: predictive cross-trade suggestions (migration 00045).
+    // jsonb array per the rules engine output. Drawer's
+    // CrossTradeOpportunities component renders these.
+    crossTradeSuggestions: (lead as unknown as Record<string, unknown>).cross_trade_suggestions,
+
+    // Phase 1.3: DIY-vs-pro applicant fields (existing columns from
+    // migration 00004 — surfaced via the joined permits row in useLeads).
+    permitApplicantName: (((lead as unknown as Record<string, unknown>).permits as Record<string, unknown> | undefined)?.applicant_name as string | undefined),
+    permitContractorName: (((lead as unknown as Record<string, unknown>).permits as Record<string, unknown> | undefined)?.contractor_name as string | undefined),
+
     rawValue: lead.permit_value ?? lead.pipeline_value ?? undefined,
   };
 }
@@ -217,11 +247,48 @@ function DashboardContent() {
     return () => { mapInstance.off("moveend", updateBounds); };
   }, [mapInstance]);
 
-  /* ── Resizable panel state ── */
+  /* ── Resizable panel state ──
+   *
+   * `bottomHeight` is persisted to localStorage so the user's preferred
+   * lead-drawer size survives reloads, lead-switches, and full sign-outs
+   * (per user request 2026-04-27 — "let the user set up how large the
+   * banner should be by stretching it"). The drawer's drag handle
+   * commits the height via `setBottomHeight`; we mirror that into
+   * localStorage so the next click on a lead reopens at the same size
+   * instead of resetting to BOTTOM_PANEL_DEFAULT every time. */
+  const BOTTOM_HEIGHT_STORAGE_KEY = "henri.dashboard.bottomHeight";
   const [leftWidth, setLeftWidth] = useState(LEFT_PANEL_DEFAULT);
-  const [bottomHeight, setBottomHeight] = useState(BOTTOM_PANEL_DEFAULT);
+  const [bottomHeight, setBottomHeightState] = useState(BOTTOM_PANEL_DEFAULT);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const COLLAPSED_WIDTH = 44;
+  const COLLAPSED_WIDTH = LEFT_PANEL_COLLAPSED;
+
+  // Hydrate from localStorage on mount. Runs once; deliberate empty
+  // deps. Wrapped in try/catch because storage access can throw in
+  // private-browsing modes or when quota is exceeded — we never want
+  // a stored preference to break the dashboard.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(BOTTOM_HEIGHT_STORAGE_KEY);
+      if (!raw) return;
+      const n = Number(raw);
+      if (Number.isFinite(n) && n >= 140 && n <= 4000) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setBottomHeightState(n);
+      }
+    } catch {
+      // ignore — fall back to default
+    }
+  }, []);
+
+  // Wrapped setter that persists every committed height change.
+  const setBottomHeight = useCallback((h: number) => {
+    setBottomHeightState(h);
+    try {
+      localStorage.setItem(BOTTOM_HEIGHT_STORAGE_KEY, String(Math.round(h)));
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
 
   /* ── Left panel drag-to-resize ── */
   const leftDragging = useRef(false);
@@ -265,27 +332,57 @@ function DashboardContent() {
   //   god-mode: 2,000 leads (virtualized panel handles the volume; map
   //     shows pins for the subset with lat/lng).
   //   subscriber: 500 leads (plan-tier enforcement will tighten).
+  //
+  // We filter to `geocoded_only: true` — without it, the map appeared
+  // empty because high-scored leads skew heavily non-geocoded (2026-04-22
+  // measurement: top 1000 by score = 5% geocoded; first 1000 unsorted =
+  // 50% geocoded; DB-wide = 70,182/138,568 = ~51%). The comment history
+  // below is preserved because the timeout it describes is still real,
+  // but the fix is a `skip_sort` branch that sidesteps the bad plan:
+  //   • god-mode (skip_sort=true):  NOT NULL + no ORDER BY → fast scan
+  //     on (contractor_id, latitude) index.
+  //   • subscriber  (score DESC):   smaller contractor_id result sets
+  //     mean the planner picks the (contractor_id, score) path and
+  //     evaluates NOT NULL as a cheap row-level filter, not a plan flip.
+  //
+  // --- Historical comment, preserved ---
   // We used to force `geocoded_only: true` so every panel row had a pin, but
   // the `NOT NULL latitude` + score-order + contractor filter combination
   // pushed Postgres into a plan that timed out under scorer write load.
-  // Dropping the filter lets Postgres pick a fast index on
-  // `(contractor_id, score DESC)`; the map layer naturally renders pins
-  // only for leads whose lat/lng are present (the `LeadLayer` filter in
-  // `toGeoJSON` discards rows without coords).
+  // Dropping the filter let Postgres pick a fast index on
+  // `(contractor_id, score DESC)`. The re-add above uses skip_sort for
+  // god-mode to sidestep the same bad plan.
   const godMode = useGodMode();
   const leadCount = useLeadCount();
-  // Keep the first-paint fetch at a single 1000-row page (PostgREST caps
-  // a single select at 1000 regardless of limit, and useLeads's paginated
-  // branch kicks in only when limit > 1000 — each extra page is another
-  // leads+permits join round-trip). Previous 500k god-mode limit fanned
-  // out into 500 sequential round-trips and made the panel stuck on
-  // skeleton for 10-15 minutes. 1000 rows paints in ~3s and still fills
-  // the virtualized panel + map clustering meaningfully. Users needing
-  // deeper filter exploration go to `/dashboard/map` which has
-  // progressive two-stage loading built in.
+  // First-paint fetch policy:
+  //   - regular contractor: 1,000 rows with the wide SELECT (permits join)
+  //     and `geocoded_only=true`. Subscription-tier ZIP cap keeps the
+  //     pool small, so the join is cheap and the LeadCard still gets
+  //     `permit_description` for free.
+  //   - god-mode (founder + dev allowlist): 100,000 rows with
+  //     `skip_permits_join: true`, NO `geocoded_only` filter, and
+  //     progressive paint per-page (Move 2). The denormalized leads
+  //     columns (address/city/state/zip/permit_type/permit_value,
+  //     written by the score cron via migration 00019) feed the
+  //     LeadCard directly, and the heavier permit fields (description,
+  //     applicant_name, applied/issued/completed dates) load on demand
+  //     via `usePermitDetail` in the LeadDetailDrawer.
+  //
+  //   Why the geocoded_only filter is dropped for god-mode:
+  //     76% of permits in the DB have null latitude/longitude (the
+  //     CSV-ingested 1.1M permits never went through the geocoder), so
+  //     76% of derived leads are also null-geo. With `geocoded_only=true`
+  //     the founder only saw ~36k of 147k leads. Dropping it for god-mode
+  //     reveals the full pool in the panel; non-geocoded leads simply
+  //     don't render on the map but DO appear in the list, which is what
+  //     a dev wants. Background `backfill-geocode.ts` is closing the gap.
+  // Users wanting the truly full pool can still navigate to
+  // `/dashboard/map`, which does its own progressive two-stage loading.
   const { data: rawLeads, isLoading, error: leadsError } = useLeads({
-    limit: 1000,
-    skip_sort: godMode, // 23× speedup for god-mode unsorted pulls
+    limit: godMode ? 100_000 : 1_000,
+    skip_sort: godMode,         // 23× speedup for god-mode unsorted pulls
+    skip_permits_join: godMode, // bypasses 3k row ceiling (see comment above)
+    filters: { geocoded_only: !godMode },
   });
 
   const leads = useMemo<LeadData[]>(
@@ -353,6 +450,8 @@ function DashboardContent() {
     const target = leads.find((l) => l.id === focusLeadId);
     if (target) {
       focusHonored.current = focusLeadId;
+      // Honor deep-link once leads arrive; handleSelectLead drives drawer state
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       handleSelectLead(target);
     }
   }, [focusLeadId, leads, handleSelectLead]);
@@ -375,7 +474,7 @@ function DashboardContent() {
           className="flex items-center justify-between border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-xs text-destructive"
         >
           <span>
-            Some leads couldn't load —{" "}
+            Some leads couldn&apos;t load —{" "}
             {leadsError instanceof Error ? leadsError.message : "unknown error"}
             . Refresh to retry.
           </span>
@@ -394,11 +493,16 @@ function DashboardContent() {
         className="shrink-0 h-full transition-[width] duration-200 ease-out"
         style={{ width: leftCollapsed ? COLLAPSED_WIDTH : leftWidth }}
       >
-        {isLoading ? (
-          <LeadsPanelSkeleton />
-        ) : leads.length === 0 && !leftCollapsed ? (
-          <EmptyLeadsState />
-        ) : (
+        {/* Render priority:
+         *   1. Leads exist → show panel even while `isLoading=true`. The
+         *      Move 2 progressive-paint path writes pages 1..N into the
+         *      cache as they land (see useLeads.ts), so the panel fills
+         *      from 1k → 25k visibly during god-mode cold-starts instead
+         *      of staying skeleton-blank for ~30s.
+         *   2. No leads + still loading → skeleton (true cold-start).
+         *   3. No leads + finished loading → empty-state hint.
+         */}
+        {leads.length > 0 ? (
           <LeadsPanel
             leads={leads}
             activeLead={activeLead}
@@ -407,7 +511,11 @@ function DashboardContent() {
             onToggleCollapsed={() => setLeftCollapsed((c) => !c)}
             totalGeocoded={leadCount.geocoded}
           />
-        )}
+        ) : isLoading ? (
+          <LeadsPanelSkeleton />
+        ) : !leftCollapsed ? (
+          <EmptyLeadsState />
+        ) : null}
       </div>
 
       {/* Left resize handle — disabled while collapsed (no drag on rail) */}

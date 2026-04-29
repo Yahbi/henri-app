@@ -1,170 +1,84 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { isGodModeEmail } from "@/lib/auth/god-mode";
+import { logger } from "@/lib/logger";
 import type { Lead, LeadQueryParams, LeadStatusUpdate, LeadStatus } from "@/types/lead";
+import {
+  SELECT_NARROW,
+  SELECT_DASHBOARD_NARROW_LEGACY,
+  resolveSelect,
+  isMissingColumnErr,
+  applyContractorScope,
+  applyLeadFilters,
+  applyLeadSort,
+  dedupRowsById,
+} from "./useLeads.helpers";
 
 const LEADS_KEY = "leads";
 
-/* ── Fetch leads from Supabase ── */
-async function fetchLeads(params?: LeadQueryParams): Promise<Lead[]> {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  // Unauthenticated: return empty. Middleware redirects to /login for any
-  // dashboard route, so this branch should not actually render. Deliberately
-  // NOT falling back to mock/demo/Socrata — the authenticated app always
-  // shows the user's own Supabase data, never placeholder content.
-  if (!user) return [];
+/* ── SELECT lists ──
+ * The SELECT_WIDE / SELECT_NARROW constants live in `./useLeads.helpers`
+ * so the duplicated filter/sort application logic across the three fetch
+ * branches below can share a single source of truth. See that file for
+ * the column lists and the rationale for the wide/narrow fallback.
+ *
+ * Per CLAUDE.md "client-side fallback first" rule, we try WIDE; on a
+ * "column does not exist" error we cache that fact for the session and
+ * fall back to NARROW. Existing leads keep rendering even on envs that
+ * haven't applied 00039 / 00044 yet, and post-migration the new fields
+ * surface automatically without a code change.
+ *
+ * The fallback flag is module-scoped so a single probe per page-load
+ * suffices — a cold dashboard load with old schema will pay one extra
+ * round trip, then every subsequent fetch goes straight to NARROW. */
 
-  let query = supabase
-    .from("leads")
-    .select(`
-      id, contractor_id, permit_id,
-      score, urgency, status,
-      trade, notes, phone, email,
-      mailing_address, cascade_flag, cascade_count,
-      score_freshness, score_value, score_contact, score_demand,
-      score_engagement, score_conversion, score_signals,
-      contacted_at, won_at, created_at,
-      latitude, longitude,
-      owner_name, owner_first, owner_last,
-      year_built, home_sqft, lot_sqft,
-      assessed_value, property_value, owner_occupied, owner_since,
-      pipeline_value, permit_history,
-      permits (
-        id, address, city, state, zip,
-        permit_type, description, status,
-        estimated_value, applied_date, issued_date, completed_date,
-        latitude, longitude
-      )
-    `)
-    .eq("contractor_id", user.id);
+/** Set to true after a "column does not exist" error so we skip the wide
+ *  probe on subsequent fetches in this page load. Reset by full reload. */
+let extendedColumnsMissing = false;
 
-  const f = params?.filters;
-  if (f?.urgency) query = query.eq("urgency", f.urgency);
-  if (f?.status) {
-    if (Array.isArray(f.status)) query = query.in("status", f.status);
-    else query = query.eq("status", f.status);
-  }
-  if (f?.trade) query = query.eq("trade", f.trade);
-  if (f?.cascade_only) query = query.eq("cascade_flag", true);
-  if (f?.geocoded_only) {
-    // Filter on leads.latitude (denormalized in migration 00019, index-backed)
-    // — NOT on permits.latitude via the join. Nested-join not-null filters
-    // can't use the permits index and trigger a Supabase statement timeout
-    // on large data sets.
-    query = query.not("latitude", "is", null).not("longitude", "is", null);
-  }
-  if (f?.min_score) query = query.gte("score", f.min_score);
-  if (f?.max_score) query = query.lte("score", f.max_score);
-
-  const sortBy = params?.sort_by ?? "score";
-  const sortDir = params?.sort_dir ?? "desc";
-  const skipSort = params?.skip_sort === true;
-  if (!skipSort) {
-    query = query.order(sortBy, { ascending: sortDir === "asc" });
-  }
-
-  const limit = params?.limit ?? 50;
-  const page = params?.page ?? 0;
-  const startOffset = page * limit;
-
-  // Supabase PostgREST caps every response at 1000 rows regardless of the
-  // requested limit. When the caller asks for more (god-mode users fetching
-  // up to 5,000 leads), paginate with .range() until we hit the requested
-  // count or the result set runs out.
-  const PAGE_SIZE = 1000;
-  type Row = Record<string, unknown>;
-  let data: Row[] = [];
-  if (limit <= PAGE_SIZE) {
-    const { data: rows, error } = await query.range(
-      startOffset,
-      startOffset + limit - 1,
-    );
-    if (error) throw error;
-    data = rows ?? [];
-  } else {
-    for (let offset = 0; offset < limit; offset += PAGE_SIZE) {
-      const take = Math.min(PAGE_SIZE, limit - offset);
-      // Must rebuild the query per page — Supabase query builders are
-      // single-use once .range() is applied.
-      let pageQuery = supabase
-        .from("leads")
-        .select(`
-          id, contractor_id, permit_id,
-          score, urgency, status,
-          trade, notes, phone, email,
-          mailing_address, cascade_flag, cascade_count,
-          score_freshness, score_value, score_contact, score_demand,
-          score_engagement, score_conversion, score_signals,
-          contacted_at, won_at, created_at,
-          latitude, longitude,
-          owner_name, owner_first, owner_last,
-          year_built, home_sqft, lot_sqft,
-          assessed_value, property_value, owner_occupied, owner_since,
-          pipeline_value, permit_history,
-          permits (
-            address, city, state, zip,
-            permit_type, description,
-            estimated_value, applied_date,
-            latitude, longitude
-          )
-        `)
-        .eq("contractor_id", user.id);
-      if (f?.urgency) pageQuery = pageQuery.eq("urgency", f.urgency);
-      if (f?.status) {
-        if (Array.isArray(f.status)) pageQuery = pageQuery.in("status", f.status);
-        else pageQuery = pageQuery.eq("status", f.status);
-      }
-      if (f?.trade) pageQuery = pageQuery.eq("trade", f.trade);
-      if (f?.cascade_only) pageQuery = pageQuery.eq("cascade_flag", true);
-      if (f?.geocoded_only) {
-        pageQuery = pageQuery
-          .not("latitude", "is", null)
-          .not("longitude", "is", null);
-      }
-      if (f?.min_score) pageQuery = pageQuery.gte("score", f.min_score);
-      if (f?.max_score) pageQuery = pageQuery.lte("score", f.max_score);
-      if (!skipSort) {
-        pageQuery = pageQuery.order(sortBy, { ascending: sortDir === "asc" });
-      }
-      const { data: rows, error } = await pageQuery.range(
-        startOffset + offset,
-        startOffset + offset + take - 1,
-      );
-      if (error) {
-        // Partial-result tolerance for god-mode fetches of 20k+ leads: if a
-        // later page hits the Supabase statement timeout, return what we have
-        // rather than throwing and showing an empty panel.
-        console.warn(
-          `useLeads: page at offset ${startOffset + offset} failed (${error.message}); returning ${data.length} rows collected so far`,
-        );
-        break;
-      }
-      if (!rows || rows.length === 0) break;
-      data.push(...(rows as Row[]));
-      if (rows.length < take) break;
-    }
-  }
-
-  return data.map((row: Record<string, unknown>) => {
+/* ── Row → Lead mapping ──
+ *
+ * Extracted so the progressive-paint path (multi-page god-mode pulls)
+ * can map each page's rows incrementally and write them to the React
+ * Query cache before subsequent pages land. Pure function — no I/O. */
+function mapRowsToLeads(rows: Record<string, unknown>[]): Lead[] {
+  const deduped = dedupRowsById(rows);
+  return deduped.map((row: Record<string, unknown>) => {
     const permit = row.permits as Record<string, unknown> | null;
     return {
       ...row,
-      address: permit?.address ?? row.mailing_address ?? "Unknown",
-      city: permit?.city,
-      state: permit?.state,
-      zip: permit?.zip ?? "",
-      permit_type: permit?.permit_type,
-      permit_description: permit?.description,
-      permit_value: permit?.estimated_value,
-      permit_filed_date: permit?.applied_date,
-      permit_age_days: permit?.applied_date
-        ? Math.floor((Date.now() - new Date(permit.applied_date as string).getTime()) / 86400000)
-        : null,
-      // Prefer the denormalized leads.latitude/longitude (scorer writes these
-      // when creating the lead; they're what the geocoded_only filter keys
-      // on). Fall back to the joined permit row if the denorm is missing.
+      address:
+        (row.address as string | null) ??
+        (permit?.address as string | null) ??
+        (row.mailing_address as string | null) ??
+        "Unknown",
+      city: (row.city as string | null) ?? (permit?.city as string | null),
+      state: (row.state as string | null) ?? (permit?.state as string | null),
+      zip:
+        (row.zip as string | null) ??
+        (permit?.zip as string | null) ??
+        "",
+      permit_type:
+        (row.permit_type as string | null) ??
+        (permit?.permit_type as string | null),
+      permit_description: permit?.description, // not denormalized; loads via usePermitDetail in drawer
+      permit_value:
+        (row.permit_value as number | null) ??
+        (permit?.estimated_value as number | null),
+      permit_filed_date:
+        (permit?.applied_date as string | null) ??
+        (permit?.issued_date as string | null) ??
+        null,
+      permit_age_days: (() => {
+        const d = (permit?.applied_date ?? permit?.issued_date) as
+          | string
+          | null
+          | undefined;
+        if (!d) return null;
+        return Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+      })(),
       latitude:
         (row.latitude as number | null) ??
         (permit?.latitude as number | null) ??
@@ -175,6 +89,169 @@ async function fetchLeads(params?: LeadQueryParams): Promise<Lead[]> {
         null,
     } as Lead;
   });
+}
+
+/** Optional progressive-paint hook. When provided, `fetchLeads` calls
+ *  `commit(currentRows)` after each successful page lands so React Query's
+ *  cache picks up the partial result and the dashboard panel paints
+ *  while later pages are still in flight. Closes Move 2 in the
+ *  "show all leads" plan. */
+interface ProgressiveCommit {
+  queryClient: QueryClient;
+  queryKey: readonly unknown[];
+}
+
+/* ── Fetch leads from Supabase ── */
+async function fetchLeads(
+  params?: LeadQueryParams,
+  progressive?: ProgressiveCommit,
+): Promise<Lead[]> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  // Unauthenticated: return empty. Middleware redirects to /login for any
+  // dashboard route, so this branch should not actually render. Deliberately
+  // NOT falling back to mock/demo/Socrata — the authenticated app always
+  // shows the user's own Supabase data, never placeholder content.
+  if (!user) return [];
+
+  // God-mode (founder/dev allowlist) bypasses the contractor_id filter.
+  // Subscription tiers (Founder 3 ZIPs / Starter 5 / Pro 12 / Enterprise
+  // 20) still cap regular contractors via the .eq() inside applyContractorScope.
+  const godMode = isGodModeEmail(user.email);
+
+  const f = params?.filters;
+  const sortBy = params?.sort_by ?? "score";
+  const sortDir = params?.sort_dir ?? "desc";
+  const skipSort = params?.skip_sort === true;
+  const skipPermitsJoin = params?.skip_permits_join === true;
+
+  /** Build a fresh leads-query builder. Supabase query builders are
+   *  single-use once `.range()` is applied, so each fetch path below
+   *  rebuilds via this helper rather than mutating a shared `query`. */
+  type Row = Record<string, unknown>;
+  // The supabase JS client's typed builder is intentionally narrow here so
+  // we can swap in the duck-typed helpers from useLeads.helpers.ts. The
+  // `as never` cast is required because PostgrestFilterBuilder isn't
+  // structurally compatible with our minimal LeadsQueryBuilder shape (it's
+  // a strict subset). Production runtime is unchanged.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const buildQuery = (): any => {
+    let q = supabase
+      .from("leads")
+      .select(resolveSelect(extendedColumnsMissing, skipPermitsJoin));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    q = applyContractorScope(q as any, godMode, user.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    q = applyLeadFilters(q as any, f);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    q = applyLeadSort(q as any, sortBy, sortDir, skipSort);
+    return q;
+  };
+
+  const limit = params?.limit ?? 50;
+  const page = params?.page ?? 0;
+  const startOffset = page * limit;
+
+  // Supabase PostgREST caps every response at 1000 rows regardless of the
+  // requested limit. When the caller asks for more (god-mode users fetching
+  // up to 5,000 leads), paginate with .range() until we hit the requested
+  // count or the result set runs out.
+  const PAGE_SIZE = 1000;
+  let data: Row[] = [];
+  if (limit <= PAGE_SIZE) {
+    const { data: rows, error } = await buildQuery().range(
+      startOffset,
+      startOffset + limit - 1,
+    );
+    if (error) {
+      // Migration 00039 / 00044 not applied yet on this env: drop the
+      // extended columns and retry from scratch. Cache the verdict so
+      // the next fetch in this session goes straight to NARROW. The
+      // single-page branch (limit ≤ 1000) is the cold-start path the
+      // dashboard hits first, so we only need the retry here.
+      if (!extendedColumnsMissing && isMissingColumnErr(error.message)) {
+        logger.warn("useLeads: extended columns missing; falling back to narrow SELECT for this session", {
+          error: error.message,
+        });
+        extendedColumnsMissing = true;
+        // Re-apply filters + sort against the narrow SELECT. Honor the
+        // skip_permits_join flag so god-mode dashboard pulls retry without
+        // the heavy embed (otherwise we'd swap a missing-column error for
+        // a statement-timeout error).
+        const fallbackSelect = skipPermitsJoin
+          ? SELECT_DASHBOARD_NARROW_LEGACY
+          : SELECT_NARROW;
+        let fb = supabase.from("leads").select(fallbackSelect);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        fb = applyContractorScope(fb as any, godMode, user.id);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        fb = applyLeadFilters(fb as any, f);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        fb = applyLeadSort(fb as any, sortBy, sortDir, skipSort);
+        const { data: rows2, error: err2 } = await fb.range(
+          startOffset,
+          startOffset + limit - 1,
+        );
+        if (err2) throw err2;
+        data = rows2 ?? [];
+      } else {
+        throw error;
+      }
+    } else {
+      data = rows ?? [];
+    }
+  } else {
+    for (let offset = 0; offset < limit; offset += PAGE_SIZE) {
+      const take = Math.min(PAGE_SIZE, limit - offset);
+      // Must rebuild the query per page — Supabase query builders are
+      // single-use once .range() is applied.
+      const { data: rows, error } = await buildQuery().range(
+        startOffset + offset,
+        startOffset + offset + take - 1,
+      );
+      if (error) {
+        // Partial-result tolerance for god-mode fetches of 20k+ leads: if a
+        // later page hits the Supabase statement timeout, return what we have
+        // rather than throwing and showing an empty panel.
+        logger.warn("useLeads: page failed; returning rows collected so far", {
+          offset: startOffset + offset,
+          error: error.message,
+          collected: data.length,
+        });
+        break;
+      }
+      if (!rows || rows.length === 0) break;
+      data.push(...(rows as Row[]));
+      // Move 2 — progressive paint: commit the cumulative deduped+mapped
+      // rows to React Query's cache after every page. The dashboard's
+      // panel renders from `data`, so it fills page-by-page (1k → 2k → 3k
+      // → … → 25k) instead of staying blank until the for-loop exits.
+      // No-op when the caller didn't pass `progressive` — preserves the
+      // legacy queryFn-only behaviour for non-list callers.
+      if (progressive) {
+        const partial = mapRowsToLeads(data);
+        progressive.queryClient.setQueryData<Lead[]>(
+          progressive.queryKey,
+          partial,
+        );
+      }
+      if (rows.length < take) break;
+    }
+  }
+
+  // Final dedupe + map runs once at the end so the queryFn return value
+  // matches what's already in the cache (after progressive setQueryData
+  // calls during the page loop above). One log fires if the dedupe found
+  // overlapping rows — a stable-tiebreaker / view-rewrite regression
+  // signal.
+  const beforeCount = data.length;
+  const result = mapRowsToLeads(data);
+  if (result.length < beforeCount) {
+    logger.warn("useLeads: dropped duplicate lead rows from paginated fetch", {
+      dropped: beforeCount - result.length,
+    });
+  }
+  return result;
 }
 
 /* ── Update lead status ── */
@@ -192,9 +269,16 @@ async function updateLeadStatus(leadId: string, update: LeadStatusUpdate): Promi
 /* ── Hooks ── */
 
 export function useLeads(params?: LeadQueryParams) {
+  const queryClient = useQueryClient();
+  const queryKey = [LEADS_KEY, params] as const;
   return useQuery({
-    queryKey: [LEADS_KEY, params],
-    queryFn: () => fetchLeads(params),
+    queryKey,
+    // Move 2 — pass `progressive` so multi-page god-mode pulls write each
+    // page into the cache as it lands. The dashboard's panel renders from
+    // `data` directly, so 1k → 5k → 10k → 25k fills visibly while
+    // `isLoading` is still true. Cheap when limit ≤ PAGE_SIZE: the
+    // single-page branch ignores `progressive`.
+    queryFn: () => fetchLeads(params, { queryClient, queryKey }),
     staleTime: 60_000,          // Don't refetch more than once per minute
     // refetchInterval deliberately removed — mutations invalidate on write,
     // and background polls were causing dashboard lag across multiple open

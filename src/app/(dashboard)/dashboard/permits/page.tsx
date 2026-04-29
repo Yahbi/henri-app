@@ -4,8 +4,9 @@ import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useLeads } from "@/hooks/useLeads";
 import { formatCurrency } from "@/types/lead";
-import type { Lead, LeadStatus } from "@/types/lead";
+import type { LeadStatus } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
 
 /* ── Constants ── */
 
@@ -85,10 +86,10 @@ function formatPermitValue(value: number | null | undefined): string {
 
 function StatCardSkeleton() {
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+    <Card className="p-4 space-y-2">
       <Skeleton className="h-3 w-24" />
       <Skeleton className="h-7 w-16" />
-    </div>
+    </Card>
   );
 }
 
@@ -157,12 +158,14 @@ export default function PermitsPage() {
     return result;
   }, [permits, tradeFilter, statusFilter, sortBy]);
 
+  // Mount-time reference so the 7-day window is stable across renders
+  const [mountNow] = useState(() => Date.now());
+
   // Stats computations
   const stats = useMemo(() => {
     const total = permits.length;
 
-    const now = Date.now();
-    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const sevenDaysAgo = mountNow - 7 * 24 * 60 * 60 * 1000;
     const thisWeek = permits.filter(
       (l) => new Date(l.created_at).getTime() >= sevenDaysAgo
     ).length;
@@ -180,7 +183,7 @@ export default function PermitsPage() {
         : 0;
 
     return { total, thisWeek, highValue, avgValue };
-  }, [permits]);
+  }, [permits, mountNow]);
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -201,30 +204,30 @@ export default function PermitsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="rounded-lg border border-border bg-card p-4">
+          <Card className="p-4">
             <p className="text-sm text-muted-foreground">Total Permits</p>
             <p className="text-2xl font-heading font-normal text-foreground mt-1">
               {stats.total}
             </p>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
+          </Card>
+          <Card className="p-4">
             <p className="text-sm text-muted-foreground">This Week</p>
             <p className="text-2xl font-heading font-normal text-foreground mt-1">
               {stats.thisWeek}
             </p>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
+          </Card>
+          <Card className="p-4">
             <p className="text-sm text-muted-foreground">High Value</p>
             <p className="text-2xl font-heading font-normal text-[#D4886A] mt-1">
               {stats.highValue}
             </p>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
+          </Card>
+          <Card className="p-4">
             <p className="text-sm text-muted-foreground">Avg Value</p>
             <p className="text-2xl font-heading font-normal text-foreground mt-1">
               {formatPermitValue(stats.avgValue)}
             </p>
-          </div>
+          </Card>
         </div>
       )}
 
@@ -284,7 +287,7 @@ export default function PermitsPage() {
 
       {/* Permits Table */}
       {isLoading ? (
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <Card className="overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-bg-subtle">
@@ -307,7 +310,7 @@ export default function PermitsPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <p className="text-sm font-semibold text-foreground">No permits found in your territory yet</p>
@@ -318,7 +321,7 @@ export default function PermitsPage() {
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-border bg-card overflow-hidden overflow-x-auto">
+        <Card className="overflow-hidden overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-bg-subtle">
@@ -341,9 +344,6 @@ export default function PermitsPage() {
                   permit.owner_first || permit.owner_last
                     ? [permit.owner_first, permit.owner_last].filter(Boolean).join(" ")
                     : permit.owner_name ?? "Unknown";
-                const address = [permit.address, permit.city, permit.state]
-                  .filter(Boolean)
-                  .join(", ");
                 const permitNumber = permit.permit_id || "--";
                 const dateStr = permit.permit_filed_date ?? permit.created_at;
 
@@ -397,7 +397,7 @@ export default function PermitsPage() {
               })}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
     </div>
   );

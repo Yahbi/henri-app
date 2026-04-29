@@ -10,6 +10,8 @@
  *   https://geocoding.geo.census.gov/geocoder/Geocoding_Services_API.html
  * ─────────────────────────────────────────────────────────────────────────── */
 
+import { logger } from "@/lib/logger";
+
 export interface GeocodedAddress {
   id: string;
   latitude: number | null;
@@ -192,7 +194,11 @@ export async function geocodeBatch(
       });
 
       if (!response.ok) {
-        console.error(`  Batch ${chunkNum}/${totalChunks} failed: ${response.status}`);
+        logger.error("Batch geocode failed", {
+          chunk: chunkNum,
+          totalChunks,
+          status: response.status,
+        });
         continue;
       }
 
@@ -215,7 +221,11 @@ export async function geocodeBatch(
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     } catch (err) {
-      console.error(`  Batch ${chunkNum}/${totalChunks} error:`, err);
+      logger.error("Batch geocode error", {
+        chunk: chunkNum,
+        totalChunks,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isGodModeEmail } from "@/lib/auth/god-mode";
 import { probeSource } from "@/lib/sources/probe";
 import { logApiError } from "@/lib/log";
+import { SourceProbeBodySchema, parseBody } from "@/lib/schemas/api";
 
 /**
  * POST /api/admin/sources/probe
@@ -22,11 +23,11 @@ export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as {
-      source_key?: string;
-      enable_on_success?: boolean;
-    };
-    const sourceKey = (body.source_key ?? "").trim();
+    const raw = await req.json();
+    const parsed = parseBody(SourceProbeBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const body = parsed.data;
+    const sourceKey = body.source_key.trim();
     if (!sourceKey) {
       return NextResponse.json({ error: "source_key required" }, { status: 400 });
     }

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     description:
       "Henri matches you with exactly one vetted, licensed contractor for your project. Free for homeowners.",
     type: "website",
-    url: "https://henri.app/portal",
+    url: "https://meethenri.com/portal",
   },
 };
 

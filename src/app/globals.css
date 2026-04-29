@@ -50,6 +50,41 @@
   --color-primary-15: var(--primary-tint-15);
   --color-primary-25: var(--primary-tint-25);
 
+  /* Trade palette — exposed as Tailwind utilities so components can
+   * render `text-trade-roofing bg-trade-roofing-tint` without reaching
+   * for hardcoded rgba literals. New trades only need the token pair
+   * added to :root in globals.css; these Tailwind mappings stay. */
+  --color-trade-roofing:         var(--trade-roofing-fg);
+  --color-trade-roofing-tint:    var(--trade-roofing-tint);
+  --color-trade-hvac:            var(--trade-hvac-fg);
+  --color-trade-hvac-tint:       var(--trade-hvac-tint);
+  --color-trade-plumbing:        var(--trade-plumbing-fg);
+  --color-trade-plumbing-tint:   var(--trade-plumbing-tint);
+  --color-trade-electrical:      var(--trade-electrical-fg);
+  --color-trade-electrical-tint: var(--trade-electrical-tint);
+  --color-trade-solar:           var(--trade-solar-fg);
+  --color-trade-solar-tint:      var(--trade-solar-tint);
+  --color-trade-adu:             var(--trade-adu-fg);
+  --color-trade-adu-tint:        var(--trade-adu-tint);
+  --color-trade-general:         var(--trade-general-fg);
+  --color-trade-general-tint:    var(--trade-general-tint);
+
+  /* Shadow tokens — Tailwind exposes these as `shadow-drawer-top`,
+   * `shadow-glow-primary`, `shadow-glow-primary-strong`,
+   * `shadow-card`, `shadow-card-elevated`, `shadow-card-hover`.
+   *
+   * `shadow-card*` are semantic aliases used by Card variants (default /
+   * elevated / hover) so future tuning of card depth happens in one place
+   * rather than via Tailwind's generic shadow-sm / shadow-md / shadow-lg. */
+  --shadow-drawer-top:          var(--shadow-drawer-top);
+  --shadow-glow-primary:        var(--shadow-glow-primary);
+  --shadow-glow-primary-strong: var(--shadow-glow-primary-strong);
+  --shadow-glow-button:         var(--shadow-glow-button);
+  --shadow-glow-button-hover:   var(--shadow-glow-button-hover);
+  --shadow-card:                var(--shadow-card);
+  --shadow-card-elevated:       var(--shadow-card-elevated);
+  --shadow-card-hover:          var(--shadow-card-hover);
+
   /* Sidebar */
   --color-sidebar: hsl(var(--sidebar));
   --color-sidebar-foreground: hsl(var(--sidebar-foreground));
@@ -72,8 +107,24 @@
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
 
-  /* Font Family */
-  --font-sans: var(--font-dm-sans), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* Font Family
+   *
+   * NB: `--font-inter` was referenced here previously but never defined —
+   * harmless dead ref, removed 2026-04-23 as part of the DM Sans wiring
+   * fix. The `--font-dm-sans` / `--font-fraunces` vars are set on <html>
+   * by next/font/google at runtime (see src/app/layout.tsx). When Tailwind
+   * v4 inlines these theme values into its utility stylesheets, the
+   * var() lookup still resolves at runtime because next/font injects the
+   * `<html class="...dm_sans-module__X__variable...">` classes before
+   * hydration.
+   *
+   * Even with this theme entry, Tailwind v4's built-in `--default-font-
+   * family` was winning for the `font-sans` utility, so body copy was
+   * rendering in the system sans stack. The `@layer base body { ... }`
+   * rule below forces the canonical stack directly on the body, which
+   * overrides Tailwind's default and guarantees brand compliance (DM
+   * Sans per CLAUDE.md) regardless of how the utility class resolves. */
+  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-fraunces), Georgia, serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 
@@ -170,6 +221,51 @@
   --primary-tint-10: rgba(212,136,106,0.10);
   --primary-tint-15: rgba(212,136,106,0.15);
   --primary-tint-25: rgba(212,136,106,0.25);
+
+  /* Trade palette — semantic per-trade colors. Kept theme-agnostic
+   * (same hue in dark / dusk) because trade identity is not a theme
+   * concern. Tint values are the ~12% overlay used for chip bg. */
+  --trade-roofing-fg:     #B5674D;
+  --trade-roofing-tint:   rgba(212,136,106,0.15);
+  --trade-hvac-fg:        #3B6FA0;
+  --trade-hvac-tint:      rgba(74,127,192,0.12);
+  --trade-plumbing-fg:    #3B6FA0;
+  --trade-plumbing-tint:  rgba(74,127,192,0.12);
+  --trade-electrical-fg:  #9A7E1E;
+  --trade-electrical-tint:rgba(212,180,74,0.15);
+  --trade-solar-fg:       #357A48;
+  --trade-solar-tint:     rgba(74,168,100,0.12);
+  --trade-adu-fg:         #6E4BA0;
+  --trade-adu-tint:       rgba(140,100,192,0.12);
+  --trade-general-fg:     #6B6B6B;
+  --trade-general-tint:   rgba(140,140,140,0.10);
+
+  /* Custom shadows — pulled from inline arbitrary classes so the
+   * elevation vocabulary is reusable and future changes happen in one
+   * place. `drawer-top` is the upward-casting shadow on bottom-anchored
+   * panels; `glow-primary` is the soft terracotta halo used on the
+   * featured pricing card.
+   *
+   * `card` / `card-elevated` / `card-hover` are the Card primitive's
+   * three depth tiers. Values intentionally match Tailwind's
+   * shadow-sm / shadow-lg / shadow-md so the visual stays identical
+   * to the pre-token state — what changes is the vocabulary. Tuning
+   * card depth in the future means editing these three lines, not
+   * grep-and-replacing across every Card consumer. Added 2026-04-25
+   * per design-system audit priority action #3. */
+  --shadow-drawer-top:          0 -4px 24px rgba(0,0,0,0.10);
+  --shadow-glow-primary:        0 0 30px hsl(var(--primary) / 0.15);
+  --shadow-glow-primary-strong: 0 0 30px hsl(var(--primary) / 0.4);
+  /* Button `glow` variant tokens (added 2026-04-27 to dodge a Tailwind v4
+   * + Turbopack 16.2.3 parser bug on `shadow-[hsl(var(--primary)/X)]`
+   * arbitrary-value classes — see audit 2026-04-27 / preview-launch
+   * session). Same visual output as the previous inline values; only the
+   * class syntax changes from arbitrary to named token. */
+  --shadow-glow-button:         0 0 20px hsl(var(--primary) / 0.4);
+  --shadow-glow-button-hover:   0 0 30px hsl(var(--primary) / 0.6);
+  --shadow-card:                0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-card-elevated:       0 10px 15px -3px rgb(0 0 0 / 0.10), 0 4px 6px -4px rgb(0 0 0 / 0.10);
+  --shadow-card-hover:          0 4px 6px -1px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.10);
 
   /* Sidebar */
   --sidebar: 40 33% 97%;
@@ -323,6 +419,12 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+    /* Force DM Sans (brand rule, CLAUDE.md). Tailwind v4's
+     * `font-sans` utility resolves to its built-in `--default-font-family`,
+     * so the `@theme` override alone wasn't enough — this direct rule
+     * makes the canonical stack win without needing to touch the body's
+     * class list. Fraunces headings keep their own `.font-heading` utility. */
+    font-family: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
@@ -368,6 +470,33 @@
   display: none;               /* Chrome/Safari/Opera */
 }
 
+/* Global themed scrollbar — applies to every scrolling surface in the app
+ * unless explicitly overridden by `.scrollbar-thin` (panel-narrow variant)
+ * or `.scrollbar-none` (hidden). Uses the same `--bg-subtle` / `--border`
+ * / `--fg-subtle` tokens that flip across light / dusk / dark themes,
+ * so the scrollbar visually matches the surface it's on without per-theme
+ * code paths. Added 2026-04-26 — prior to this, every page body, modal,
+ * and kanban column rendered the OS-default white scrollbar in all themes. */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: var(--bg-subtle);
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border: 2px solid var(--bg-subtle);
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--fg-subtle);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) var(--bg-subtle);
+}
+
 /* Print styles for estimate modal */
 @media print {
   .print\:hidden { display: none !important; }
@@ -379,4 +508,25 @@
   outline: 2px solid hsl(var(--primary));
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Reduced motion — accessibility (P0-12).
+ * Vestibular-disorder users opt-out of motion via OS setting. We honor the
+ * preference by collapsing every animation + transition to ~instantaneous,
+ * preserving end-state visuals (so layout shifts don't break) while
+ * removing the motion that triggers symptoms. The `!important` is required
+ * because Tailwind's animate-* utilities and component-level transition
+ * classes set animation-* / transition-* with normal specificity.
+ *
+ * Smooth scrolling is also disabled — `scroll-behavior: smooth` on long
+ * lists triggers vestibular discomfort. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

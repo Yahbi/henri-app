@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSignals, calculateScore } from "@/lib/scoring/model";
 import { fetchLivePermits } from "@/lib/permits/live";
+import { LeadScorerBodySchema, parseBody } from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /**
  * Lead Scorer Agent
@@ -18,8 +20,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json().catch(() => ({}));
-    const requestedIds: string[] | undefined = body.lead_ids;
+    const raw = await request.json().catch(() => ({}));
+    const parsed = parseBody(LeadScorerBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const requestedIds = parsed.data.lead_ids;
 
     let leads = await fetchLivePermits();
 
@@ -85,7 +89,7 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    console.error("[lead-scorer] Error:", err);
+    logger.error("[lead-scorer] Error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { status: "error", message: "Scoring failed" },
       { status: 500 },

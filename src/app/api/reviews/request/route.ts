@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /* ─── POST /api/reviews/request — contractor sends a review request ─── */
 export async function POST(req: NextRequest) {
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (insertErr) {
-      console.error("Review request insert error:", insertErr);
+      logger.error("Review request insert error", { error: insertErr instanceof Error ? insertErr.message : String(insertErr) });
       return NextResponse.json(
         { error: "Failed to create review request" },
         { status: 500 }
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
 
     const senderName =
       profile.company_name ?? profile.full_name ?? "Your contractor";
-    const reviewLink = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://henri.app"}/review/${token}`;
+    const reviewLink = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://meethenri.com"}/review/${token}`;
 
     /* Send via the appropriate channel */
     if (channel === "email" && customer_email) {
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              from: "Henri <noreply@henri.app>",
+              from: "Henri <noreply@meethenri.com>",
               to: [customer_email],
               subject: `${senderName} is requesting your feedback`,
               html: `
@@ -146,7 +147,7 @@ export async function POST(req: NextRequest) {
             .eq("id", reviewRequest.id);
         }
       } catch (emailErr) {
-        console.error("Review request email error:", emailErr);
+        logger.error("Review request email error", { error: emailErr instanceof Error ? emailErr.message : String(emailErr) });
         /* Non-blocking: request is saved even if email fails */
       }
     }
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
             .eq("id", reviewRequest.id);
         }
       } catch (smsErr) {
-        console.error("Review request SMS error:", smsErr);
+        logger.error("Review request SMS error", { error: smsErr instanceof Error ? smsErr.message : String(smsErr) });
         /* Non-blocking: request is saved even if SMS fails */
       }
     }
@@ -201,7 +202,7 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    console.error("Review request POST error:", err);
+    logger.error("Review request POST error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

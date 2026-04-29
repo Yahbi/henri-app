@@ -8,6 +8,7 @@
 
 import { PERMIT_SOURCES } from "./sources";
 import { fetchPermits, type NormalizedPermit } from "./fetcher";
+import { logger } from "@/lib/logger";
 import type { Lead, LeadUrgency } from "@/types/lead";
 import { getUrgency } from "@/types/lead";
 import { enrichProperty } from "@/lib/enrichment/pipeline";
@@ -144,7 +145,9 @@ export async function fetchLivePermits(): Promise<Lead[]> {
     if (result.status === "fulfilled") {
       allPermits.push(...result.value);
     } else {
-      console.warn("[live-fetch] Source failed:", result.reason);
+      logger.warn("live-fetch source failed", {
+        reason: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      });
     }
   }
 

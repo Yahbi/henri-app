@@ -29,8 +29,12 @@ const NEXRAD_TILE_URL =
 
 export function NOAARadarLayer({ map, visible }: NOAARadarLayerProps) {
   // Rotate the cache-buster every 5 minutes so stale tiles in the browser
-  // cache get replaced with new radar frames.
-  const cacheBucket = useRef<number>(Math.floor(Date.now() / 300_000));
+  // cache get replaced with new radar frames. Initialized in effect so
+  // Date.now() isn't called during render (react-hooks/purity).
+  const cacheBucket = useRef<number>(0);
+  useEffect(() => {
+    cacheBucket.current = Math.floor(Date.now() / 300_000);
+  }, []);
 
   useEffect(() => {
     if (!map) return;

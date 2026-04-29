@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils/cn";
 import { Plus, Loader2, CalendarDays } from "lucide-react";
 import { useLeads, useUpdateLeadStatus } from "@/hooks/useLeads";
@@ -9,8 +9,9 @@ import type { Lead, LeadStatus } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AddLeadDialog } from "@/components/dashboard/AddLeadDialog";
 import { ExclusivityBadge } from "@/components/dashboard/ExclusivityBadge";
+import { WatchersBadge } from "@/components/dashboard/WatchersBadge";
 import { useExclusivity } from "@/hooks/useExclusivity";
-import type { ExclusivityLockSummary } from "@/lib/exclusivity/locks";
+import type { ExclusivityLeadSummary } from "@/lib/exclusivity/locks";
 
 interface KanbanLead {
   id: string;
@@ -44,14 +45,22 @@ interface KanbanColumnDef {
   dotColor: string;
 }
 
+/* Status column colours — sourced from semantic CSS tokens so the palette
+ * propagates from globals.css. `dotColor` is a string fed to inline
+ * `style={{ background: col.dotColor }}`; both `var(--hot)` and
+ * `hsl(var(--success))` resolve at the CSS layer. The `quoted` purple and
+ * `archived` grey have no semantic token (no `--purple`/`--neutral` in the
+ * brand palette) so they stay as hex literals — when the brand adds
+ * those, swap them in here in one place. Migrated from raw hex on
+ * 2026-04-25 per design-system audit priority action #4. */
 const COLUMNS: KanbanColumnDef[] = [
-  { id: "new", label: "New", color: "bg-primary-10", dotColor: "#D4886A" },
-  { id: "contacted", label: "Contacted", color: "bg-[rgba(212,162,74,0.10)]", dotColor: "#D4A24A" },
-  { id: "quoted", label: "Quoted", color: "bg-[rgba(139,92,246,0.10)]", dotColor: "#8B5CF6" },
-  { id: "proposal", label: "Proposal", color: "bg-[rgba(74,127,192,0.10)]", dotColor: "#4A7FC0" },
-  { id: "won", label: "Won", color: "bg-[rgba(61,153,112,0.10)]", dotColor: "#3D9970" },
-  { id: "lost", label: "Lost", color: "bg-[rgba(192,80,60,0.10)]", dotColor: "#C0503C" },
-  { id: "archived", label: "Archived", color: "bg-muted/30", dotColor: "#6B7280" },
+  { id: "new",       label: "New",       color: "bg-primary-10",                                                  dotColor: "var(--hot)" },
+  { id: "contacted", label: "Contacted", color: "bg-[color-mix(in_srgb,var(--warm)_10%,transparent)]",            dotColor: "var(--warm)" },
+  { id: "quoted",    label: "Quoted",    color: "bg-[rgba(139,92,246,0.10)]",                                     dotColor: "#8B5CF6" },
+  { id: "proposal",  label: "Proposal",  color: "bg-[color-mix(in_srgb,var(--cool)_10%,transparent)]",            dotColor: "var(--cool)" },
+  { id: "won",       label: "Won",       color: "bg-[color-mix(in_srgb,hsl(var(--success))_10%,transparent)]",    dotColor: "hsl(var(--success))" },
+  { id: "lost",      label: "Lost",      color: "bg-[color-mix(in_srgb,hsl(var(--destructive))_10%,transparent)]", dotColor: "hsl(var(--destructive))" },
+  { id: "archived",  label: "Archived",  color: "bg-muted/30",                                                    dotColor: "#6B7280" },
 ];
 
 /** Industry-default win probabilities per pipeline stage. These are the
@@ -119,25 +128,33 @@ function mapLeadToKanban(lead: Lead): KanbanLead {
   };
 }
 
+/* Score-tier colour pill — uses the canonical `--hot`/`--warm`/`--cool`
+ * tokens so the palette propagates from globals.css. Same pattern as
+ * LeadCard's `scoreColor()` (lines 99-101). */
 function scoreColor(score: number) {
-  if (score >= 75) return "text-[#D4886A] bg-[rgba(212,136,106,0.12)]";
-  if (score >= 50) return "text-[#D4A24A] bg-[rgba(212,162,74,0.12)]";
-  return "text-[#4A7FC0] bg-[rgba(74,127,192,0.12)]";
+  if (score >= 75) return "text-hot  bg-[color-mix(in_srgb,var(--hot)_12%,transparent)]";
+  if (score >= 50) return "text-warm bg-[color-mix(in_srgb,var(--warm)_12%,transparent)]";
+  return "text-cool bg-[color-mix(in_srgb,var(--cool)_12%,transparent)]";
 }
 
+/* Trade pill colours — every Henri trade slug has a matching `--trade-*-fg`
+ * (text) + `--trade-*-tint` (bg) token defined in globals.css, so consumers
+ * just pick the slug. The "general remodel" badge uses the `general` trade
+ * tokens; `solar` keeps its slug as `solar` (no orange-ambar token, the
+ * `--trade-solar-*` pair handles it). Migrated from raw hex on 2026-04-25. */
 const TRADE_COLORS: Record<string, { bg: string; text: string }> = {
-  roofing:          { bg: "bg-[rgba(212,136,106,0.15)]", text: "text-[#D4886A]" },
-  hvac:             { bg: "bg-[rgba(74,127,192,0.15)]",  text: "text-[#4A7FC0]" },
-  plumbing:         { bg: "bg-[rgba(61,153,112,0.15)]",  text: "text-[#3D9970]" },
-  electrical:       { bg: "bg-[rgba(212,162,74,0.15)]",  text: "text-[#D4A24A]" },
-  solar:            { bg: "bg-[rgba(245,166,35,0.15)]",  text: "text-[#F5A623]" },
-  adu:              { bg: "bg-[rgba(139,92,246,0.15)]",   text: "text-[#8B5CF6]" },
-  "general remodel":{ bg: "bg-[rgba(107,114,128,0.15)]", text: "text-[#6B7280]" },
+  roofing:           { bg: "bg-trade-roofing-tint",    text: "text-trade-roofing" },
+  hvac:              { bg: "bg-trade-hvac-tint",       text: "text-trade-hvac" },
+  plumbing:          { bg: "bg-trade-plumbing-tint",   text: "text-trade-plumbing" },
+  electrical:        { bg: "bg-trade-electrical-tint", text: "text-trade-electrical" },
+  solar:             { bg: "bg-trade-solar-tint",      text: "text-trade-solar" },
+  adu:               { bg: "bg-trade-adu-tint",        text: "text-trade-adu" },
+  "general remodel": { bg: "bg-trade-general-tint",    text: "text-trade-general" },
 };
 
 function tradeBadgeColors(trade: string): { bg: string; text: string } {
   const key = trade.toLowerCase();
-  return TRADE_COLORS[key] ?? { bg: "bg-[rgba(107,114,128,0.12)]", text: "text-[#6B7280]" };
+  return TRADE_COLORS[key] ?? { bg: "bg-trade-general-tint", text: "text-trade-general" };
 }
 
 /** Red <3 days, yellow 3-10, grey older */
@@ -153,13 +170,19 @@ function KanbanCard({
   onDragStart,
   isUpdating,
   exclusivity,
+  isDragging,
 }: {
   lead: KanbanLead;
   onDragStart: (e: React.DragEvent, lead: KanbanLead) => void;
   isUpdating?: boolean;
-  /** Phase 0a exclusivity lock summary. Badge shows countdown when the
-   *  current contractor holds the lock; never rendered otherwise. */
-  exclusivity?: ExclusivityLockSummary | null;
+  /** Phase 0a exclusivity summary: lock countdown (when caller holds it)
+   *  + coarse watcher bucket (wedge #6 competitive intel). Either/both
+   *  badges may render; badge code no-ops when not applicable. */
+  exclusivity?: ExclusivityLeadSummary | null;
+  /** True when this card is the source of an active drag. Hides the
+   *  source while the drag preview floats with the cursor — fixes the
+   *  "ghost duplicate" perception flagged in the 2026-04-26 audit. */
+  isDragging?: boolean;
 }) {
   const badge = lead.trade ? tradeBadgeColors(lead.trade) : null;
   const urgencyColor = urgencyDotColor(lead.permitAgeDays);
@@ -178,10 +201,22 @@ function KanbanCard({
     <div
       title={cardTooltip}
       draggable={!isUpdating}
-      onDragStart={(e) => onDragStart(e, lead)}
+      onDragStart={(e) => {
+        // Set drag-data so the browser fires native dragend events even
+        // when the drop target is the same column. Without setData, some
+        // browsers cancel the drag silently and the card looks duplicated.
+        e.dataTransfer.setData("text/plain", lead.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart(e, lead);
+      }}
       className={cn(
         "bg-card border border-border rounded-xl p-3 transition-shadow",
-        isUpdating ? "opacity-50 cursor-not-allowed" : "cursor-grab active:cursor-grabbing hover:shadow-md"
+        isUpdating ? "opacity-50 cursor-not-allowed" : "cursor-grab active:cursor-grabbing hover:shadow-md",
+        // Hide the source card while a drag is in flight. The browser's
+        // ghost-image floats with the cursor; if the source stays
+        // visible the user perceives a duplicate. Visibility, not
+        // display:none, so layout doesn't reflow.
+        isDragging && "opacity-0 pointer-events-none"
       )}
     >
       {/* Row 1: Address + score badge */}
@@ -219,6 +254,7 @@ function KanbanCard({
       {/* Row 2: Trade badge + permit number + exclusivity countdown */}
       <div className="flex items-center gap-1.5 mt-2 flex-wrap">
         <ExclusivityBadge summary={exclusivity} size="xs" />
+        <WatchersBadge bucket={exclusivity?.watchers_bucket} size="xs" />
         {badge && lead.trade && (
           <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium capitalize", badge.bg, badge.text)}>
             {lead.trade}
@@ -328,6 +364,17 @@ export function KanbanBoard() {
     e.dataTransfer.effectAllowed = "move";
   }, []);
 
+  // Clear `draggedLead` when the user releases outside any column. Without
+  // this, the source card stays opacity-0 after a cancelled drag and the
+  // user has to refresh to see it again. Window-level dragend fires for
+  // every drag regardless of where the drop happens.
+  useEffect(() => {
+    if (!draggedLead) return;
+    const onEnd = () => setDraggedLead(null);
+    window.addEventListener("dragend", onEnd);
+    return () => window.removeEventListener("dragend", onEnd);
+  }, [draggedLead]);
+
   const handleDrop = useCallback(async (toCol: string) => {
     if (!draggedLead) return;
     const { lead, fromCol } = draggedLead;
@@ -417,6 +464,7 @@ export function KanbanBoard() {
                             onDragStart={(e) => handleDragStart(e, lead, col.id)}
                             isUpdating={updatingIds.has(lead.id)}
                             exclusivity={locks[lead.id]}
+                            isDragging={draggedLead?.lead.id === lead.id}
                           />
                         ))
                       )}

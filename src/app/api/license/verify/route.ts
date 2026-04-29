@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { verifyLicense } from "@/lib/license/verify";
+import { LicenseVerifyBodySchema, parseBody } from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /* POST /api/license/verify — verify a contractor license */
 export async function POST(req: NextRequest) {
   try {
-    const { license_number, state, license_type, holder_name } = await req.json();
-
-    if (!license_number || !state) {
-      return NextResponse.json({ error: "License number and state are required" }, { status: 400 });
-    }
+    const raw = await req.json();
+    const parsed = parseBody(LicenseVerifyBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { license_number, state, license_type, holder_name } = parsed.data;
 
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
         : "License submitted for verification. You'll be notified once verified."),
     });
   } catch (error) {
-    console.error("License verify error:", error);
+    logger.error("License verify error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "Verification failed" }, { status: 500 });
   }
 }

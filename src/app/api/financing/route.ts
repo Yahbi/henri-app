@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { FinancingAttachBodySchema, parseBody } from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/financing — financing stats & recent deals for contractor ─── */
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const supabase = await createClient();
 
@@ -43,7 +45,7 @@ export async function GET(request: NextRequest) {
       .order("created_at", { ascending: false });
 
     if (quotesError) {
-      console.error("Financing quotes fetch error:", quotesError);
+      logger.error("Financing quotes fetch error", { error: quotesError instanceof Error ? quotesError.message : String(quotesError) });
       return NextResponse.json(
         { error: "Failed to fetch financing data" },
         { status: 500 }
@@ -132,7 +134,7 @@ export async function GET(request: NextRequest) {
       deals,
     });
   } catch (err) {
-    console.error("Financing GET error:", err);
+    logger.error("Financing GET error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -168,30 +170,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
+    const raw = await req.json();
+    const parsed = parseBody(FinancingAttachBodySchema, raw);
+    if (parsed.response) return parsed.response;
     const { quote_id, financing_partner, monthly_payment, term_months, apr } =
-      body as {
-        quote_id?: string;
-        financing_partner?: "greensky" | "mosaic" | "service_finance";
-        monthly_payment?: number;
-        term_months?: number;
-        apr?: number;
-      };
-
-    if (!quote_id || !financing_partner) {
-      return NextResponse.json(
-        { error: "quote_id and financing_partner are required" },
-        { status: 400 }
-      );
-    }
-
-    const validPartners = ["greensky", "mosaic", "service_finance"];
-    if (!validPartners.includes(financing_partner)) {
-      return NextResponse.json(
-        { error: "Invalid financing_partner. Must be greensky, mosaic, or service_finance" },
-        { status: 400 }
-      );
-    }
+      parsed.data;
 
     /* Verify the quote belongs to this contractor */
     const { data: existingQuote, error: quoteErr } = await supabase
@@ -228,7 +211,7 @@ export async function POST(req: NextRequest) {
       .eq("id", quote_id);
 
     if (updateErr) {
-      console.error("Financing update error:", updateErr);
+      logger.error("Financing update error", { error: updateErr instanceof Error ? updateErr.message : String(updateErr) });
       return NextResponse.json(
         { error: "Failed to save financing details" },
         { status: 500 }
@@ -240,7 +223,7 @@ export async function POST(req: NextRequest) {
       message: "Financing details saved",
     });
   } catch (err) {
-    console.error("Financing POST error:", err);
+    logger.error("Financing POST error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

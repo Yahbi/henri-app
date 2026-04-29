@@ -24,6 +24,8 @@ function getStyles(severity: string) {
 export function WeatherAlertBanner({ alerts, className }: WeatherAlertBannerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // Mount-time reference so expiry countdowns are stable per render
+  const [mountNow] = useState(() => Date.now());
 
   if (alerts.length === 0 || dismissed) return null;
 
@@ -68,7 +70,7 @@ export function WeatherAlertBanner({ alerts, className }: WeatherAlertBannerProp
           {alerts.map((alert) => {
             const s = getStyles(alert.severity);
             const expires = new Date(alert.expires);
-            const timeLeft = Math.max(0, Math.round((expires.getTime() - Date.now()) / 3_600_000));
+            const timeLeft = Math.max(0, Math.round((expires.getTime() - mountNow) / 3_600_000));
 
             return (
               <div key={alert.id} className="pt-2">

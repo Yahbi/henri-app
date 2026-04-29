@@ -8,7 +8,7 @@ import { Resend } from "resend";
  * verified domain + API key.
  */
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "henri@henri.app";
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "henri@meethenri.com";
 
 function escapeHtml(str: string): string {
   return str
@@ -71,7 +71,7 @@ export async function sendIntakeConfirmation(
           <a href="${projectUrl}" style="display:inline-block;background:#D4886A;color:#ffffff;padding:12px 20px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">View your project →</a>
         </div>
         <p style="color:#64748b;font-size:12px;margin:24px 0 0;">
-          Questions? Reply to this email or sign in at henri.app to chat directly with your contractor.
+          Questions? Reply to this email or sign in at meethenri.com to chat directly with your contractor.
         </p>
       </td>
     </tr>

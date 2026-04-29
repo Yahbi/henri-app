@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { logger } from "@/lib/logger";
 import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
 
 interface UserProfile {
@@ -69,7 +70,7 @@ export function useUser(): UseUserReturn {
         setUser(authUser);
         if (authUser) await fetchProfile(authUser.id);
       } catch (err) {
-        console.error("useUser init failed", err);
+        logger.error("useUser init failed", { error: err instanceof Error ? err.message : String(err) });
       } finally {
         setLoading(false);
       }
@@ -88,7 +89,7 @@ export function useUser(): UseUserReturn {
             setProfile(null);
           }
         } catch (err) {
-          console.error("useUser auth-change handler failed", err);
+          logger.error("useUser auth-change handler failed", { error: err instanceof Error ? err.message : String(err) });
         } finally {
           setLoading(false);
         }

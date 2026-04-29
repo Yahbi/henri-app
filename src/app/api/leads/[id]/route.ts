@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { LeadPatchBodySchema, parseBody } from "@/lib/schemas/api";
 
 /* GET /api/leads/[id] — fetch single lead with permit data */
 export async function GET(
@@ -32,15 +33,14 @@ export async function PATCH(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await req.json();
-  const allowedFields = [
-    "status", "urgency", "notes", "contacted_at", "won_at",
-    "phone", "phone2", "email", "email2", "trade", "pipeline_value",
-  ];
+  const raw = await req.json();
+  const parsed = parseBody(LeadPatchBodySchema, raw);
+  if (parsed.response) return parsed.response;
 
+  /* Strict schema → drop undefined keys so untouched columns stay put. */
   const updates: Record<string, unknown> = {};
-  for (const key of allowedFields) {
-    if (key in body) updates[key] = body[key];
+  for (const [key, value] of Object.entries(parsed.data)) {
+    if (value !== undefined) updates[key] = value;
   }
 
   /* Auto-set timestamps on status transitions */

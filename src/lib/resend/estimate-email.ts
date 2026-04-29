@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { logger } from "@/lib/logger";
 
 function getResend() {
   return new Resend(process.env.RESEND_API_KEY!);
@@ -6,7 +7,7 @@ function getResend() {
 
 // See note in src/lib/resend/email.ts — production deploys must set
 // RESEND_FROM_EMAIL to a verified-domain mailbox.
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "henri@henri.app";
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "henri@meethenri.com";
 
 /** Escape HTML special characters */
 function escapeHtml(str: string): string {
@@ -33,7 +34,7 @@ interface EstimateEmailData {
 
 function buildEstimateEmailHtml(data: EstimateEmailData): string {
   const formattedAmount = `$${data.amount.toLocaleString()}`;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://henri.app";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://meethenri.com";
 
   return `
 <!DOCTYPE html>
@@ -120,13 +121,17 @@ export async function sendEstimateEmail(
     });
 
     if (error) {
-      console.error("[estimate-email] Resend error:", error);
+      logger.error("estimate-email Resend error", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return { success: false, emailId: null };
     }
 
     return { success: true, emailId: result?.id ?? null };
   } catch (err) {
-    console.error("[estimate-email] Error:", err);
+    logger.error("estimate-email error", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { success: false, emailId: null };
   }
 }

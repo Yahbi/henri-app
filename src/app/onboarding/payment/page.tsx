@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { CreditCard, Clock } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -24,7 +23,6 @@ const planDetails: Record<string, { name: string; price: number }> = {
 };
 
 export default function PaymentPage() {
-  const router = useRouter();
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);

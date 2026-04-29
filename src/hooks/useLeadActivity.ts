@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { logger } from "@/lib/logger";
 
 export interface ActivityEvent {
   id: string;
@@ -55,7 +56,7 @@ export function useLeadActivity(leadId?: string): UseLeadActivityReturn {
       const data = await res.json();
       setEvents(data.events ?? []);
     } catch (err) {
-      console.error("useLeadActivity fetch error:", err);
+      logger.error("useLeadActivity fetch error", { error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setIsLoading(false);

@@ -118,7 +118,7 @@ export function PropertyTracker({ homeValue: initialValue, mortgage: initialMort
   }, [zip]);
 
   /* Fetch real benchmark data for the user's ZIP */
-  const { benchmarks, isLoading: benchmarksLoading } = useBenchmarks(zip);
+  const { benchmarks } = useBenchmarks(zip);
 
   /* Map benchmarks to renovation ROI format, falling back to hardcoded data */
   const renovationROI = useMemo(() => {

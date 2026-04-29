@@ -25,13 +25,6 @@ const qualityTiers = [
   { value: "premium", label: "Premium", multiplier: 1.45 },
 ];
 
-interface BenchmarkData {
-  cost_low: number;
-  cost_avg: number;
-  cost_high: number;
-  sample_size: number;
-}
-
 interface CostEstimatorProps {
   initialZip?: string;
 }
@@ -44,14 +37,20 @@ export function CostEstimator({ initialZip = "" }: CostEstimatorProps) {
   const project = projectTypes.find((p) => p.value === projectType)!;
   const tier = qualityTiers.find((q) => q.value === quality)!;
 
-  const { benchmarks: benchmarkResults, isLoading: loadingBenchmark } = useBenchmarks(zip, project.trade, project.label);
+  const { benchmarks: benchmarkResults } = useBenchmarks(zip, project.trade, project.label);
 
-  const benchmark = benchmarkResults.length > 0 ? {
-    cost_low: benchmarkResults[0].cost_low,
-    cost_avg: benchmarkResults[0].cost_avg,
-    cost_high: benchmarkResults[0].cost_high,
-    sample_size: benchmarkResults[0].sample_size,
-  } : null;
+  const benchmark = useMemo(
+    () =>
+      benchmarkResults.length > 0
+        ? {
+            cost_low: benchmarkResults[0].cost_low,
+            cost_avg: benchmarkResults[0].cost_avg,
+            cost_high: benchmarkResults[0].cost_high,
+            sample_size: benchmarkResults[0].sample_size,
+          }
+        : null,
+    [benchmarkResults],
+  );
 
   const estimate = useMemo(() => {
     const mult = tier.multiplier;

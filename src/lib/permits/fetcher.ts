@@ -4,6 +4,10 @@
  * ────────────────────────────────────────────────────────────────────────── */
 
 import { type PermitSource, type HenriTrade, detectTrade } from "./sources";
+import {
+  extractContactWithProvenance,
+  type ContactSource,
+} from "@/lib/ingest/extract-contact";
 
 export interface NormalizedPermit {
   source_id: string;
@@ -22,6 +26,13 @@ export interface NormalizedPermit {
   applied_date: string | null;
   trade: HenriTrade;
   raw_data: Record<string, unknown>;
+  /** Provenance of any contact fields populated from `raw_data`. Null
+   *  when the upstream parser supplied owner_first/owner_last directly
+   *  and no raw-blob fallback was needed. Persisted to
+   *  `permits.contact_source` / `permits.contact_confidence` by the
+   *  cron. See migration 00039. */
+  contact_source: ContactSource | null;
+  contact_confidence: number | null;
 }
 
 export interface FetchOptions {
@@ -191,6 +202,27 @@ export async function fetchPermits(
       ownerLast = parts.last;
     }
 
+    // Ultimate fallback — the multi-city raw extractor. Catches the
+    // long tail of field-naming variants (owner_s_first_name on NYC,
+    // ownername on Baton Rouge, permittee_s_business_name, etc.) that
+    // aren't covered by the fm / resolve() priority lists above. Pure
+    // in-row read, no extra network calls.
+    //
+    // Run it unconditionally so we can attach provenance
+    // (`contact_source` / `contact_confidence`) to every NormalizedPermit,
+    // but only OVERWRITE owner_first/owner_last when the structured
+    // upstream fields were empty — same behavior as before.
+    const rawContact = extractContactWithProvenance(row);
+    if (!ownerFirst && !ownerLast) {
+      ownerFirst = rawContact.owner_first ?? "";
+      ownerLast = rawContact.owner_last ?? "";
+      if (!ownerFirst && !ownerLast && rawContact.owner_name) {
+        const parts = splitOwnerName(rawContact.owner_name);
+        ownerFirst = parts.first;
+        ownerLast = parts.last;
+      }
+    }
+
     // Build description text from available fields
     const descriptionText = toStr(resolve(row, fm.description, "description", "work_description", "scope_of_work"));
     const permitTypeText = toStr(resolve(row, fm.permit_type, "permit_type", "type", "work_type"));
@@ -238,6 +270,8 @@ export async function fetchPermits(
       estimated_value: toDollars(resolve(row, fm.permit_value, "estimated_cost", "valuation", "est_cost")),
       owner_first: ownerFirst,
       owner_last: ownerLast,
+      contact_source: rawContact.source,
+      contact_confidence: rawContact.confidence,
       description: descriptionText,
       applied_date: toStr(resolve(row, fm.issued_date, "issue_date", "issued_date", "approved_date")),
       trade,

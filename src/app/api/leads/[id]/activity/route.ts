@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /* ── Types ── */
 
@@ -297,7 +298,7 @@ export async function GET(
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error("Lead activity GET error:", err);
+    logger.error("Lead activity GET error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to fetch lead activity" },
       { status: 500 }

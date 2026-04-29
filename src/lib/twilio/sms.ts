@@ -1,4 +1,5 @@
 import Twilio from "twilio";
+import { logger } from "@/lib/logger";
 import type { LeadData } from "@/types/leads";
 
 function getTwilioClient() {
@@ -49,7 +50,9 @@ export async function sendLeadSMS(
 
     return { success: true, messageId: message.sid };
   } catch (error) {
-    console.error("Twilio SMS error:", error);
+    logger.error("Twilio SMS error", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return { success: false, messageId: null };
   }
 }

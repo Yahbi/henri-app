@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     description:
       "AI-scored permit leads delivered exclusively to you. One contractor per trade per ZIP code. Plans from $149/mo.",
     type: "website",
-    url: "https://henri.app/contractors",
+    url: "https://meethenri.com/contractors",
   },
 };
 

@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /* Ordered funnel stages (the happy path) */
 const FUNNEL_STAGES = ["new", "contacted", "quoted", "proposal", "won"] as const;
-
-/* Timestamp fields used to compute time between stages */
-const STAGE_TIMESTAMP: Record<string, string> = {
-  new: "created_at",
-  contacted: "contacted_at",
-  won: "won_at",
-};
 
 /**
  * Compute average days between two date arrays (pairwise).
@@ -189,7 +183,7 @@ export async function GET(_request: NextRequest) {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error("Funnel API error:", err);
+    logger.error("Funnel API error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to compute funnel data" },
       { status: 500 }

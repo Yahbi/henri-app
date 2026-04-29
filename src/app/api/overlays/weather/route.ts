@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 
 const NWS_API_BASE = "https://api.weather.gov";
 
@@ -10,7 +11,7 @@ export async function GET(request: NextRequest) {
 
     const headers: HeadersInit = {
       Accept: "application/geo+json",
-      "User-Agent": "(Henri App, contact@henri.app)",
+      "User-Agent": "(Henri App, contact@meethenri.com)",
     };
 
     let alertsUrl: string;
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ alerts });
   } catch (err) {
-    console.error("Error fetching weather alerts:", err);
+    logger.error("Error fetching weather alerts", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to fetch weather alerts" },
       { status: 500 }

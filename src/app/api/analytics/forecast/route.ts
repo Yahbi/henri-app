@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /* Plan prices in dollars per month (source of truth: CLAUDE.md) */
 const PLAN_PRICES: Record<string, number> = {
@@ -232,7 +233,7 @@ export async function GET(_request: NextRequest) {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error("Forecast API error:", err);
+    logger.error("Forecast API error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to compute forecast" },
       { status: 500 }

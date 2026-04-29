@@ -29,11 +29,13 @@ export function ExclusivityBadge({
   const expired = ms <= 0;
   const urgent = !expired && ms < 24 * 60 * 60 * 1000;
 
+  // Tone classes — color-mix() over canonical tokens so future palette
+  // shifts (warm/primary) propagate. Migrated 2026-04-25.
   const tone = expired
     ? "text-muted-foreground bg-bg-subtle border-border"
     : urgent
-      ? "text-warm bg-[rgba(212,162,74,0.12)] border-[rgba(212,162,74,0.25)]"
-      : "text-primary bg-primary-10 border-[rgba(212,136,106,0.25)]";
+      ? "text-warm bg-[color-mix(in_srgb,var(--warm)_12%,transparent)] border-[color-mix(in_srgb,var(--warm)_25%,transparent)]"
+      : "text-primary bg-primary-10 border-[color-mix(in_srgb,var(--primary)_25%,transparent)]";
 
   const sizeCls =
     size === "xs"

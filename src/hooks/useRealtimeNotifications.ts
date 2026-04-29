@@ -57,6 +57,8 @@ export function useRealtimeNotifications({
 
   useEffect(() => {
     if (!enabled || !userId) {
+      // Reset-on-disable; state drives "connected" indicator UI
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsConnected(false);
       return;
     }

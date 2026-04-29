@@ -607,7 +607,7 @@ export function ChatIntakeModal({
         setIsComputing(false);
       }
     })();
-  }, [validateContact, contactName, contactPhone, contactEmail, initialZip, initialTrade, address, selectedTrade, timeline, budget, description]);
+  }, [validateContact, contactName, contactPhone, contactEmail, initialZip, initialTrade, address, selectedTrade, timeline, budget, description, refinementAnswers]);
 
   /* ---- ESC to close ---- */
   useEffect(() => {
@@ -709,25 +709,61 @@ export function ChatIntakeModal({
 
             {/* Step 1: Address / ZIP */}
             {step === 1 && (
-              <div className="flex gap-2 pt-2">
-                <input
-                  type="text"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Enter ZIP code or address..."
-                  className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddressSubmit();
-                  }}
-                  autoFocus
-                />
-                <button
-                  onClick={handleAddressSubmit}
-                  disabled={!address.trim()}
-                  className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
-                >
-                  Next
-                </button>
+              <div className="pt-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Enter ZIP code or address..."
+                    className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleAddressSubmit();
+                    }}
+                    /* `inputMode="text"` not `numeric` — we accept either
+                     * a ZIP or a full street address, so a digits-only
+                     * keyboard would block the second path. */
+                    inputMode="text"
+                    autoComplete="postal-code"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleAddressSubmit}
+                    disabled={!address.trim()}
+                    className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+                {/* Live input-intent hint — updates as the user types so
+                 * the disabled-Next state is never mysterious. Design
+                 * critique M6 flagged the Next button looking stuck
+                 * when `input` events weren't firing correctly (dev-tools
+                 * artefact, but the hint also helps real users who type
+                 * a partial ZIP). Three states:
+                 *   - empty    → no hint (placeholder carries the ask)
+                 *   - digits <5 → "Keep typing — 5 digits for a ZIP"
+                 *   - digits =5 → "ZIP code recognised"
+                 *   - non-digit → "Or type the full street address" */}
+                {(() => {
+                  const trimmed = address.trim();
+                  if (!trimmed) return null;
+                  const digitsOnly = /^\d+$/.test(trimmed);
+                  const isZip = digitsOnly && trimmed.length === 5;
+                  const hint = isZip
+                    ? "ZIP code recognised"
+                    : digitsOnly
+                      ? `Keep typing — ${5 - trimmed.length} more digit${5 - trimmed.length === 1 ? "" : "s"} for a ZIP`
+                      : "Or type the full street address — both work";
+                  const tone = isZip
+                    ? "text-[color:var(--success,_#3D9970)]"
+                    : "text-muted-foreground";
+                  return (
+                    <p className={`mt-1.5 text-[11px] ${tone}`} aria-live="polite">
+                      {hint}
+                    </p>
+                  );
+                })()}
               </div>
             )}
 

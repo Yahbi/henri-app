@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/outreach — outreach history + stats for the current contractor ─── */
 export async function GET() {
@@ -40,7 +41,7 @@ export async function GET() {
       .limit(50);
 
     if (oErr) {
-      console.error("Outreach queue fetch error:", oErr);
+      logger.error("Outreach queue fetch error", { error: oErr instanceof Error ? oErr.message : String(oErr) });
       return Response.json(
         { error: "Failed to fetch outreach data" },
         { status: 500 }
@@ -78,7 +79,7 @@ export async function GET() {
       .order("created_at", { ascending: false });
 
     if (sErr) {
-      console.error("Sequences fetch error:", sErr);
+      logger.error("Sequences fetch error", { error: sErr instanceof Error ? sErr.message : String(sErr) });
       // Non-blocking — still return outreach data
     }
 
@@ -111,7 +112,7 @@ export async function GET() {
       sequences: sequences ?? [],
     });
   } catch (err) {
-    console.error("Outreach GET error:", err);
+    logger.error("Outreach GET error", { error: err instanceof Error ? err.message : String(err) });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -186,7 +187,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (insertErr) {
-      console.error("Outreach insert error:", insertErr);
+      logger.error("Outreach insert error", { error: insertErr instanceof Error ? insertErr.message : String(insertErr) });
       return Response.json(
         { error: "Failed to queue outreach" },
         { status: 500 }
@@ -198,7 +199,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    console.error("Outreach POST error:", err);
+    logger.error("Outreach POST error", { error: err instanceof Error ? err.message : String(err) });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

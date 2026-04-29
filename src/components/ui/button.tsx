@@ -20,13 +20,30 @@ const buttonVariants = cva(
         danger:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm",
         link: "text-primary underline-offset-4 hover:underline",
-        glow: "bg-primary text-primary-foreground shadow-[0_0_20px_hsl(var(--primary)/0.4)] hover:shadow-[0_0_30px_hsl(var(--primary)/0.6)] hover:bg-primary/90",
+        // Use named shadow tokens (defined in globals.css `@theme inline`)
+        // instead of arbitrary `shadow-[hsl(var(--primary)/X)]` values.
+        // Same visual output; the arbitrary-value form trips a Tailwind
+        // v4 + Turbopack 16.2.3 PostCSS parser bug.
+        glow: "bg-primary text-primary-foreground shadow-glow-button hover:shadow-glow-button-hover hover:bg-primary/90",
       },
       size: {
+        /* `sm` stays at h-8 (32px) for tight contexts — tables, filter
+         * chips, inline lead-card actions — where the button is NOT the
+         * only path to the action and 44px would destroy information
+         * density. Only use sm in contexts that also expose the same
+         * action via another 44px-or-larger affordance. */
         sm: "h-8 px-3 text-xs rounded-md",
-        md: "h-10 px-4 text-sm",
+        /* `md` bumped from h-10 (40px) → h-11 (44px) on 2026-04-23 to
+         * meet WCAG 2.5.5 "Target Size (Enhanced)" + Apple HIG 44pt
+         * minimum. Most primary CTAs on the app use this default size;
+         * contractors use Henri on phones on job sites, so missed taps
+         * are real. Padding bumped to px-5 so the click area scales
+         * with the height (tallest-meets-widest).*/
+        md: "h-11 px-5 text-sm",
         lg: "h-12 px-6 text-base rounded-md",
-        icon: "h-10 w-10",
+        /* Icon-only buttons — same 44px bump as md. Accessibility-first;
+         * the trade-off is slightly chunkier icon clusters. */
+        icon: "h-11 w-11",
       },
     },
     defaultVariants: {

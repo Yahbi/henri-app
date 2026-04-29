@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { Send, Copy, Check, TrendingUp, TrendingDown, Minus, Loader2, Star } from "lucide-react";
+import { Send, Copy, Check, Loader2, Star } from "lucide-react";
 import { useUser } from "@/hooks/useUser";
 import { ComingSoon, STUBS_ENABLED } from "@/components/ComingSoon";
 import { useReviews } from "@/hooks/useReviews";
+import { Card } from "@/components/ui/card";
 
 /* ─── Types ─── */
 type Sentiment = "positive" | "neutral" | "negative";
@@ -391,7 +392,7 @@ function ReputationPageInner() {
 
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="rounded-lg border border-border bg-card p-4">
+        <Card className="p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Overall Rating</p>
           {isLoading ? (
             <div className="h-8 w-12 bg-bg-subtle rounded animate-pulse mt-1" />
@@ -401,8 +402,8 @@ function ReputationPageInner() {
               <StarRating count={Math.round(stats.avg)} />
             </>
           )}
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        </Card>
+        <Card className="p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Reviews</p>
           {isLoading ? (
             <div className="h-8 w-12 bg-bg-subtle rounded animate-pulse mt-1" />
@@ -414,27 +415,27 @@ function ReputationPageInner() {
               )}
             </>
           )}
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        </Card>
+        <Card className="p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Response Rate</p>
           <p className="text-2xl font-heading font-normal text-foreground mt-1">{responseRate}%</p>
           <p className="text-xs text-muted-foreground mt-0.5">Goal: 90%+</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        </Card>
+        <Card className="p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Sentiment</p>
           <div className="flex items-center gap-3 mt-2">
             <span className="text-xs text-green-400">{sentimentCounts.positive} pos</span>
             <span className="text-xs text-yellow-400">{sentimentCounts.neutral} neu</span>
             <span className="text-xs text-red-400">{sentimentCounts.negative} neg</span>
           </div>
-        </div>
+        </Card>
       </div>
 
       {/* Star Distribution + Review Trend */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
           <h2 className="text-lg font-heading font-normal text-foreground mb-3">Rating Distribution</h2>
-          <div className="rounded-lg border border-border bg-card p-5 space-y-2">
+          <Card className="p-5 space-y-2">
             {[5, 4, 3, 2, 1].map((star) => {
               const count = stats.distribution[star] ?? 0;
               const pct = stats.count > 0 ? (count / stats.count) * 100 : 0;
@@ -449,15 +450,15 @@ function ReputationPageInner() {
                 </div>
               );
             })}
-          </div>
+          </Card>
         </div>
 
         <div>
           <h2 className="text-lg font-heading font-normal text-foreground mb-3">Review Trend</h2>
-          <div className="rounded-lg border border-border bg-card p-5">
+          <Card className="p-5">
             <TrendBar data={monthlyTrend} />
             <p className="text-xs text-muted-foreground mt-3 text-center">Reviews per month (last 6 months)</p>
-          </div>
+          </Card>
         </div>
       </div>
 
@@ -465,7 +466,7 @@ function ReputationPageInner() {
       {stats.count > 0 && (
         <div>
           <h2 className="text-lg font-heading font-normal text-foreground mb-3">Your Performance</h2>
-          <div className="rounded-lg border border-primary/20 bg-card p-5">
+          <Card className="border-primary/20 p-5">
             <div className="flex items-center gap-2 mb-3">
               <p className="text-sm text-foreground font-medium">{companyName}</p>
               <StarRating count={Math.round(stats.avg)} />
@@ -485,7 +486,7 @@ function ReputationPageInner() {
                 <p className="text-[10px] text-muted-foreground">5-Star Reviews</p>
               </div>
             </div>
-          </div>
+          </Card>
         </div>
       )}
 
@@ -508,17 +509,17 @@ function ReputationPageInner() {
         {isLoading ? (
           <div className="space-y-3">
             {[...Array(3)].map((_, i) => (
-              <div key={i} className="rounded-lg border border-border bg-card p-5 animate-pulse space-y-3">
+              <Card key={i} className="p-5 animate-pulse space-y-3">
                 <div className="h-4 w-48 bg-bg-subtle rounded" />
                 <div className="h-3 w-full bg-bg-subtle rounded" />
                 <div className="h-3 w-2/3 bg-bg-subtle rounded" />
-              </div>
+              </Card>
             ))}
           </div>
         ) : (
           <div className="space-y-3">
             {filteredReviews.map((review) => (
-              <div key={review.id} className="rounded-lg border border-border bg-card p-5 space-y-3">
+              <Card key={review.id} className="p-5 space-y-3">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <StarRating count={review.stars} />
@@ -542,7 +543,7 @@ function ReputationPageInner() {
                     <Send className="h-3 w-3" /> Reply with AI Draft
                   </button>
                 )}
-              </div>
+              </Card>
             ))}
             {filteredReviews.length === 0 && !isLoading && (
               <div className="rounded-xl border border-dashed border-border p-8 text-center">

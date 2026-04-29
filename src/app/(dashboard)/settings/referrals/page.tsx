@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Copy, Check, Send, Gift, Users, DollarSign, Loader2 } from "lucide-react";
 import { useReferrals } from "@/hooks/useReferrals";
 import type { Referral } from "@/hooks/useReferrals";
+import { Card } from "@/components/ui/card";
 
 function statusBadge(status: string) {
   const map: Record<string, { label: string; cls: string }> = {
@@ -97,26 +98,26 @@ export default function ReferralsPage() {
           <h2 className="text-lg font-heading font-normal text-foreground">How It Works</h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="rounded-lg bg-card border border-border p-4 space-y-2">
+          <Card className="p-4 space-y-2">
             <p className="text-sm font-medium text-foreground">Refer a Contractor</p>
             <p className="text-2xl font-heading font-normal text-primary">1 month free</p>
             <p className="text-xs text-muted-foreground">
               When they subscribe to any plan, you both get one month credited to your account.
             </p>
-          </div>
-          <div className="rounded-lg bg-card border border-border p-4 space-y-2">
+          </Card>
+          <Card className="p-4 space-y-2">
             <p className="text-sm font-medium text-foreground">Refer a Homeowner</p>
             <p className="text-2xl font-heading font-normal text-primary">$50 credit</p>
             <p className="text-xs text-muted-foreground">
               When a homeowner you refer completes their first project through Henri.
             </p>
-          </div>
+          </Card>
         </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="rounded-lg border border-border bg-card p-4">
+        <Card className="p-4">
           <div className="flex items-center gap-1.5 mb-1">
             <Users className="h-3.5 w-3.5 text-muted-foreground" />
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Referred</p>
@@ -124,8 +125,8 @@ export default function ReferralsPage() {
           <p className="text-2xl font-heading font-normal text-foreground">
             {isLoading ? "\u2014" : stats.totalReferred}
           </p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        </Card>
+        <Card className="p-4">
           <div className="flex items-center gap-1.5 mb-1">
             <Check className="h-3.5 w-3.5 text-green-400" />
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Converted</p>
@@ -133,8 +134,8 @@ export default function ReferralsPage() {
           <p className="text-2xl font-heading font-normal text-green-400">
             {isLoading ? "\u2014" : stats.converted}
           </p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        </Card>
+        <Card className="p-4">
           <div className="flex items-center gap-1.5 mb-1">
             <DollarSign className="h-3.5 w-3.5 text-primary" />
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Earned</p>
@@ -142,8 +143,8 @@ export default function ReferralsPage() {
           <p className="text-2xl font-heading font-normal text-primary">
             {isLoading ? "\u2014" : `$${stats.totalEarned}`}
           </p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        </Card>
+        <Card className="p-4">
           <div className="flex items-center gap-1.5 mb-1">
             <Gift className="h-3.5 w-3.5 text-[#D4A24A]" />
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Pending</p>
@@ -151,13 +152,13 @@ export default function ReferralsPage() {
           <p className="text-2xl font-heading font-normal text-[#D4A24A]">
             {isLoading ? "\u2014" : stats.pendingRewards}
           </p>
-        </div>
+        </Card>
       </div>
 
       {/* Referral Link + Invite */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Share link */}
-        <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+        <Card className="p-6 space-y-4">
           <h3 className="text-base font-heading font-normal text-foreground">Your Referral Link</h3>
           <div className="flex gap-2">
             <input
@@ -178,10 +179,10 @@ export default function ReferralsPage() {
             Share this link with contractors or homeowners. Your code:{" "}
             <span className="font-mono text-foreground">{referralCode}</span>
           </p>
-        </div>
+        </Card>
 
         {/* Email invite */}
-        <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+        <Card className="p-6 space-y-4">
           <h3 className="text-base font-heading font-normal text-foreground">Send an Invite</h3>
           <div className="flex gap-2">
             <input
@@ -211,19 +212,19 @@ export default function ReferralsPage() {
               {inviteResult.message}
             </p>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Referral History */}
       <div>
         <h3 className="text-lg font-heading font-normal text-foreground mb-3">Referral History</h3>
         {isLoading ? (
-          <div className="rounded-lg border border-border bg-card p-8 text-center">
+          <Card className="p-8 text-center">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">Loading referrals...</p>
-          </div>
+          </Card>
         ) : referrals.length > 0 ? (
-          <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <Card className="overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-bg-subtle">
@@ -258,7 +259,7 @@ export default function ReferralsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
         ) : (
           <div className="rounded-xl border border-dashed border-border p-8 text-center">
             <p className="text-sm font-medium text-foreground">No referrals yet</p>

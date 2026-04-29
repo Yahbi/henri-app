@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { wasProcessed, markProcessed } from "@/lib/webhooks/idempotency";
 
 /**
  * Verify a Svix-formatted webhook signature (used by Resend).
@@ -117,6 +118,23 @@ export async function POST(request: NextRequest) {
     const supabase = createAdminClient();
     const now = new Date().toISOString();
 
+    // Audit priority #7 (2026-04-28): Svix-shaped idempotency. Resend
+    // (via Svix) sends every event with a `svix-id` header that's
+    // guaranteed unique per delivery; replays carry the same ID. We
+    // dedupe on (svix-id, type) since one email can have multiple
+    // distinct events (delivered → opened → clicked).
+    const svixId = request.headers.get("svix-id") ?? emailId;
+    const idempotencyKey = `${svixId}:${event.type}`;
+    const seen = await wasProcessed(supabase, "resend", idempotencyKey);
+    if (seen) {
+      return NextResponse.json({
+        ok: true,
+        skipped: "duplicate",
+        emailId,
+        eventType: event.type,
+      });
+    }
+
     const updates: Record<string, unknown> = {};
 
     switch (event.type) {
@@ -161,6 +179,11 @@ export async function POST(request: NextRequest) {
     if (error) {
       logger.error("Resend webhook DB update error", { error: error.message });
     }
+
+    await markProcessed(supabase, "resend", idempotencyKey, {
+      event_type: event.type,
+      raw_meta: { emailId, type: event.type },
+    });
 
     return NextResponse.json({ status: "ok", emailId, eventType: event.type });
   } catch (err) {

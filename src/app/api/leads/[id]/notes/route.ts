@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { LeadNoteBodySchema, parseBody } from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /* ── POST /api/leads/[id]/notes — append a timestamped note to a lead ── */
 
@@ -19,12 +21,15 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await req.json();
-    const { content } = body as { content?: string };
+    const raw = await req.json();
+    const parsed = parseBody(LeadNoteBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { content } = parsed.data;
 
-    if (!content || content.trim() === "") {
+    /* Reject pure-whitespace content (Zod's min(1) lets through "   "). */
+    if (content.trim() === "") {
       return NextResponse.json(
-        { error: "content is required" },
+        { error: "Note content required" },
         { status: 400 }
       );
     }
@@ -64,7 +69,7 @@ export async function POST(
       .single();
 
     if (updateErr) {
-      console.error("Note update error:", updateErr);
+      logger.error("Note update error", { error: updateErr instanceof Error ? updateErr.message : String(updateErr) });
       return NextResponse.json(
         { error: "Failed to save note" },
         { status: 500 }
@@ -92,7 +97,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (err) {
-    console.error("Lead notes POST error:", err);
+    logger.error("Lead notes POST error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

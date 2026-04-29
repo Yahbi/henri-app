@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 import { hasSupabase } from "@/lib/env";
 import { isGodModeEmail, GOD_MODE_MAP_LIMIT } from "@/lib/auth/god-mode";
 import { fetchAllTerritoryZips } from "@/lib/territories/fetch-all";
@@ -146,8 +147,12 @@ export async function GET(request: NextRequest) {
           )
         `,
         )
-        .eq("contractor_id", user.id)
         .range(offset, to);
+      // Subscription tiers cap by contractor_id; god-mode (founder/dev
+      // allowlist) sees every lead in the account regardless of tier.
+      if (!godMode) {
+        pageQuery = pageQuery.eq("contractor_id", user.id);
+      }
       // Score-ordered scans on (contractor_id, score DESC) across 131k rows
       // trigger Postgres statement timeouts on later pages under scorer
       // write load. When the caller wants a large slice (anything ≥ 5000),
@@ -169,9 +174,11 @@ export async function GET(request: NextRequest) {
         // Partial-result tolerance: large ?limit= requests can hit the
         // Supabase statement timeout on a later page. Return what we have
         // rather than 500'ing the entire response and blanking the map.
-        console.warn(
-          `leads/map: page at offset ${offset} failed (${pageErr.message}); returning ${leads.length} rows collected so far`,
-        );
+        logger.warn("leads/map: page failed; returning rows collected so far", {
+          offset,
+          error: pageErr.message,
+          collected: leads.length,
+        });
         break;
       }
       if (!pageRows || pageRows.length === 0) break;
@@ -221,9 +228,17 @@ export async function GET(request: NextRequest) {
       if (Math.abs(lat) < 0.5 && Math.abs(lng) < 0.5) continue;
       if (lat === 0 || lng === 0) continue;
 
-      // Only include leads in the contractor's territories
+      // Territory scoping: leads are scoped to the contractor via
+      // `contractor_id = user.id` above. A second ZIP-level filter is
+      // redundant (and actively wrong) — a contractor keeps leads they
+      // earned even after releasing the territory, so filtering against
+      // *current* territory ZIPs wipes legacy leads. This mirrors the
+      // dropped `.in("permits.zip", userZips)` in /api/leads; same
+      // rationale documented there. Debug (2026-04-22): the filter was
+      // dropping 98% of god-mode leads because founder's assigned
+      // leads span Hartford CT / Louisville KY but current territories
+      // are NY-heavy — zero ZIP overlap, blank map.
       const zip = String(permit.zip ?? "");
-      if (zip && userZips.length > 0 && !userZips.includes(zip)) continue;
 
       features.push({
         type: "Feature",
@@ -353,7 +368,7 @@ export async function GET(request: NextRequest) {
       headers: { "Cache-Control": "private, max-age=60" },
     });
   } catch (err) {
-    console.error("Error fetching map leads:", err);
+    logger.error("Error fetching map leads", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to fetch map data" },
       { status: 500 },

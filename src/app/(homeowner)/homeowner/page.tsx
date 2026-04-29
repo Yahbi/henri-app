@@ -158,7 +158,7 @@ export default function HomeownerDashboard() {
                 <MessageSquare className="mx-auto h-8 w-8 text-muted-foreground/40" />
                 <p className="mt-3 text-sm font-medium text-foreground">No projects yet</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Tell Henri about a project and we'll match you with a verified local contractor.
+                  Tell Henri about a project and we&apos;ll match you with a verified local contractor.
                 </p>
                 {/* 3-step ladder — Phase 1.5 gives the homeowner a clear
                     next-step expectation before they even open the chat */}

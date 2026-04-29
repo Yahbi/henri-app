@@ -174,7 +174,7 @@ async function deliverOne(c: BlastCampaign, lead: Lead): Promise<boolean> {
   // email
   if (!lead.email) return false;
   const resendKey = process.env.RESEND_API_KEY;
-  const fromAddr = process.env.RESEND_FROM_EMAIL ?? "henri@henri.app";
+  const fromAddr = process.env.RESEND_FROM_EMAIL ?? "henri@meethenri.com";
   if (!resendKey) return false;
   try {
     const res = await fetch("https://api.resend.com/emails", {

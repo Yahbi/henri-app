@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { logger } from "@/lib/logger";
 import type { ContractorProfile, ContractorProfileUpdate } from "@/types/profile";
 
 interface UseProfileReturn {
@@ -35,7 +36,7 @@ export function useProfile(): UseProfileReturn {
       const data = await res.json();
       setProfile(data.profile ?? null);
     } catch (err) {
-      console.error("useProfile fetch error:", err);
+      logger.error("useProfile fetch error", { error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setIsLoading(false);

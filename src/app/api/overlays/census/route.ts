@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 
 const CENSUS_ACS_API = "https://api.census.gov/data/2022/acs/acs5";
 
@@ -110,7 +111,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ data });
   } catch (err) {
-    console.error("Error fetching Census data:", err);
+    logger.error("Error fetching Census data", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to fetch Census demographic data" },
       { status: 500 }

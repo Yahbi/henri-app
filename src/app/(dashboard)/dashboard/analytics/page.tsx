@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { MetricGrid } from "@/components/analytics/MetricGrid";
 import { BenchmarkWidget } from "@/components/dashboard/BenchmarkWidget";
 import { useLeads } from "@/hooks/useLeads";
@@ -10,6 +10,7 @@ import { useUser } from "@/hooks/useUser";
 import { useFunnel } from "@/hooks/useFunnel";
 import { useForecast } from "@/hooks/useForecast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, ArrowRight } from "lucide-react";
 
 const LeadTrendChart = dynamic(
@@ -32,7 +33,7 @@ function ConversionFunnel({ stages, overall }: {
   const maxCount = Math.max(...stages.map((s) => s.count), 1);
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+    <Card className="p-5 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">Conversion Funnel</h3>
         <span className="text-xs text-muted-foreground">Last 30 days</span>
@@ -93,7 +94,7 @@ function ConversionFunnel({ stages, overall }: {
           <p className="text-[10px] text-muted-foreground">Avg Cycle</p>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -117,7 +118,7 @@ function ForecastWidget({ forecast }: { forecast: {
   const trendDir = lastMonth >= prevMonth ? "up" : "down";
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+    <Card className="p-5 space-y-4">
       <h3 className="text-sm font-semibold text-foreground">Revenue Forecast</h3>
 
       {/* Mini trend chart */}
@@ -176,7 +177,7 @@ function ForecastWidget({ forecast }: { forecast: {
           Revenue {trendDir === "up" ? "trending up" : "declining"} month-over-month
         </span>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -231,7 +232,7 @@ function PropertyAgeChart({
   //   3. Loaded, N hits → the bar chart below
   if (isLoading) {
     return (
-      <div className="bg-card border border-border rounded-xl p-4">
+      <Card className="p-4">
         <h3 className="text-sm font-semibold text-foreground">Leads by property age</h3>
         <div className="space-y-1.5 mt-3">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -246,7 +247,7 @@ function PropertyAgeChart({
             </div>
           ))}
         </div>
-      </div>
+      </Card>
     );
   }
 
@@ -255,7 +256,7 @@ function PropertyAgeChart({
     // enrichment data is live today + that we're expanding (rather than
     // silently rendering an empty chart that looks broken).
     return (
-      <div className="rounded-xl border border-border bg-card p-4">
+      <Card className="p-4">
         <h3 className="text-sm font-semibold text-foreground">Leads by property age</h3>
         <p className="mt-2 text-xs text-muted-foreground">
           Year-built data is live in CA, CT, DC, MD, NC, NY, SD, and Harris
@@ -263,12 +264,12 @@ function PropertyAgeChart({
           jurisdictions — chart will populate automatically once your
           leads land in a supported area.
         </p>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="bg-card border border-border rounded-xl p-4">
+    <Card className="p-4">
       <h3 className="text-sm font-semibold text-foreground">Leads by property age</h3>
       <p className="text-xs text-muted-foreground mt-0.5 mb-3">
         {total.toLocaleString()} leads with known year built
@@ -287,7 +288,7 @@ function PropertyAgeChart({
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -304,17 +305,19 @@ export default function AnalyticsPage() {
     limit: godMode ? 500_000 : 2000,
     skip_sort: godMode, // planner-friendly; see useLeads paginated branch
   });
-  const leads = leadsRaw ?? [];
+  const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
   const { profile } = useUser();
   const { funnel, isLoading: funnelLoading } = useFunnel();
   const planPrice = profile?.plan ? (PLAN_PRICES[profile.plan] ?? 749) : 749;
   const { forecast, isLoading: forecastLoading } = useForecast(planPrice);
 
+  // Mount-time "now" so the 30-day window is stable across renders (not a moving target)
+  const [mountNow] = useState(() => Date.now());
+
   const metrics = useMemo(() => {
     if (!leads || leads.length === 0) return null;
 
-    const now = Date.now();
-    const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+    const thirtyDaysAgo = mountNow - 30 * 24 * 60 * 60 * 1000;
     const recent = leads.filter((l) => new Date(l.created_at).getTime() >= thirtyDaysAgo);
 
     const totalLeads = recent.length;
@@ -337,7 +340,7 @@ export default function AnalyticsPage() {
       : null;
 
     return { totalLeads, contactRate, quoteRate, jobsWon, revenue, avgResponseH, costPerWin, roi };
-  }, [leads, planPrice]);
+  }, [leads, planPrice, mountNow]);
 
   const zipDisplay = leads.length > 0
     ? [...new Set(leads.map((l) => l.zip).filter(Boolean))].slice(0, 3).join(", ")
@@ -399,7 +402,7 @@ export default function AnalyticsPage() {
         }, {});
         const topZip = Object.entries(zipCounts).sort((a, b) => b[1] - a[1])[0];
         return (
-          <div className="bg-card border border-border rounded-xl p-4 inline-block">
+          <Card className="p-4 inline-block">
             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
               Top ZIP
             </p>
@@ -409,7 +412,7 @@ export default function AnalyticsPage() {
             <p className="text-xs text-muted-foreground mt-1">
               {topZip ? `${topZip[1]} lead${topZip[1] !== 1 ? "s" : ""}` : "Not enough data yet"}
             </p>
-          </div>
+          </Card>
         );
       })()}
 

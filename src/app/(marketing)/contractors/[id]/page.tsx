@@ -636,7 +636,7 @@ export default async function ContractorProfilePage({
               For contractors
             </Link>
             <Link
-              href="mailto:support@henri.app"
+              href="mailto:support@meethenri.com"
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               Contact

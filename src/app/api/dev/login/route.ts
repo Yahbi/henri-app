@@ -3,14 +3,24 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
 // Dev-only one-click login for the seeded dev contractor.
-// Refuses to run in production; delete this file to remove the shortcut.
+// Refuses to run in production OR on any Vercel deploy.
+// Delete this file to remove the shortcut entirely.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Defense-in-depth (P0-2): three independent gates. All must hold for
+// the route to fire. Mirrors the pattern in /api/dev/auto-login.
+function devLoginAllowed(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  if (process.env.VERCEL_ENV) return false; // any Vercel env is off-limits
+  if (process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN !== "1") return false;
+  return true;
+}
+
 export async function GET(request: Request) {
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Disabled in production" }, { status: 404 });
+  if (!devLoginAllowed()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

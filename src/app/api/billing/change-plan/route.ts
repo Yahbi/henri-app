@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe/client";
 import { logApiError } from "@/lib/log";
+import { ChangePlanBodySchema, parseBody } from "@/lib/schemas/api";
+
+/* Schema lives in `src/lib/schemas/api.ts` (`ChangePlanBodySchema`) so
+ * every request body across the API surface goes through the same
+ * validation pattern. Per the 2026-04-26 audit ([04-api-surface.md F2])
+ * we previously did `if (!plan || !PLAN_PRICES[plan])` which works at
+ * runtime but lets a malformed JSON body coerce silently. With Zod the
+ * 400 response is explicit. */
 
 /**
  * POST /api/billing/change-plan
@@ -32,9 +40,12 @@ const PLAN_RANK: Record<string, number> = {
 
 export async function POST(req: NextRequest) {
   try {
-    const { plan } = (await req.json()) as { plan?: string };
-    if (!plan || !PLAN_PRICES[plan]) {
-      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+    const raw = await req.json().catch(() => ({}));
+    const parsed = parseBody(ChangePlanBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const plan = parsed.data.plan;
+    if (!PLAN_PRICES[plan]) {
+      return NextResponse.json({ error: "Plan price ID not configured" }, { status: 400 });
     }
 
     const supabase = await createClient();

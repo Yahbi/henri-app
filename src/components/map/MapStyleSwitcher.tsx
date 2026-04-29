@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Layers as LayersIcon, Check } from "lucide-react";
+// `Map` icon — represents basemap style switching (Voyager / Satellite /
+// Streets). `OverlayControls` uses the `Layers` icon for stacking-layers
+// semantics; using a different icon here disambiguates the two toolbar
+// buttons. Was `Layers` until 2026-04-26 — both buttons looked identical.
+import { Map as MapIcon, Check } from "lucide-react";
 import { MAP_STYLES_DROPDOWN, type MapStyleOption } from "@/lib/mapbox/config";
 import { cn } from "@/lib/utils/cn";
 import type maplibregl from "maplibre-gl";
@@ -82,7 +86,7 @@ export function MapStyleSwitcher({
           open && "bg-accent text-accent-foreground",
         )}
       >
-        <LayersIcon className="h-4 w-4" />
+        <MapIcon className="h-4 w-4" />
       </button>
 
       {open && (

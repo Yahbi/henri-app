@@ -1,53 +1,200 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { MapPin, Grid3X3, Users } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { MapPin, ShieldCheck, Clock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 
+/*
+ * Landing-page territory visualization.
+ *
+ * Previous version dropped the full contractor MapDashboard onto the
+ * marketing page, which made the section look like an unfinished admin
+ * tool (weather banner, overlay controls, style switcher). Founder
+ * feedback: "doesn't look pro."
+ *
+ * This replacement is a hand-crafted SVG grid of ZIP tiles showing
+ * availability states (Open / 1 slot left / Claimed). No live map
+ * library, no overlay controls, no tile requests — renders instantly,
+ * reads honestly, and conveys "one contractor per trade per ZIP" at a
+ * glance without needing the contractor workspace.
+ *
+ * Truthfulness: stats below reflect what CLAUDE.md says we actually
+ * have — ~925k permits across 46 states — rounded down ("900k+",
+ * "46 states"). Never invent metrics.
+ */
 
-const Map = dynamic(() => import("@/components/map/MapDashboard"), {
-  ssr: false,
-  loading: () => <Skeleton className="h-[500px] w-full rounded-xl" />,
-});
+type TileStatus = "open" | "one-left" | "claimed";
 
-const stats = [
-  { icon: MapPin, value: "6", label: "Cities" },
-  { icon: Grid3X3, value: "10,000+", label: "ZIPs" },
-  { icon: Users, value: "1", label: "Contractor Per ZIP" },
+interface Tile {
+  zip: string;
+  status: TileStatus;
+  /* Grid position for visual variety. */
+  col: number;
+  row: number;
+}
+
+/* Hand-arranged grid that evokes a city gridmap without pretending to
+   be a real one. ZIPs are purely decorative — not tied to a live DB. */
+const TILES: Tile[] = [
+  { zip: "90028", status: "claimed",   col: 0, row: 0 },
+  { zip: "90038", status: "one-left",  col: 1, row: 0 },
+  { zip: "90046", status: "open",      col: 2, row: 0 },
+  { zip: "90069", status: "claimed",   col: 3, row: 0 },
+  { zip: "90077", status: "open",      col: 4, row: 0 },
+  { zip: "90024", status: "one-left",  col: 0, row: 1 },
+  { zip: "90025", status: "open",      col: 1, row: 1 },
+  { zip: "90034", status: "claimed",   col: 2, row: 1 },
+  { zip: "90035", status: "open",      col: 3, row: 1 },
+  { zip: "90064", status: "claimed",   col: 4, row: 1 },
+  { zip: "90403", status: "open",      col: 0, row: 2 },
+  { zip: "90404", status: "one-left",  col: 1, row: 2 },
+  { zip: "90405", status: "claimed",   col: 2, row: 2 },
+  { zip: "90272", status: "open",      col: 3, row: 2 },
+  { zip: "90291", status: "open",      col: 4, row: 2 },
+  { zip: "90066", status: "claimed",   col: 0, row: 3 },
+  { zip: "90230", status: "open",      col: 1, row: 3 },
+  { zip: "90232", status: "one-left",  col: 2, row: 3 },
+  { zip: "90094", status: "open",      col: 3, row: 3 },
+  { zip: "90292", status: "claimed",   col: 4, row: 3 },
+];
+
+const STATUS_STYLES: Record<TileStatus, {
+  fill: string;
+  border: string;
+  label: string;
+  dot: string;
+}> = {
+  open: {
+    fill: "bg-success/10",
+    border: "border-success/30",
+    label: "Open",
+    dot: "bg-success",
+  },
+  "one-left": {
+    fill: "bg-warning/10",
+    border: "border-warning/30",
+    label: "1 slot left",
+    dot: "bg-warning",
+  },
+  claimed: {
+    fill: "bg-primary/10",
+    border: "border-primary/30",
+    label: "Claimed",
+    dot: "bg-primary",
+  },
+};
+
+/* Stats match the Hero's conservative framing so numbers never
+   disagree across the landing page. "45+" maps to the CLAUDE.md
+   example for the honest-framing rule; bump when we grow, never
+   round up pre-emptively. */
+const STATS = [
+  { icon: MapPin,      value: "900k+",   label: "Permits tracked" },
+  { icon: ShieldCheck, value: "45+",     label: "States covered" },
+  { icon: Clock,       value: "14-day",  label: "Exclusive window" },
 ] as const;
 
 export function TerritoryMapPreview() {
+  /* Progressive reveal — tiles fade in sequentially on scroll into view.
+     Cheap effect, big visual payoff, no JS dep. */
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!sectionRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            setVisible(true);
+            observer.disconnect();
+            break;
+          }
+        }
+      },
+      { threshold: 0.2 }
+    );
+    observer.observe(sectionRef.current);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <section className="bg-background py-24 lg:py-32">
+    <section ref={sectionRef} className="bg-background py-24 lg:py-32">
       <div className="mx-auto max-w-7xl px-6">
         {/* Section header */}
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="font-heading text-3xl font-normal tracking-tight text-foreground sm:text-4xl">
-            Lock Down Your Territory
+            Lock down your territory
           </h2>
           <p className="mt-4 text-lg text-muted-foreground">
-            One contractor per trade per ZIP. Be the first — and only — one to
-            know about every new permit in your exclusive territory.
+            One contractor per trade per ZIP. When a permit files in your
+            territory, you&apos;re the only one Henri tells.
           </p>
         </div>
 
-        {/* Map */}
-        <Card variant="elevated" className="mt-12 overflow-hidden">
-          <div className="h-[500px]">
-            <Map />
-          </div>
+        {/* Territory grid — card-framed SVG-ish tile visualization */}
+        <Card variant="elevated" className="mt-12 overflow-hidden bg-gradient-to-br from-background to-bg-subtle border-border">
+          <CardContent className="p-8 sm:p-12">
+            <div className="flex flex-col items-center">
+              {/* Tile grid */}
+              <div
+                className="grid gap-3"
+                style={{
+                  gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+                  gridTemplateRows: "repeat(4, auto)",
+                }}
+                role="img"
+                aria-label="Illustrative grid of ZIP codes showing availability states: Open, one slot left, and Claimed."
+              >
+                {TILES.map((tile, idx) => {
+                  const style = STATUS_STYLES[tile.status];
+                  /* Stagger the reveal by grid index so the whole thing
+                     washes in from top-left to bottom-right. */
+                  const delay = visible ? `${idx * 30}ms` : "0ms";
+                  return (
+                    <div
+                      key={tile.zip}
+                      className={`${style.fill} ${style.border} rounded-xl border px-4 py-5 text-left transition-all duration-500 ${
+                        visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+                      }`}
+                      style={{ transitionDelay: delay }}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          {style.label}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 font-mono text-lg font-medium tracking-tight text-foreground">
+                        {tile.zip}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Legend */}
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
+                {(Object.keys(STATUS_STYLES) as TileStatus[]).map((k) => (
+                  <div key={k} className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 rounded-full ${STATUS_STYLES[k].dot}`} />
+                    <span>{STATUS_STYLES[k].label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
         </Card>
 
-        {/* Stat cards */}
+        {/* Stat cards — honest numbers only, per CLAUDE.md. */}
         <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
-          {stats.map((stat) => {
+          {STATS.map((stat) => {
             const Icon = stat.icon;
             return (
-              <Card key={stat.label} variant="glass" className="text-center">
+              <Card key={stat.label} variant="translucent" className="text-center">
                 <CardContent className="flex flex-col items-center gap-2 p-6">
-                  <Icon className="h-6 w-6 text-primary" />
-                  <span className="text-2xl font-bold text-foreground">
+                  <Icon className="h-6 w-6 text-primary" aria-hidden="true" />
+                  <span className="font-heading text-3xl font-normal text-foreground">
                     {stat.value}
                   </span>
                   <span className="text-sm text-muted-foreground">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { logger } from "@/lib/logger";
 
 export interface Review {
   id: string;
@@ -113,7 +114,7 @@ export function useReviews(contractorId?: string): UseReviewsReturn {
         setStats(defaultStats);
       }
     } catch (err) {
-      console.error("useReviews fetch error:", err);
+      logger.error("useReviews fetch error", { error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setIsLoading(false);

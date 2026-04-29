@@ -7,6 +7,23 @@ import { cn } from "@/lib/utils/cn";
    Types
    ------------------------------------------------------------------ */
 
+/**
+ * Toast severity. Aligned with common toast-library conventions
+ * (react-hot-toast, sonner) — these are *notifications of what
+ * happened*, not action intents.
+ *
+ * Semantic distinction from `Badge`:
+ *   - Toast `"error"` = "something failed, surfacing to the user"
+ *   - Badge `"destructive"` = "this action will destroy data"
+ *
+ * They both happen to render red but mean different things. Per the
+ * design-system audit (2026-04-23), we explicitly keep these names
+ * separate rather than collapsing to a single `destructive` token,
+ * because the Toast message is describing an OUTCOME while the Badge
+ * is describing a PENDING INTENT. If you need a toast for a confirmed
+ * destructive action ("X leads archived"), use `type: "success"`
+ * with the consequence spelled out in the title.
+ */
 type ToastType = "success" | "error" | "warning" | "info";
 
 interface Toast {

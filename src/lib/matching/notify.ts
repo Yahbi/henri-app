@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MatchCandidate } from "./engine";
 import { sendLeadSMS } from "@/lib/twilio/sms";
 import { sendLeadEmail } from "@/lib/resend/email";
+import { logger } from "@/lib/logger";
 import type { LeadData } from "@/types/leads";
 
 interface IntakeInfo {
@@ -21,7 +22,7 @@ export async function notifyMatch(
   match: MatchCandidate,
   intake: IntakeInfo
 ): Promise<void> {
-  const { contractorId, companyName } = match;
+  const { contractorId } = match;
   const { id: intakeId, zip, trade, description } = intake;
 
   /* 1. Create an in-app notification */
@@ -37,7 +38,10 @@ export async function notifyMatch(
   });
 
   if (notifError) {
-    console.error(`Notification error for contractor ${contractorId}:`, notifError);
+    logger.error("Notification error", {
+      contractor_id: contractorId,
+      error: notifError instanceof Error ? notifError.message : String(notifError),
+    });
   }
 
   /* 2. Create a quote request so the contractor can respond */
@@ -52,7 +56,10 @@ export async function notifyMatch(
   });
 
   if (quoteError) {
-    console.error(`Quote creation error for contractor ${contractorId}:`, quoteError);
+    logger.error("Quote creation error", {
+      contractor_id: contractorId,
+      error: quoteError instanceof Error ? quoteError.message : String(quoteError),
+    });
   }
 
   /* 3. Fetch contractor contact info for external notifications */
@@ -95,7 +102,11 @@ export async function notifyMatch(
   }
 
   if (notifications.length > 0) {
-    Promise.allSettled(notifications).catch(console.error);
+    Promise.allSettled(notifications).catch((err) =>
+      logger.error("notifyMatch external send batch error", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 }
 

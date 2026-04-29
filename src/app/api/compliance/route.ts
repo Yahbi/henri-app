@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllTerritories } from "@/lib/territories/fetch-all";
+import { logger } from "@/lib/logger";
 
 /* ─── Helpers ─── */
 
@@ -197,7 +198,7 @@ export async function GET() {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error("Error fetching compliance data:", err);
+    logger.error("Error fetching compliance data", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to fetch compliance data" },
       { status: 500 }
@@ -291,7 +292,7 @@ export async function PATCH(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("Error updating license info:", err);
+    logger.error("Error updating license info", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to update license info" },
       { status: 500 }

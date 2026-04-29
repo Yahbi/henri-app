@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLeads } from "@/hooks/useLeads";
 import { useOutreach } from "@/hooks/useOutreach";
 import { FocusTrap } from "@/components/ui/focus-trap";
 import { OutreachLibraryCard } from "@/components/dashboard/OutreachLibraryCard";
 import { AutoFireOutreachToggle } from "@/components/dashboard/AutoFireOutreachToggle";
+import { Card } from "@/components/ui/card";
 
 interface Template {
   name: string;
@@ -83,12 +84,53 @@ interface TemplateModalProps {
   onSave: (updated: Template) => void;
 }
 
+/* Token catalog + sample values for live preview. The Phase 1.5 sprint
+ * plan calls for a token picker; this is the catalog that powers it.
+ * Token names match what the sequence engine substitutes at send-time
+ * (see src/lib/sequences/engine.ts). */
+const TEMPLATE_TOKENS: { name: string; sample: string; hint: string }[] = [
+  { name: "{{owner_first}}",        sample: "John",                   hint: "First name of the homeowner" },
+  { name: "{{owner_last}}",         sample: "Smith",                  hint: "Last name of the homeowner" },
+  { name: "{{address}}",            sample: "123 Maple St, Hartford", hint: "Full property address" },
+  { name: "{{address_short}}",      sample: "123 Maple St",           hint: "Just the street address" },
+  { name: "{{permit_number}}",      sample: "BLD-2026-04123",         hint: "City permit identifier" },
+  { name: "{{permit_type}}",        sample: "Residential roofing",    hint: "Type of permit" },
+  { name: "{{permit_value}}",       sample: "$24,000",                hint: "Estimated job value" },
+  { name: "{{permit_description}}", sample: "Asphalt re-roof, 22sq",  hint: "Scope of work text" },
+  { name: "{{trade}}",              sample: "roofing",                hint: "Trade slug" },
+  { name: "{{zip}}",                sample: "06106",                  hint: "Property ZIP" },
+  { name: "{{contractor_name}}",    sample: "Mike Henderson",         hint: "Contractor's first name" },
+  { name: "{{contractor_company}}", sample: "Apex Roofing LLC",       hint: "Contractor business name" },
+  { name: "{{contractor_phone}}",   sample: "(860) 555-0142",         hint: "Contractor callback number" },
+  { name: "{{contractor_license}}", sample: "HIC.0654321",            hint: "Contractor license number" },
+];
+
+/** Render a template body with tokens replaced by sample values for the
+ *  live-preview pane. Pure function; safe for render. */
+function renderPreview(body: string): string {
+  let out = body;
+  for (const t of TEMPLATE_TOKENS) {
+    out = out.replaceAll(t.name, t.sample);
+  }
+  return out;
+}
+
+/** Compute SMS segment count per the 7-bit GSM standard (160-char
+ *  segments, or 153 chars/segment when the message is multi-part). */
+function smsSegments(text: string): { chars: number; segments: number } {
+  const chars = text.length;
+  if (chars === 0) return { chars: 0, segments: 0 };
+  if (chars <= 160) return { chars, segments: 1 };
+  return { chars, segments: Math.ceil(chars / 153) };
+}
+
 function TemplateModal({ template, onClose, onSave }: TemplateModalProps) {
   const [name, setName] = useState(template.name);
   const [channel, setChannel] = useState<"SMS" | "Email">(template.channel);
   const [preview, setPreview] = useState(template.preview);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // ESC closes the modal. FocusTrap below handles Tab-cycle; without
   // this keyboard users had to Shift+Tab to the X button and Enter.
@@ -99,6 +141,29 @@ function TemplateModal({ template, onClose, onSave }: TemplateModalProps) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  /** Insert a token at the current cursor position in the textarea.
+   *  Falls back to appending if the textarea isn't focused. */
+  function insertToken(token: string) {
+    const el = textareaRef.current;
+    if (!el) {
+      setPreview((p) => p + token);
+      return;
+    }
+    const start = el.selectionStart ?? preview.length;
+    const end = el.selectionEnd ?? preview.length;
+    const next = preview.slice(0, start) + token + preview.slice(end);
+    setPreview(next);
+    // Restore cursor to just-past-inserted-token.
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + token.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
+
+  const rendered = renderPreview(preview);
+  const sms = channel === "SMS" ? smsSegments(rendered) : null;
 
   async function handleSave() {
     if (!name.trim() || !preview.trim()) return;
@@ -129,7 +194,7 @@ function TemplateModal({ template, onClose, onSave }: TemplateModalProps) {
       aria-labelledby="tpl-modal-title"
     >
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
+      <div className="relative z-10 w-full max-w-2xl rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-3">
           <h2 id="tpl-modal-title" className="text-lg font-heading font-normal text-foreground">
             Edit Template
@@ -173,18 +238,75 @@ function TemplateModal({ template, onClose, onSave }: TemplateModalProps) {
             </select>
           </div>
 
+          {/* Phase 1.5: Token picker — clickable chips that insert at cursor.
+           * Replaces the previous "Use {first_name}, ..." hint with a real
+           * UI affordance. Each chip carries a tooltip with sample value. */}
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block" htmlFor="tpl-body">
-              Message Body
-              <span className="ml-2 font-normal text-muted-foreground/70">Use {"{first_name}"}, {"{address}"}, {"{amount}"} as variables</span>
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Tokens (click to insert)
+              </label>
+              <span className="text-[10px] text-muted-foreground">
+                Replaced with real values at send time
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {TEMPLATE_TOKENS.map((t) => (
+                <button
+                  key={t.name}
+                  type="button"
+                  onClick={() => insertToken(t.name)}
+                  title={`${t.hint} — sample: ${t.sample}`}
+                  className="rounded-md border border-border bg-bg-subtle px-2 py-1 text-[10px] font-mono text-muted-foreground hover:bg-primary/10 hover:text-primary hover:border-primary/30 transition-colors"
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="tpl-body">
+                Message Body
+              </label>
+              {sms && (
+                <span
+                  className={
+                    sms.segments > 1
+                      ? "text-[10px] text-warm font-medium"
+                      : "text-[10px] text-muted-foreground"
+                  }
+                  title="SMS messages over 160 characters are split into multiple segments — each charged separately by Twilio."
+                >
+                  {sms.chars} chars · {sms.segments} SMS segment{sms.segments === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
             <textarea
               id="tpl-body"
+              ref={textareaRef}
               value={preview}
               onChange={(e) => setPreview(e.target.value)}
               rows={5}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none font-mono"
             />
+          </div>
+
+          {/* Phase 1.5: Live preview pane. Renders the message with sample
+           * token values so the contractor sees what the homeowner actually
+           * receives — without needing a real lead. */}
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              Preview (with sample values)
+            </label>
+            <div className="rounded-lg border border-border bg-bg-subtle px-3 py-2.5 text-sm text-foreground whitespace-pre-wrap min-h-[80px]">
+              {rendered.trim() || (
+                <span className="text-muted-foreground italic text-xs">
+                  Preview will render here as you type or click tokens above.
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -377,6 +499,8 @@ export default function OutreachPage() {
     }
   }, []);
   useEffect(() => {
+    // Fetch templates on mount — setState happens inside fetchTemplates after IO
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTemplates();
   }, [fetchTemplates]);
 
@@ -418,22 +542,40 @@ export default function OutreachPage() {
         <p className="text-sm text-muted-foreground mt-1">Automated SMS &amp; email sequences</p>
       </div>
 
-      {/* Stats Row */}
+      {/* Phase 0a wedge #6 — auto-fire outreach on lead create.
+       *
+       * Promoted ABOVE the stats row on 2026-04-23 (design critique M7).
+       * On a fresh account the stats are all "0 / 0.0% / 0.0%" and
+       * reading three zeros before discovering the capability that will
+       * populate them was the wrong information order. Capability first,
+       * measurement second — stats only become meaningful once auto-fire
+       * or a manual send has happened. */}
+      <AutoFireOutreachToggle />
+
+      {/* Stats Row. Shows empty-state helper when nothing's been sent
+       * yet — avoids the "0 / 0.0% / 0.0%" dead-zone that mixed with
+       * the auto-fire toggle order used to suggest the feature was
+       * broken. When `total_sent` is 0 we explicitly frame the zeros
+       * as "waiting for first send" rather than a failed metric. */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {stats.map((stat) => (
-          <div key={stat.label} className="rounded-lg border border-border bg-card p-4">
+          <Card key={stat.label} className="p-4">
             <p className="text-sm text-muted-foreground">{stat.label}</p>
             {isLoading ? (
               <div className="h-8 w-16 mt-1 rounded bg-muted animate-pulse" />
             ) : (
               <p className="text-2xl font-heading font-normal text-foreground mt-1">{stat.value}</p>
             )}
-          </div>
+          </Card>
         ))}
       </div>
-
-      {/* Phase 0a wedge #6 — auto-fire outreach on lead create. */}
-      <AutoFireOutreachToggle />
+      {!isLoading && outreachStats.total_sent === 0 && (
+        <p className="-mt-2 text-[11px] text-muted-foreground italic">
+          Stats will populate after your first outbound message. Enable
+          auto-fire above to start automatically, or use a template below
+          to send manually.
+        </p>
+      )}
 
       {/* Phase 0a wedge #10 — starter template library. Renders only
           when migration 00032 is live + seeded. Copy buttons clone
@@ -445,9 +587,9 @@ export default function OutreachPage() {
         <h2 className="text-lg font-heading font-normal text-foreground mb-3">Outreach Templates</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {templates.map((tpl) => (
-            <div
+            <Card
               key={tpl.name}
-              className="rounded-lg border border-border bg-card p-4 space-y-2 hover:border-primary/40 transition-colors cursor-pointer"
+              className="p-4 space-y-2 hover:border-primary/40 transition-colors cursor-pointer"
               onClick={() => setEditTarget(tpl)}
               role="button"
               tabIndex={0}
@@ -471,7 +613,7 @@ export default function OutreachPage() {
                   Send
                 </button>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       </div>
@@ -480,20 +622,20 @@ export default function OutreachPage() {
       <div>
         <h2 className="text-lg font-heading font-normal text-foreground mb-3">Recent Outreach</h2>
         {isLoading ? (
-          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <Card className="p-4 space-y-3">
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-10 rounded bg-muted animate-pulse" />
             ))}
-          </div>
+          </Card>
         ) : recentOutreach.length === 0 ? (
-          <div className="rounded-lg border border-border bg-card p-8 text-center">
+          <Card className="p-8 text-center">
             <p className="text-sm text-muted-foreground">No outreach sent yet.</p>
             <p className="text-xs text-muted-foreground mt-1">
               Use a template above to send your first message.
             </p>
-          </div>
+          </Card>
         ) : (
-          <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <Card className="overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-bg-subtle">
@@ -529,7 +671,7 @@ export default function OutreachPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
         )}
       </div>
 

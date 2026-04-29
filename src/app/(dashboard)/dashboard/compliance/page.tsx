@@ -5,6 +5,7 @@ import { CheckCircle, AlertTriangle, Clock, RefreshCw, Shield, FileText, Calenda
 import { useCompliance } from "@/hooks/useCompliance";
 import { useLeads } from "@/hooks/useLeads";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
 import type { Lead } from "@/types/lead";
 
 /* ─── Types ─── */
@@ -203,7 +204,7 @@ function ComplianceScore({
   const pct = apiScore;
 
   return (
-    <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+    <Card className="p-6 space-y-4">
       <div className="flex items-center gap-3">
         <Shield className="h-5 w-5 text-primary" />
         <h2 className="text-lg font-heading font-normal text-foreground">Compliance Score</h2>
@@ -249,7 +250,7 @@ function ComplianceScore({
           ))}
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -258,7 +259,6 @@ export default function CompliancePage() {
   const {
     license: hookLicense,
     insuranceExpiry,
-    permits: apiPermits,
     complianceScore,
     warnings,
     isLoading,
@@ -271,17 +271,21 @@ export default function CompliancePage() {
   const [checkMsg, setCheckMsg] = useState("");
 
   // Map hook license to LicenseRecord interface used by existing UI
-  const license: LicenseRecord | null = hookLicense
-    ? {
-        id: hookLicense.number,
-        license_number: hookLicense.number,
-        license_state: hookLicense.state,
-        license_type: hookLicense.type,
-        verification_status: hookLicense.verified ? "verified" : "pending_verification",
-        expiry_date: hookLicense.expiry,
-        last_checked_at: hookLicense.verified_at,
-      }
-    : null;
+  const license: LicenseRecord | null = useMemo(
+    () =>
+      hookLicense
+        ? {
+            id: hookLicense.number,
+            license_number: hookLicense.number,
+            license_state: hookLicense.state,
+            license_type: hookLicense.type,
+            verification_status: hookLicense.verified ? "verified" : "pending_verification",
+            expiry_date: hookLicense.expiry,
+            last_checked_at: hookLicense.verified_at,
+          }
+        : null,
+    [hookLicense],
+  );
 
   const loading = isLoading;
 
@@ -386,7 +390,7 @@ export default function CompliancePage() {
         <ComplianceScore license={license} insuranceExpiry={insuranceExpiry} apiScore={complianceScore} />
 
         {/* License Card */}
-        <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+        <Card className="p-6 space-y-4">
           <div className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-heading font-normal text-foreground">Contractor License</h2>
@@ -430,11 +434,11 @@ export default function CompliancePage() {
               </div>
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Insurance Card */}
-      <div className="rounded-lg border border-border bg-card p-6 space-y-3">
+      <Card className="p-6 space-y-3">
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-heading font-normal text-foreground">Insurance & Bonding</h2>
@@ -497,7 +501,7 @@ export default function CompliancePage() {
             </a>
           </div>
         )}
-      </div>
+      </Card>
 
       {/* Active Permits Tracker */}
       <div>
@@ -508,7 +512,7 @@ export default function CompliancePage() {
             <span className="text-xs text-muted-foreground ml-auto">{permitCount} permit{permitCount !== 1 ? "s" : ""} from your leads</span>
           )}
         </div>
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <Card className="overflow-hidden">
           {leadsLoading ? (
             <div className="p-4 space-y-3">
               <Skeleton className="h-4 w-full" />
@@ -564,13 +568,13 @@ export default function CompliancePage() {
               </tbody>
             </table>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Verification Timeline */}
       <div>
         <h2 className="text-lg font-heading font-normal text-foreground mb-3">Verification History</h2>
-        <div className="rounded-lg border border-border bg-card p-5">
+        <Card className="p-5">
           {loading ? (
             <div className="space-y-3">
               <Skeleton className="h-4 w-64" />
@@ -608,7 +612,7 @@ export default function CompliancePage() {
               ))}
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Run Check */}

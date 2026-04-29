@@ -27,6 +27,12 @@ export function FocusTrap({ children, active, restoreFocusRef }: FocusTrapProps)
     const container = containerRef.current;
     if (!container) return;
 
+    // Snapshot the restore-target ref at effect-start so the cleanup
+    // sees the same element we opened against — not whatever the ref
+    // has been mutated to by the time the modal closes.
+    const restoreTargetAtOpen =
+      restoreFocusRef?.current ?? previousFocusRef.current;
+
     const firstFocusable = getFocusableElements(container)[0];
     if (firstFocusable) {
       setTimeout(() => firstFocusable.focus(), 0);
@@ -60,10 +66,9 @@ export function FocusTrap({ children, active, restoreFocusRef }: FocusTrapProps)
 
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      // Restore focus
-      const restoreTarget = restoreFocusRef?.current ?? previousFocusRef.current;
-      if (restoreTarget && typeof restoreTarget.focus === "function") {
-        restoreTarget.focus();
+      // Restore focus using the snapshot, not a mutated ref value.
+      if (restoreTargetAtOpen && typeof restoreTargetAtOpen.focus === "function") {
+        restoreTargetAtOpen.focus();
       }
     };
   }, [active, restoreFocusRef]);

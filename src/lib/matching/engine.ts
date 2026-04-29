@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { logger } from "@/lib/logger";
 
 /* ── Types ── */
 
@@ -245,7 +246,9 @@ export async function findMatches(
     .eq("status", "active");
 
   if (terrError) {
-    console.error("Territory lookup error:", terrError);
+    logger.error("Territory lookup error", {
+      error: terrError instanceof Error ? terrError.message : String(terrError),
+    });
     return [];
   }
 

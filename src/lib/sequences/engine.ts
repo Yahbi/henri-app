@@ -6,6 +6,7 @@
 /* ────────────────────────────────────────────────────────────────────────── */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 import { getTemplate, type SequenceStep } from "./templates";
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -98,7 +99,7 @@ export async function startSequence(
 ): Promise<string | null> {
   const template = getTemplate(templateId);
   if (!template) {
-    console.error(`Sequence template "${templateId}" not found`);
+    logger.error("Sequence template not found", { templateId });
     return null;
   }
 
@@ -137,7 +138,9 @@ export async function startSequence(
     .single();
 
   if (seqError || !seq) {
-    console.error("Failed to create sequence:", seqError);
+    logger.error("Failed to create sequence", {
+      error: seqError instanceof Error ? seqError.message : String(seqError),
+    });
     return null;
   }
 
@@ -177,7 +180,9 @@ export async function processDueSteps(): Promise<ProcessingResult> {
     .eq("status", "active");
 
   if (seqError) {
-    console.error("Failed to fetch active sequences:", seqError);
+    logger.error("Failed to fetch active sequences", {
+      error: seqError instanceof Error ? seqError.message : String(seqError),
+    });
     return result;
   }
 
@@ -220,7 +225,10 @@ export async function processDueSteps(): Promise<ProcessingResult> {
       .single();
 
     if (!lead) {
-      console.error(`Lead ${seq.lead_id} not found for sequence ${seq.id}`);
+      logger.error("Lead not found for sequence", {
+        lead_id: seq.lead_id,
+        sequence_id: seq.id,
+      });
       result.errors++;
       await updateSequenceStatus(supabase, seq.id, "cancelled");
       continue;
@@ -315,7 +323,9 @@ export async function cancelSequence(sequenceId: string): Promise<boolean> {
     .eq("id", sequenceId);
 
   if (seqErr) {
-    console.error("Failed to cancel sequence:", seqErr);
+    logger.error("Failed to cancel sequence", {
+      error: seqErr instanceof Error ? seqErr.message : String(seqErr),
+    });
     return false;
   }
 
@@ -386,10 +396,11 @@ async function enqueueStep(params: EnqueueParams): Promise<boolean> {
   });
 
   if (error) {
-    console.error(
-      `Failed to enqueue step ${stepIndex} for sequence ${sequenceId}:`,
-      error
-    );
+    logger.error("Failed to enqueue step", {
+      step_index: stepIndex,
+      sequence_id: sequenceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 
@@ -428,9 +439,10 @@ async function updateSequenceStatus(
     .eq("id", sequenceId);
 
   if (error) {
-    console.error(
-      `Failed to update sequence ${sequenceId} to "${status}":`,
-      error
-    );
+    logger.error("Failed to update sequence status", {
+      sequence_id: sequenceId,
+      status,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }

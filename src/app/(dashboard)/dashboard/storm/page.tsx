@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Check, Send, Zap, AlertTriangle } from "lucide-react";
+import { Copy, Check, Zap, AlertTriangle } from "lucide-react";
 import { useStorm } from "@/hooks/useStorm";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExpandableBanner } from "@/components/ui/expandable-banner";
+import { Card } from "@/components/ui/card";
 
 /* ─── Helpers ─── */
 function mapNwsSeverity(severity: string): "Severe" | "Moderate" | "Minor" {
@@ -95,7 +96,7 @@ function TemplateCard({ tpl }: { tpl: typeof outreachTemplates[0] }) {
   const [copied, setCopied] = useState(false);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <Card className="p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-medium text-foreground">{tpl.name}</h3>
@@ -116,7 +117,7 @@ function TemplateCard({ tpl }: { tpl: typeof outreachTemplates[0] }) {
       <div className="rounded-md bg-bg-subtle p-3 text-xs text-muted-foreground leading-relaxed whitespace-pre-line max-h-28 overflow-y-auto">
         {tpl.template}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -129,8 +130,10 @@ export default function StormPage() {
   const STORM_KEY = "henri.storm_mode.v1";
   const [stormMode, setStormMode] = useState(false);
   useEffect(() => {
+    // Mount-once hydration from localStorage; cannot derive at render (SSR mismatch)
     if (typeof window === "undefined") return;
     const saved = window.localStorage.getItem(STORM_KEY);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved === "1") setStormMode(true);
   }, []);
   useEffect(() => {
@@ -138,7 +141,7 @@ export default function StormPage() {
     window.localStorage.setItem(STORM_KEY, stormMode ? "1" : "0");
   }, [stormMode]);
 
-  const { alerts, territories, isLoading, error, refresh } = useStorm();
+  const { alerts, territories, isLoading } = useStorm();
 
   const mappedAlerts = alerts.map((alert) => ({
     id: alert.id,
@@ -272,16 +275,16 @@ export default function StormPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {isLoading
           ? Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-lg border border-border bg-card p-4">
+              <Card key={i} className="p-4">
                 <Skeleton className="h-4 w-24 mb-2" />
                 <Skeleton className="h-8 w-16" />
-              </div>
+              </Card>
             ))
           : quickStats.map((stat) => (
-              <div key={stat.label} className="rounded-lg border border-border bg-card p-4">
+              <Card key={stat.label} className="p-4">
                 <p className="text-sm text-muted-foreground">{stat.label}</p>
                 <p className="text-2xl font-heading font-normal text-foreground mt-1">{stat.value}</p>
-              </div>
+              </Card>
             ))}
       </div>
 
@@ -293,7 +296,7 @@ export default function StormPage() {
           <div className="space-y-3">
             {isLoading ? (
               Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="rounded-lg border border-border bg-card p-4 space-y-3">
+                <Card key={i} className="p-4 space-y-3">
                   <div className="flex items-start gap-3">
                     <Skeleton className="h-9 w-9 rounded-full" />
                     <div className="flex-1 space-y-2">
@@ -304,15 +307,15 @@ export default function StormPage() {
                   <div className="space-y-1.5">
                     <Skeleton className="h-4 w-full" />
                   </div>
-                </div>
+                </Card>
               ))
             ) : mappedAlerts.length === 0 ? (
-              <div className="rounded-lg border border-border bg-card p-4">
+              <Card className="p-4">
                 <p className="text-sm text-muted-foreground">No active weather alerts for your territories.</p>
-              </div>
+              </Card>
             ) : (
               mappedAlerts.map((event) => (
-                <div key={event.id} className="rounded-lg border border-border bg-card p-4 space-y-3">
+                <Card key={event.id} className="p-4 space-y-3">
                   <div className="flex items-start gap-3">
                     {stormIcon(event.type)}
                     <div className="flex-1">
@@ -329,7 +332,7 @@ export default function StormPage() {
                       <span className="text-foreground">{event.affectedZips.join(", ")}</span>
                     </div>
                   </div>
-                </div>
+                </Card>
               ))
             )}
           </div>
@@ -349,7 +352,7 @@ export default function StormPage() {
       {/* Historical Timeline */}
       <div>
         <h2 className="text-lg font-heading font-normal text-foreground mb-3">Storm History & Permit Surge</h2>
-        <div className="rounded-lg border border-border bg-card p-5">
+        <Card className="p-5">
           <div className="space-y-4">
             {isLoading ? (
               Array.from({ length: 3 }).map((_, i) => (
@@ -401,7 +404,7 @@ export default function StormPage() {
               ))
             )}
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   );

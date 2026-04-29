@@ -2,11 +2,11 @@
   "crons": [
     {
       "path": "/api/cron/score",
-      "schedule": "0 */2 * * *"
+      "schedule": "1 */2 * * *"
     },
     {
       "path": "/api/cron/scrape",
-      "schedule": "*/30 * * * *"
+      "schedule": "5,35 * * * *"
     },
     {
       "path": "/api/cron/license-check",
@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/billing-sync",
-      "schedule": "0 */6 * * *"
+      "schedule": "10 */6 * * *"
     },
     {
       "path": "/api/cron/digest",
@@ -26,11 +26,11 @@
     },
     {
       "path": "/api/cron/follow-ups",
-      "schedule": "*/15 * * * *"
+      "schedule": "0,15,30,45 * * * *"
     },
     {
       "path": "/api/cron/permits",
-      "schedule": "0 */6 * * *"
+      "schedule": "20 */6 * * *"
     },
     {
       "path": "/api/cron/review-requests",
@@ -46,19 +46,27 @@
     },
     {
       "path": "/api/cron/enrich",
-      "schedule": "*/15 * * * *"
+      "schedule": "5,20,35,50 * * * *"
     },
     {
       "path": "/api/cron/geocode-backfill",
-      "schedule": "*/15 * * * *"
+      "schedule": "10,25,40,55 * * * *"
     },
     {
       "path": "/api/cron/blast-worker",
-      "schedule": "*/5 * * * *"
+      "schedule": "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
     },
     {
       "path": "/api/cron/market-intel",
-      "schedule": "0 4 * * *"
+      "schedule": "3 4 * * *"
+    },
+    {
+      "path": "/api/cron/storm-events",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/re-enrich",
+      "schedule": "0 2 * * *"
     }
   ]
 }

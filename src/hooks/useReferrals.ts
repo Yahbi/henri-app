@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { logger } from "@/lib/logger";
 
 export interface Referral {
   id: string;
@@ -82,7 +83,7 @@ export function useReferrals(): UseReferralsReturn {
       setReferrals(data.referrals ?? []);
       setStats(data.stats ?? defaultStats);
     } catch (err) {
-      console.error("useReferrals fetch error:", err);
+      logger.error("useReferrals fetch error", { error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setIsLoading(false);
@@ -114,7 +115,7 @@ export function useReferrals(): UseReferralsReturn {
         /* Refresh the list */
         await fetchReferrals();
         return { success: true };
-      } catch (err) {
+      } catch {
         return { success: false, error: "Network error" };
       }
     },
@@ -142,7 +143,7 @@ export function useReferrals(): UseReferralsReturn {
         /* Refresh the list */
         await fetchReferrals();
         return { success: true };
-      } catch (err) {
+      } catch {
         return { success: false, error: "Network error" };
       }
     },

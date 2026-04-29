@@ -132,7 +132,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         }
 
         const appUrl =
-          process.env.NEXT_PUBLIC_APP_URL ?? "https://henri.app";
+          process.env.NEXT_PUBLIC_APP_URL ?? "https://meethenri.com";
         const reviewLink = `${appUrl}/review/${token}`;
 
         let emailSent = false;
@@ -150,7 +150,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                  from: "Henri <noreply@henri.app>",
+                  from: "Henri <noreply@meethenri.com>",
                   to: [customerEmail],
                   subject: `How was your experience with ${senderName}?`,
                   html: buildReviewEmailHtml({

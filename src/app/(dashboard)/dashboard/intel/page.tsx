@@ -5,19 +5,23 @@ import { useLeads } from "@/hooks/useLeads";
 import { formatCurrency, getUrgency } from "@/types/lead";
 import type { Lead } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
 import { MarketIntelPanel } from "@/components/dashboard/MarketIntelPanel";
 
 const FILTERS = ["All", "New Today", "High Value", "Cascade"];
 
 /* ── Helpers ── */
 
+/* Score-tier pill — uses the canonical `--hot`/`--warm`/`--cool` tokens
+ * via the same `color-mix` pattern as LeadCard. Migrated from raw hex
+ * 2026-04-25 per design-system audit priority action #4. */
 function scoreBadge(score: number) {
   const color =
     score >= 75
-      ? "text-[#D4886A] bg-[rgba(212,136,106,0.12)]"
+      ? "text-hot  bg-[color-mix(in_srgb,var(--hot)_12%,transparent)]"
       : score >= 50
-      ? "text-[#D4A24A] bg-[rgba(212,162,74,0.12)]"
-      : "text-[#4A7FC0] bg-[rgba(74,127,192,0.12)]";
+      ? "text-warm bg-[color-mix(in_srgb,var(--warm)_12%,transparent)]"
+      : "text-cool bg-[color-mix(in_srgb,var(--cool)_12%,transparent)]";
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
       {score}
@@ -37,10 +41,13 @@ function daysAgoLabel(days: number): string {
 }
 
 function daysAgoColorClass(days: number): string {
-  if (days <= 1) return "text-[#D4886A]";       // hot - terracotta
-  if (days <= 3) return "text-[#D4A24A]";       // warm - amber
-  if (days <= 7) return "text-[#7BA4C7]";       // cool - light blue
-  return "text-muted-foreground";                // cold - muted
+  // Tokenized 2026-04-25. The 4-7 day band uses a lighter blue (#7BA4C7)
+  // than the --cool token (#4A7FC0) — kept as a literal because the
+  // brand palette has no "light cool" semantic; revisit if added.
+  if (days <= 1) return "text-hot";
+  if (days <= 3) return "text-warm";
+  if (days <= 7) return "text-[#7BA4C7]";
+  return "text-muted-foreground";
 }
 
 /** Normalize trade strings for grouping */
@@ -68,7 +75,7 @@ function normalizeTrade(lead: Lead): string {
 
 function IntelCardSkeleton() {
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <Card className="p-4 space-y-3">
       <div className="flex items-start justify-between">
         <div className="flex-1 space-y-1.5">
           <Skeleton className="h-4 w-48" />
@@ -81,7 +88,7 @@ function IntelCardSkeleton() {
         <Skeleton className="h-4 w-16" />
         <Skeleton className="h-4 w-16" />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -89,10 +96,10 @@ function SummaryBarSkeleton() {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
       {[...Array(4)].map((_, i) => (
-        <div key={i} className="rounded-lg border border-border bg-card p-4 space-y-2">
+        <Card key={i} className="p-4 space-y-2">
           <Skeleton className="h-3 w-24" />
           <Skeleton className="h-6 w-16" />
-        </div>
+        </Card>
       ))}
     </div>
   );
@@ -100,7 +107,7 @@ function SummaryBarSkeleton() {
 
 function TradeBreakdownSkeleton() {
   return (
-    <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+    <Card className="p-5 space-y-3">
       <Skeleton className="h-5 w-36" />
       <div className="space-y-2">
         {[...Array(5)].map((_, i) => (
@@ -111,13 +118,13 @@ function TradeBreakdownSkeleton() {
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
 function TrendingAreasSkeleton() {
   return (
-    <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+    <Card className="p-5 space-y-3">
       <Skeleton className="h-5 w-32" />
       <div className="space-y-2">
         {[...Array(5)].map((_, i) => (
@@ -127,7 +134,7 @@ function TrendingAreasSkeleton() {
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -237,13 +244,15 @@ export default function IntelPage() {
     return computeTrendingZips(leads);
   }, [leads]);
 
+  // Mount-time reference so "new today" is stable per render cycle
+  const [mountNow] = useState(() => Date.now());
+
   /* Intel cards (enhanced from original) */
   const intelCards = useMemo(() => {
     if (!leads) return [];
     return leads.map((lead) => {
-      const now = Date.now();
       const filed = lead.permit_filed_date ? new Date(lead.permit_filed_date) : new Date(lead.created_at);
-      const isToday = (now - filed.getTime()) < 24 * 3600 * 1000;
+      const isToday = (mountNow - filed.getTime()) < 24 * 3600 * 1000;
       const isHighValue = (lead.permit_value ?? 0) >= 50_000 || (lead.pipeline_value ?? 0) >= 50_000;
       const isCascade = lead.cascade_flag;
 
@@ -289,7 +298,7 @@ export default function IntelPage() {
         urgency: getUrgency(lead.score),
       };
     });
-  }, [leads]);
+  }, [leads, mountNow]);
 
   const filtered = useMemo(() => {
     if (activeFilter === "All") return intelCards;
@@ -329,24 +338,24 @@ export default function IntelPage() {
         <SummaryBarSkeleton />
       ) : summary ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="rounded-lg border border-border bg-card p-4">
+          <Card className="p-4">
             <p className="text-xs text-muted-foreground">Total Permits</p>
             <p className="text-xl font-heading font-normal text-foreground mt-1">{summary.totalPermits}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
+          </Card>
+          <Card className="p-4">
             <p className="text-xs text-muted-foreground">Avg Permit Value</p>
             <p className="text-xl font-heading font-normal text-foreground mt-1">{formatCurrency(summary.avgValue)}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
+          </Card>
+          <Card className="p-4">
             <p className="text-xs text-muted-foreground">Hottest Trade</p>
-            <p className="text-xl font-heading font-normal text-[#D4886A] mt-1">{summary.hottestTrade}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
+            <p className="text-xl font-heading font-normal text-hot mt-1">{summary.hottestTrade}</p>
+          </Card>
+          <Card className="p-4">
             <p className="text-xs text-muted-foreground">Filed Today / This Week</p>
             <p className="text-xl font-heading font-normal text-foreground mt-1">
               {summary.filedToday} <span className="text-sm text-muted-foreground">/</span> {summary.filedThisWeek}
             </p>
-          </div>
+          </Card>
         </div>
       ) : null}
 
@@ -360,7 +369,7 @@ export default function IntelPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Trade Breakdown */}
           {tradeBreakdown.length > 0 && (
-            <div className="rounded-lg border border-border bg-card p-5">
+            <Card className="p-5">
               <h2 className="text-sm font-heading font-normal text-foreground mb-4">Trade Breakdown</h2>
               <div className="space-y-2.5">
                 {tradeBreakdown.map(({ trade, count }) => {
@@ -372,7 +381,7 @@ export default function IntelPage() {
                       </span>
                       <div className="flex-1 h-4 rounded-full bg-muted overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-[#D4886A] transition-all duration-500"
+                          className="h-full rounded-full bg-hot transition-all duration-500"
                           style={{ width: `${pct}%` }}
                         />
                       </div>
@@ -381,12 +390,12 @@ export default function IntelPage() {
                   );
                 })}
               </div>
-            </div>
+            </Card>
           )}
 
           {/* Trending Areas */}
           {trendingZips.length > 0 && (
-            <div className="rounded-lg border border-border bg-card p-5">
+            <Card className="p-5">
               <h2 className="text-sm font-heading font-normal text-foreground mb-4">Trending Areas</h2>
               <div className="space-y-3">
                 {trendingZips.map(({ zip, city, state, count }, idx) => {
@@ -397,7 +406,7 @@ export default function IntelPage() {
                         <span
                           className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${
                             idx === 0
-                              ? "bg-[rgba(212,136,106,0.15)] text-[#D4886A]"
+                              ? "bg-[color-mix(in_srgb,var(--hot)_15%,transparent)] text-hot"
                               : "bg-muted text-muted-foreground"
                           }`}
                         >
@@ -417,7 +426,7 @@ export default function IntelPage() {
                   );
                 })}
               </div>
-            </div>
+            </Card>
           )}
         </div>
       ) : null}
@@ -456,7 +465,7 @@ export default function IntelPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map((card) => (
-            <div key={card.id} className="rounded-lg border border-border bg-card p-4 space-y-3">
+            <Card key={card.id} className="p-4 space-y-3">
               {/* Top row: address + score */}
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
@@ -474,7 +483,7 @@ export default function IntelPage() {
                     {card.locationTag && (
                       <>
                         <span className="text-xs text-muted-foreground">--</span>
-                        <span className="inline-flex items-center rounded-full bg-[rgba(212,136,106,0.08)] px-2 py-0.5 text-[10px] text-[#D4886A]">
+                        <span className="inline-flex items-center rounded-full bg-[color-mix(in_srgb,var(--hot)_8%,transparent)] px-2 py-0.5 text-[10px] text-hot">
                           {card.locationTag}
                         </span>
                       </>
@@ -514,7 +523,7 @@ export default function IntelPage() {
                   </span>
                 </div>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       )}

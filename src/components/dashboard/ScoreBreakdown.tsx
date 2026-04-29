@@ -42,12 +42,17 @@ export function ScoreBreakdown({
   engagement,
   conversion,
 }: ScoreBreakdownProps) {
+  /* Bar colours — sourced from semantic CSS tokens so the score-signal
+   * palette propagates from globals.css. Engagement (purple) and
+   * Conversion (pink) have no semantic token in the brand palette and
+   * stay as hex literals; replace if/when the brand adds them. Migrated
+   * from raw hex on 2026-04-25 per design-system audit. */
   return (
     <div className="space-y-2">
-      <ScoreBar label="Freshness" value={freshness} max={20} color="#D4886A" />
-      <ScoreBar label="Value" value={value} max={20} color="#D4A24A" />
-      <ScoreBar label="Contact" value={contact} max={15} color="#3D9970" />
-      <ScoreBar label="Demand" value={demand} max={15} color="#4A7FC0" />
+      <ScoreBar label="Freshness"  value={freshness} max={20} color="var(--hot)" />
+      <ScoreBar label="Value"      value={value}     max={20} color="var(--warm)" />
+      <ScoreBar label="Contact"    value={contact}   max={15} color="hsl(var(--success))" />
+      <ScoreBar label="Demand"     value={demand}    max={15} color="var(--cool)" />
       {engagement != null && engagement > 0 && (
         <ScoreBar label="Engagement" value={engagement} max={15} color="#8B5CF6" />
       )}

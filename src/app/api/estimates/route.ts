@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { sendEstimateEmail } from "@/lib/resend/estimate-email";
 import { hasResend } from "@/lib/env";
 import { logApiError } from "@/lib/log";
+import { EstimateCreateBodySchema, parseBody } from "@/lib/schemas/api";
 
 /* ─── GET /api/estimates — list estimates for authenticated contractor ─── */
 export async function GET(request: NextRequest) {
@@ -84,7 +85,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
+    const raw = await req.json();
+    const parsed = parseBody(EstimateCreateBodySchema, raw);
+    if (parsed.response) return parsed.response;
     const {
       contact_name,
       contact_email,
@@ -96,39 +99,13 @@ export async function POST(req: NextRequest) {
       tiers,
       amount,
       status,
-    } = body as {
-      contact_name?: string;
-      contact_email?: string;
-      contact_phone?: string;
-      trade: string;
-      zip: string;
-      description?: string;
-      scope_notes?: string;
-      tiers: Record<string, unknown>;
-      amount: number;
-      status: "draft" | "sent";
-    };
-
-    if (!trade || !zip || !tiers || amount == null) {
-      return NextResponse.json(
-        { error: "trade, zip, tiers, and amount are required" },
-        { status: 400 }
-      );
-    }
-
-    if (status && status !== "draft" && status !== "sent") {
-      return NextResponse.json(
-        { error: "Status must be 'draft' or 'sent'" },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     const estimateStatus = status ?? "draft";
 
     /* Send estimate email via Resend when status is "sent" and email provided */
-    let emailSent = false;
     if (estimateStatus === "sent" && contact_email && hasResend()) {
-      const result = await sendEstimateEmail({
+      await sendEstimateEmail({
         contactName: contact_name ?? "Homeowner",
         contactEmail: contact_email,
         trade: trade ?? "General",
@@ -138,7 +115,6 @@ export async function POST(req: NextRequest) {
         scopeNotes: scope_notes ?? undefined,
         estimateId: "pending", // Will update after insert
       });
-      emailSent = result.success;
     }
 
     const { data: estimate, error: insertErr } = await supabase

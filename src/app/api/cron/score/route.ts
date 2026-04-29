@@ -4,55 +4,14 @@ import { calculateScore, buildSignals } from "@/lib/scoring";
 import type { Urgency } from "@/lib/scoring";
 import { buildScoreSignalBreakdown } from "@/lib/scoring/signals";
 import { logger } from "@/lib/logger";
+import { evaluateRules, type AddressPermitHistory } from "@/lib/predictive/rules";
+import { mineDescription, mergeSuggestions } from "@/lib/predictive/llm-mining";
+import { getMiningLlmClient } from "@/lib/predictive/openai-client";
+import type { Lead } from "@/types/lead";
+import { extractOwnerFields, normalizeAddrKey } from "./helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-/* ── Owner-field extractor across jurisdictions ──────────────────────────
- * Different permit portals use wildly different raw_json key casing:
- *   CT open-data:  owner_first / owner_last
- *   LA city:       OWNER_NAME / ApplicantName
- *   Miami-Dade:    OwnerFirst / OwnerLast
- *   Generic:       applicant_name / APPLICANT_NAME
- * Returns the first non-empty string across a list of candidate keys, so
- * the scorer doesn't have to be taught a new casing for every new feed. */
-function pickRawField(raw: Record<string, unknown> | null | undefined, keys: string[]): string | null {
-  if (!raw) return null;
-  for (const k of keys) {
-    const v = raw[k];
-    if (typeof v === "string" && v.trim().length > 0) return v.trim();
-  }
-  return null;
-}
-
-function extractOwnerFields(raw: Record<string, unknown> | null | undefined) {
-  return {
-    first: pickRawField(raw, [
-      "owner_first", "OwnerFirst", "OWNER_FIRST", "first_name", "FIRST_NAME",
-      "applicant_first", "APPLICANT_FIRSTNAME", "ApplicantFirst",
-    ]),
-    last: pickRawField(raw, [
-      "owner_last", "OwnerLast", "OWNER_LAST", "last_name", "LAST_NAME",
-      "applicant_last", "APPLICANT_LASTNAME", "ApplicantLast",
-    ]),
-    full: pickRawField(raw, [
-      "owner_name", "OwnerName", "OWNER_NAME", "owners_name", "OWNERS_NAME",
-      "applicant_name", "APPLICANT_NAME", "ApplicantName", "Applicant",
-    ]),
-    phone: pickRawField(raw, [
-      "owner_phone", "OwnerPhone", "OWNER_PHONE", "phone", "PHONE", "Phone",
-      "applicant_phone", "APPLICANT_PHONE",
-    ]),
-    email: pickRawField(raw, [
-      "owner_email", "OwnerEmail", "OWNER_EMAIL", "email", "EMAIL", "Email",
-      "applicant_email", "APPLICANT_EMAIL",
-    ]),
-    contractor: pickRawField(raw, [
-      "contractor_name", "ContractorName", "CONTRACTOR_NAME",
-      "contractor", "Contractor", "CONTRACTOR",
-    ]),
-  };
-}
 
 /* ── Types for query results ─────────────────────────────────────────────── */
 
@@ -99,7 +58,7 @@ interface ScoredLead {
 async function fetchConversionRates(
   supabase: ReturnType<typeof createAdminClient>,
   zips: string[],
-  trades: string[]
+  _trades: string[]
 ): Promise<{
   zipRates: Map<string, number>;
   tradeRates: Map<string, number>;
@@ -168,6 +127,15 @@ export async function GET(request: NextRequest) {
 
   const supabase = createAdminClient();
 
+  // Audit priority #8 (2026-04-28): inline 280s deadline check. Vercel
+  // hard-kills at maxDuration=300; we leave 20s headroom so partial
+  // results land cleanly and the cron's response object completes
+  // before the executor disappears. Used in the per-permit scoring +
+  // per-lead insert loops below to early-exit when the budget runs out.
+  const t0 = Date.now();
+  const deadlineMs = t0 + 280_000;
+  const deadlineExceeded = (): boolean => Date.now() > deadlineMs;
+
   try {
     /* ── 1. Fetch unscored permits ──────────────────────────────────────── */
 
@@ -232,15 +200,9 @@ export async function GET(request: NextRequest) {
     );
 
     /* Per-address history rollup (populates cascade_flag, pipeline_value, etc.)
-     * Keyed by the same `address_norm` format used by build-address-history.ts:
-     *   lower(trim(address).replace(/[.,#]/g,"").replace(/\s+/g," ")) + "|" + zip
-     */
-    const normalizeAddrKey = (address: string | null | undefined, zip: string | null | undefined): string | null => {
-      if (!address) return null;
-      const cleaned = address.toLowerCase().replace(/[.,#]/g, "").replace(/\s+/g, " ").trim();
-      if (!cleaned) return null;
-      return `${cleaned}|${zip ?? ""}`;
-    };
+     * Keyed by the same `address_norm` format used by build-address-history.ts.
+     * `normalizeAddrKey` lives in `./helpers` so the round-robin + key-norm
+     * logic is unit-testable in isolation. */
     const addrKeysSet = new Set<string>();
     for (const p of permits) {
       const k = normalizeAddrKey(p.address, p.zip);
@@ -264,7 +226,7 @@ export async function GET(request: NextRequest) {
           .select("address_norm, permit_count, total_value, permits, trades")
           .in("address_norm", chunk);
         if (histErr) {
-          console.warn("address_permit_history lookup failed:", histErr.message);
+          logger.warn("address_permit_history lookup failed", { error: histErr.message });
           continue;
         }
         for (const r of histRows ?? []) {
@@ -276,10 +238,9 @@ export async function GET(request: NextRequest) {
           });
         }
       } catch (e) {
-        console.warn(
-          "address_permit_history lookup failed:",
-          e instanceof Error ? e.message : String(e),
-        );
+        logger.warn("address_permit_history lookup failed", {
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     }
 
@@ -386,6 +347,18 @@ export async function GET(request: NextRequest) {
     const assignmentMap = new Map<string, { scored: ScoredLead; contractor: { id: string; phone?: string; email?: string; name?: string } }>();
 
     for (const sl of scoredLeads) {
+      // Audit priority #8: inline 280s deadline. The lead-build loop is
+      // the heaviest part of the cron (rules engine + LLM mining +
+      // signal-jsonb construction). Bail early so the orchestrator still
+      // gets to write the leads it has prepared so far.
+      if (deadlineExceeded()) {
+        logger.warn("score cron deadline reached during lead build", {
+          processedLeads: leadsToInsert.length,
+          remainingScored: scoredLeads.length - leadsToInsert.length,
+          elapsedMs: Date.now() - t0,
+        });
+        break;
+      }
       const zip = sl.permit.zip;
       if (!zip) continue;
       const contractors = zipToContractors.get(zip);
@@ -406,6 +379,89 @@ export async function GET(request: NextRequest) {
         const pipelineValue =
           history?.total_value ?? sl.permit.estimated_value ?? null;
         const permitHistoryJson = history?.permits ?? [];
+
+        // Phase 1.2: Predictive cross-trade rules engine. Builds a
+        // synthetic Lead-shaped context and evaluates the 8 rules.
+        // Output is jsonb written to leads.cross_trade_suggestions
+        // (migration 00045). Gated on WRITE_CROSS_TRADE_SUGGESTIONS=1
+        // env so pre-migration deploys silently skip the column.
+        // The synthetic Lead avoids importing the full Lead type's
+        // strict shape — only the fields the rules read are populated.
+        let crossTradeSuggestions: ReturnType<typeof evaluateRules> = [];
+        if (process.env.WRITE_CROSS_TRADE_SUGGESTIONS === "1") {
+          try {
+            const syntheticLead = {
+              trade: rawJson?.normalized_trade ?? sl.permit.permit_type,
+              permit_type: sl.permit.permit_type,
+              permit_description: sl.permit.description,
+              year_built: null,           // not yet populated by scorer
+              owner_since: null,          // not yet populated by scorer
+              cascade_count: cascadeCount,
+            } as unknown as Lead;
+            const predictiveHistory: AddressPermitHistory | null = history
+              ? ({
+                  address_norm: addrKey ?? "",
+                  address: sl.permit.address ?? "",
+                  city: sl.permit.city ?? null,
+                  state: sl.permit.state ?? null,
+                  zip: sl.permit.zip ?? null,
+                  permit_count: history.permit_count,
+                  total_value: history.total_value,
+                  first_permit_date: null,
+                  last_permit_date: null,
+                  trades: history.trades ?? [],
+                  // Cast through unknown — runtime shape from address_permit_history
+                  // jsonb is compatible with HistoryPermit (subset of the same schema),
+                  // but TypeScript can't prove it across the supabase-js boundary.
+                  permits: (history.permits ?? []) as unknown as AddressPermitHistory["permits"],
+                } as AddressPermitHistory)
+              : null;
+            crossTradeSuggestions = evaluateRules({
+              lead: syntheticLead,
+              history: predictiveHistory,
+            });
+
+            // Phase 2.1: Layer 2 — LLM description-mining. Layered on
+            // TOP of the deterministic rules to catch cross-trade
+            // signals buried in free-text descriptions (paver deck,
+            // tile shower, skylight install, etc.). Gated by
+            // LLM_MINING_ENABLED so contractors can disable until
+            // they're ready to pay for LLM costs.
+            if (
+              process.env.LLM_MINING_ENABLED === "1" &&
+              sl.permit.description
+            ) {
+              try {
+                const llmSuggestions = await mineDescription(
+                  {
+                    description: sl.permit.description,
+                    primaryTrade: syntheticLead.trade ?? "general",
+                    permitId: sl.permit.id,
+                  },
+                  getMiningLlmClient(),
+                );
+                crossTradeSuggestions = mergeSuggestions(
+                  crossTradeSuggestions,
+                  llmSuggestions,
+                );
+              } catch (llmErr) {
+                // LLM never blocks scoring — log + continue with
+                // deterministic-only suggestions.
+                logger.warn("LLM mining failed (graceful-degrade)", {
+                  permitId: sl.permit.id,
+                  error: String(llmErr),
+                });
+              }
+            }
+          } catch (e) {
+            // Defensive: predictive rules are best-effort. A bug in
+            // the engine should never block lead creation.
+            logger.warn("Predictive rules eval failed", {
+              permitId: sl.permit.id,
+              error: String(e),
+            });
+          }
+        }
 
         leadsToInsert.push({
           permit_id: sl.permit.id,
@@ -451,6 +507,13 @@ export async function GET(request: NextRequest) {
           cascade_count: cascadeCount,
           pipeline_value: pipelineValue,
           permit_history: permitHistoryJson,
+          // Phase 1.2 predictive cross-trade suggestions. Only included
+          // when WRITE_CROSS_TRADE_SUGGESTIONS=1 — empty array otherwise
+          // so the upsert payload shape stays stable. The retry-on-
+          // missing-column path below strips this field if migration
+          // 00045 hasn't applied yet.
+          cross_trade_suggestions:
+            crossTradeSuggestions.length > 0 ? crossTradeSuggestions : null,
           notes: sl.factors.length > 0
             ? `Scoring factors: ${sl.factors.join(" | ")}`
             : null,
@@ -487,6 +550,30 @@ export async function GET(request: NextRequest) {
         logger.warn("score_signals column missing \u2014 stripping + retrying (migration 00031 pending)");
         const stripped = leadsToInsert.map((row) => {
           const { score_signals: _omit, ...rest } = row as Record<string, unknown>;
+          return rest;
+        });
+        insertResult = await supabase
+          .from("leads")
+          .upsert(stripped, {
+            onConflict: "permit_id,contractor_id",
+            ignoreDuplicates: false,
+          })
+          .select("id, zip, permit_id, contractor_id, score, urgency");
+      }
+
+      // Phase 1.2 resilience — `cross_trade_suggestions` is only present
+      // after migration 00045 lands. Same strip-and-retry pattern as
+      // score_signals above. Keeps the scorer working pre-migration.
+      if (
+        insertResult.error &&
+        /cross_trade_suggestions/i.test(insertResult.error.message)
+      ) {
+        logger.warn(
+          "cross_trade_suggestions column missing \u2014 stripping + retrying (migration 00045 pending)",
+        );
+        const stripped = leadsToInsert.map((row) => {
+          const { cross_trade_suggestions: _omit, ...rest } =
+            row as Record<string, unknown>;
           return rest;
         });
         insertResult = await supabase

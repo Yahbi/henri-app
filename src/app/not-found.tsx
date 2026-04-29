@@ -65,7 +65,7 @@ export default function NotFound() {
       <p className="mt-8 text-xs text-muted-foreground">
         Still can&apos;t find what you need?{" "}
         <a
-          href="mailto:support@henri.app"
+          href="mailto:support@meethenri.com"
           className="underline hover:text-foreground"
         >
           Email support

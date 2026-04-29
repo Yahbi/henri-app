@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
+import { logger } from "@/lib/logger";
 import type { ContractorProfileUpdate } from "@/types/profile";
 
 /* ── Updatable fields whitelist ── */
@@ -14,6 +15,10 @@ const UPDATABLE_FIELDS: (keyof ContractorProfileUpdate)[] = [
   "phone",
   "profile_public",
   "service_area",
+  // G3 fix (2026-04-27): wedge bullet #5 (10-second missed-call SMS)
+  // depends on this column being populated. Adding it to the
+  // whitelist makes the new Settings UI work end-to-end.
+  "twilio_tracked_number",
 ];
 
 /* ─── GET /api/profile — return full contractor profile with computed fields ─── */
@@ -32,6 +37,7 @@ export async function GET() {
         id, email, full_name, company_name, bio, trade,
         service_area, specialties, years_experience,
         portfolio_photos, profile_public, phone,
+        twilio_tracked_number,
         plan, role, onboarding_completed, created_at,
         avg_rating, review_count, response_time_h
       `
@@ -69,7 +75,7 @@ export async function GET() {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error("profile.get failed", {
+    logger.error("profile.get failed", {
       message: err instanceof Error ? err.message : "unknown",
     });
     return NextResponse.json(
@@ -115,6 +121,46 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    // twilio_tracked_number — accept E.164 (`+14155551234`) or null/empty
+    // (clear the field). Defensive normalization happens here so the DB
+    // never sees mixed formats. Empty string → null.
+    if ("twilio_tracked_number" in body) {
+      const raw = body.twilio_tracked_number;
+      if (raw === null || raw === "" || raw === undefined) {
+        body.twilio_tracked_number = null;
+      } else if (typeof raw !== "string") {
+        return NextResponse.json(
+          { error: "Phone number must be a string" },
+          { status: 400 }
+        );
+      } else {
+        // Strip non-digits except leading + and reformat to E.164.
+        // US-default: prepend +1 if user typed 10 digits.
+        const trimmed = raw.trim();
+        const digits = trimmed.replace(/[^\d+]/g, "");
+        let e164: string;
+        if (digits.startsWith("+")) {
+          e164 = digits;
+        } else if (/^\d{10}$/.test(digits)) {
+          e164 = `+1${digits}`;
+        } else if (/^1\d{10}$/.test(digits)) {
+          e164 = `+${digits}`;
+        } else {
+          return NextResponse.json(
+            { error: "Phone must be 10 digits or E.164 format (+15551234567)" },
+            { status: 400 }
+          );
+        }
+        if (!/^\+\d{10,15}$/.test(e164)) {
+          return NextResponse.json(
+            { error: "Phone must be a valid E.164 number" },
+            { status: 400 }
+          );
+        }
+        body.twilio_tracked_number = e164;
+      }
+    }
+
     /* ── Build update payload (whitelist only) ── */
     const update: Record<string, unknown> = {};
     for (const key of UPDATABLE_FIELDS) {
@@ -140,6 +186,7 @@ export async function PATCH(request: NextRequest) {
         id, email, full_name, company_name, bio, trade,
         service_area, specialties, years_experience,
         portfolio_photos, profile_public, phone,
+        twilio_tracked_number,
         plan, role, onboarding_completed, created_at,
         avg_rating, review_count, response_time_h
       `
@@ -147,7 +194,7 @@ export async function PATCH(request: NextRequest) {
       .single();
 
     if (updateError) {
-      console.error("profile.update failed", {
+      logger.error("profile.update failed", {
         message: updateError.message,
       });
       return NextResponse.json(
@@ -176,7 +223,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ profile: result });
   } catch (err) {
-    console.error("profile.patch failed", {
+    logger.error("profile.patch failed", {
       message: err instanceof Error ? err.message : "unknown",
     });
     return NextResponse.json(

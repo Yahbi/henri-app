@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { logger } from "@/lib/logger";
 import type { Permit, ScoredPermit, Urgency } from "@/types/permits";
 
 function getOpenAI() {
@@ -65,7 +66,9 @@ export async function scorePermit(permit: Permit): Promise<ScoreResult> {
       urgency,
     };
   } catch (error) {
-    console.error("Error scoring permit:", error);
+    logger.error("Error scoring permit", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return {
       score: 0,
       reasoning: "Scoring failed due to an error",

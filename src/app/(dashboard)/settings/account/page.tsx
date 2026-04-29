@@ -21,10 +21,13 @@ export default function AccountSettingsPage() {
     service_area: "",
     years_experience: "",
     profile_public: false,
+    twilio_tracked_number: "",
   });
 
   useEffect(() => {
+    // Hydrate editable form once profile arrives from async fetch
     if (profile) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm({
         full_name: profile.full_name ?? "",
         company_name: profile.company_name ?? "",
@@ -34,6 +37,7 @@ export default function AccountSettingsPage() {
         service_area: profile.service_area ?? "",
         years_experience: profile.years_experience != null ? String(profile.years_experience) : "",
         profile_public: profile.profile_public ?? false,
+        twilio_tracked_number: profile.twilio_tracked_number ?? "",
       });
     }
   }, [profile]);
@@ -52,6 +56,9 @@ export default function AccountSettingsPage() {
       trade: form.trade,
       service_area: form.service_area,
       profile_public: form.profile_public,
+      // Empty string clears the field server-side; the API normalizes
+      // any 10-digit US number to E.164 (+1XXXXXXXXXX) before write.
+      twilio_tracked_number: form.twilio_tracked_number.trim() || null,
     };
 
     if (form.years_experience !== "") {
@@ -116,6 +123,34 @@ export default function AccountSettingsPage() {
             onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
             className="w-full px-3 py-2 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
           />
+        </div>
+
+        {/* G3 fix (2026-04-27): Twilio tracked-number input.
+         * Wedge bullet #5 ("missed-call text-back within 10s") needs
+         * `profiles.twilio_tracked_number` populated to know which
+         * contractor a missed call routes to. Until this UI shipped,
+         * the webhook had no way to find the contractor and silently
+         * 404'd every call. */}
+        <div>
+          <label htmlFor="twilio-tracked-number" className="block text-xs font-medium text-muted-foreground mb-1.5">
+            Missed-call SMS number{" "}
+            <span className="font-normal text-fg-subtle">(optional)</span>
+          </label>
+          <input
+            id="twilio-tracked-number"
+            type="tel"
+            placeholder="(555) 123-4567"
+            value={form.twilio_tracked_number}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, twilio_tracked_number: e.target.value }))
+            }
+            className="w-full px-3 py-2 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <p className="text-[11px] text-muted-foreground mt-1">
+            When a homeowner calls this number and you don&apos;t pick up, Henri
+            sends a text-back within 10 seconds with the lead context. Leave
+            blank to disable. US 10-digit or +country format accepted.
+          </p>
         </div>
 
         <div>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 
 export async function GET(request: NextRequest) {
   try {
@@ -96,7 +97,7 @@ export async function GET(request: NextRequest) {
       features,
     });
   } catch (err) {
-    console.error("Error fetching permit overlays:", err);
+    logger.error("Error fetching permit overlays", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to fetch permits" },
       { status: 500 }

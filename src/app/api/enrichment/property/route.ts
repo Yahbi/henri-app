@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
 import { enrichProperty } from "@/lib/enrichment/pipeline";
+import { logger } from "@/lib/logger";
 
 /**
  * Property enrichment endpoint.
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("Property enrichment error:", err);
+    logger.error("Property enrichment error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to enrich property data" },
       { status: 500 },

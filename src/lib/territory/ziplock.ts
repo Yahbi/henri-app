@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 import type { TerritoryClaimResult, ZipAvailability } from "@/types/leads";
 
 export async function claimTerritory(
@@ -78,7 +79,7 @@ export async function getZipAvailability(
   });
 
   if (error) {
-    console.error("Error checking zip availability:", error.message);
+    logger.error("Error checking zip availability", { error: error.message });
     return null;
   }
 

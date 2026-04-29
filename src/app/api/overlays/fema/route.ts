@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 
 const FEMA_FLOOD_API =
   "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28/query";
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
       // FEMA's public NFHL endpoint is occasionally 404/503. Fail soft — return
       // an empty FeatureCollection so the map continues to render without the
       // overlay instead of surfacing a 500 to the client.
-      console.warn(`FEMA upstream ${response.status}; returning empty overlay`);
+      logger.warn("FEMA upstream error; returning empty overlay", { status: response.status });
       return NextResponse.json(
         { type: "FeatureCollection", features: [] },
         { headers: { "Cache-Control": "public, max-age=300" } },
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
     const geojson = await response.json();
     return NextResponse.json(geojson);
   } catch (err) {
-    console.warn("FEMA fetch error — returning empty overlay:", err instanceof Error ? err.message : String(err));
+    logger.warn("FEMA fetch error — returning empty overlay", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { type: "FeatureCollection", features: [] },
       { headers: { "Cache-Control": "public, max-age=60" } },

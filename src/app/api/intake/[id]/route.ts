@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /**
  * GET /api/intake/[id]
@@ -106,7 +107,7 @@ export async function GET(
 
     return NextResponse.json(body);
   } catch (error) {
-    console.error("Intake detail GET error:", error);
+    logger.error("Intake detail GET error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

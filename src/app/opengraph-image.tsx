@@ -89,7 +89,7 @@ export default async function OGImage() {
               textTransform: "uppercase" as const,
             }}
           >
-            henri.app
+            meethenri.com
           </div>
           <div
             style={{

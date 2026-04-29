@@ -35,6 +35,8 @@ export function MarketingNav() {
 
   // Close the drawer whenever the route changes.
   useEffect(() => {
+    // Reset drawer state on route change; not derivable since it's user-controlled
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpen(false);
   }, [pathname]);
 
@@ -92,19 +94,27 @@ export function MarketingNav() {
             >
               Sign in
             </Link>
+            {/* Primary CTA. Height bumped from py-2 (36px) → h-11 (44px)
+             * on 2026-04-23 to meet WCAG 2.5.5 / iOS HIG minimum touch
+             * target. inline-flex + items-center keeps the text vertically
+             * centred at the taller height; the nav bar itself is h-14
+             * (56px) so there's still 6px of clearance top + bottom. */}
             <Link
               href={primaryCta.href}
-              className="hidden rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 md:inline-block"
+              className="hidden h-11 items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-white transition-opacity hover:opacity-90 md:inline-flex"
             >
               {primaryCta.label}
             </Link>
 
+            {/* Hamburger — bumped h-9 → h-11 for the same touch-target
+             * reason. Primary mobile affordance for the nav; if it's hard
+             * to hit the whole mobile nav is gated behind it. */}
             <button
               type="button"
               aria-label={open ? "Close navigation menu" : "Open navigation menu"}
               aria-expanded={open}
               onClick={() => setOpen((v) => !v)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
             >
               {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
@@ -137,7 +147,7 @@ export function MarketingNav() {
           </Link>
           <Link
             href={primaryCta.href}
-            className="rounded-lg bg-primary px-4 py-2 text-center text-base font-semibold text-white transition-opacity hover:opacity-90"
+            className="flex h-11 items-center justify-center rounded-lg bg-primary px-4 text-center text-base font-semibold text-white transition-opacity hover:opacity-90"
           >
             {primaryCta.label}
           </Link>

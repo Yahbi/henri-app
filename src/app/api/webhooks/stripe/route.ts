@@ -380,6 +380,147 @@ async function handlePaymentSucceeded(
     "Payment Received",
     "Payment received. Thank you!"
   );
+
+  // Phase 1.4: 13th-month-free referral credit
+  // ─────────────────────────────────────────
+  // When the referee's FIRST invoice clears, apply a 1-month-free
+  // Stripe coupon to the referrer's subscription. Idempotent via the
+  // unique (referrer_id, referee_id) constraint on referral_credits
+  // (migration 00046). Re-deliveries of the same invoice are silently
+  // ignored. Wrapped in try/catch so a failure never blocks the
+  // payment-confirmation flow.
+  await applyReferralCreditIfEligible(supabase, profile, invoice).catch((err) => {
+    logger.error("Referral credit application failed", {
+      profileId: profile.id,
+      invoiceId: invoice.id,
+      error: String(err),
+    });
+  });
+}
+
+/**
+ * If this paying customer was referred by another contractor AND this
+ * is their first paid invoice, create a 1-month-free Stripe coupon and
+ * apply it to the referrer's subscription. Idempotent.
+ *
+ * Phase 1.4 of the post-audit roadmap. Foundation already shipped via
+ * migration 00015 (`referrals` + `referred_by` column). This adds the
+ * payment-side wiring.
+ */
+async function applyReferralCreditIfEligible(
+  supabase: AdminClient,
+  refereeProfile: { id: string },
+  invoice: Stripe.Invoice,
+): Promise<void> {
+  // Look up the referrer chain. `referred_by` was populated at signup
+  // by `process_referral_signup` (migration 00015's RPC).
+  const { data: row } = await supabase
+    .from("profiles")
+    .select("id, referred_by")
+    .eq("id", refereeProfile.id)
+    .single();
+  if (!row?.referred_by) return; // not referred — nothing to credit
+
+  // Idempotency check: only credit on FIRST paid invoice. Subsequent
+  // invoices for this referee shouldn't re-fire the credit.
+  const { count: prior } = await supabase
+    .from("referral_credits")
+    .select("id", { count: "exact", head: true })
+    .eq("referee_id", refereeProfile.id);
+  if (prior && prior > 0) return;
+
+  // Look up the referrer's Stripe customer.
+  const { data: referrerProfile } = await supabase
+    .from("profiles")
+    .select("id, stripe_customer_id")
+    .eq("id", row.referred_by)
+    .single();
+  if (!referrerProfile?.stripe_customer_id) return;
+
+  // Audit B3 fix (2026-04-27): RACE-SAFE coupon issuance.
+  //
+  // The prior order was (1) check count → (2) create Stripe coupon →
+  // (3) apply to subscription → (4) insert referral_credits row.
+  // Stripe webhooks deliver at-least-once. A retried delivery within
+  // 50–200 ms passed both count checks, both `stripe.coupons.create`
+  // succeeded, and both `subscriptions.update` calls succeeded —
+  // attaching TWO 100%-off coupons to the same customer's next invoice.
+  // The unique constraint on `referral_credits(referrer_id, referee_id)`
+  // blocked the second INSERT but the duplicate coupon was already
+  // attached.
+  //
+  // New order: INSERT the row FIRST with a placeholder coupon_id. If
+  // the unique constraint blocks (concurrent delivery already won the
+  // race), abort cleanly. Only on successful insert do we create the
+  // Stripe coupon and update the row with the real coupon_id. This
+  // makes the unique-constraint the bottleneck for at-most-once,
+  // exactly the property Stripe's at-least-once delivery requires.
+  const placeholderCouponId = `pending_${refereeProfile.id.slice(0, 8)}_${Date.now()}`;
+  const { data: insertedRow, error: insertErr } = await supabase
+    .from("referral_credits")
+    .insert({
+      referrer_id: row.referred_by,
+      referee_id: refereeProfile.id,
+      stripe_invoice_id: invoice.id,
+      stripe_coupon_id: placeholderCouponId,
+    })
+    .select("id")
+    .single();
+  if (insertErr || !insertedRow) {
+    // Concurrent delivery won the race (or another error). Either way,
+    // exit before creating the Stripe coupon — the other delivery
+    // already issued one.
+    return;
+  }
+
+  const stripe = getStripe();
+
+  // Create the 1-month-free coupon. `duration: "once"` means it applies
+  // to a single billing cycle (the referrer's NEXT invoice).
+  const coupon = await stripe.coupons.create({
+    duration: "once",
+    percent_off: 100,
+    name: `Henri referral — ${refereeProfile.id.slice(0, 8)}`,
+  });
+
+  // Apply to the referrer's active subscription. If they have no active
+  // subscription (cancelled, paused), the coupon is created but not
+  // attached — they'll get it next time they subscribe.
+  const subs = await stripe.subscriptions.list({
+    customer: referrerProfile.stripe_customer_id,
+    status: "active",
+    limit: 1,
+  });
+  if (subs.data[0]) {
+    // Stripe API v2025+: applying a coupon directly to a subscription
+    // via update is the canonical pattern. The Stripe TS types for
+    // subscription.update don't always reflect every available field;
+    // the cast through unknown threads the coupon application without
+    // disabling no-explicit-any project-wide.
+    await stripe.subscriptions.update(subs.data[0].id, {
+      coupon: coupon.id,
+    } as unknown as Stripe.SubscriptionUpdateParams);
+  }
+
+  // Update the row with the real Stripe coupon id. We held the unique
+  // slot with the placeholder; now stamp the truth.
+  await supabase
+    .from("referral_credits")
+    .update({ stripe_coupon_id: coupon.id })
+    .eq("id", insertedRow.id);
+
+  // Best-effort notification to the referrer. Non-fatal on failure.
+  try {
+    await notify(
+      supabase,
+      row.referred_by,
+      "billing_alert",
+      "Referral credit applied",
+      "Your referee just paid their first invoice — your next bill is on the house.",
+    );
+  } catch {
+    // notify failures are logged inside notify(); swallow here.
+  }
 }
 
 /* ─── POST /api/webhooks/stripe ─── */

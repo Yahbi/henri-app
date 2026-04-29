@@ -21,7 +21,6 @@ import {
   Briefcase,
   MessageSquare,
   Search,
-  Map,
   MessageCircle,
 } from "lucide-react";
 import { FeedbackDialog } from "@/components/feedback/FeedbackDialog";
@@ -35,7 +34,10 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 // Tab order groups tabs by the verb the contractor is doing:
-//   lead work       → Leads · Map · Pipeline · Delivery (pick → explore → move → close)
+//   lead work       → Leads · Pipeline · Delivery (pick → move → close)
+//     (Leads tab already shows the map alongside the list — a separate
+//     Map tab was duplicative and confused users into thinking they
+//     were different surfaces. Removed per founder feedback.)
 //   intel + reach   → Intel · Analytics · Outreach · Estimate · ROI
 //   risk + events   → Compliance · Storm
 //   stub surfaces   → Canvass · Reputation · Financing · Blast
@@ -45,7 +47,6 @@ import { createClient } from "@/lib/supabase/client";
 //   talk            → Messages
 const CORE_TABS = [
   { href: "/dashboard", label: "Leads", icon: LayoutDashboard },
-  { href: "/dashboard/map", label: "Map", icon: Map },
   { href: "/dashboard/pipeline", label: "Pipeline", icon: Kanban },
   { href: "/dashboard/jobs", label: "Delivery", icon: Briefcase },
   { href: "/dashboard/intel", label: "Intel", icon: Lightbulb },
@@ -187,6 +188,8 @@ function TerritoryPill() {
  */
 function BillingStatePill() {
   const { profile } = useUser();
+  // Mount-time reference so trial/license countdowns are stable per render
+  const [mountNow] = useState(() => Date.now());
   if (!profile) return null;
 
   const planLabel = PLAN_LABELS[profile.plan ?? "founder"] ?? "Founder";
@@ -194,13 +197,13 @@ function BillingStatePill() {
   // Trial countdown — Stripe-created subscriptions with trial_period_days=1
   // put `profile.trial_ends_at` on the row (webhook writes it).
   const trialEnd = profile.trial_ends_at ? new Date(profile.trial_ends_at) : null;
-  const trialRemainingMs = trialEnd ? trialEnd.getTime() - Date.now() : 0;
+  const trialRemainingMs = trialEnd ? trialEnd.getTime() - mountNow : 0;
   const inTrial = trialRemainingMs > 0;
   const trialHours = Math.max(0, Math.ceil(trialRemainingMs / 3_600_000));
 
   // License expiration.
   const licensedUntil = profile.licensed_until ? new Date(profile.licensed_until) : null;
-  const licenseExpired = licensedUntil ? licensedUntil.getTime() < Date.now() : false;
+  const licenseExpired = licensedUntil ? licensedUntil.getTime() < mountNow : false;
 
   const tone = licenseExpired
     ? "bg-red-500/10 text-red-400 border-red-500/20"

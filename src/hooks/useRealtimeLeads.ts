@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
@@ -112,6 +112,8 @@ export function useRealtimeLeads({
 
   useEffect(() => {
     if (!enabled || !contractorId) {
+      // Reset-on-disable; state drives "connected" indicator UI
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsConnected(false);
       return;
     }

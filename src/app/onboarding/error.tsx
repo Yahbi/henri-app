@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 export default function OnboardingError({
   error,
   reset,
@@ -10,9 +12,9 @@ export default function OnboardingError({
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-background">
       <div className="max-w-md w-full rounded-xl border border-border bg-card p-8 text-center space-y-4 shadow-lg">
-        <a href="/" className="inline-block font-heading text-2xl font-normal text-primary mb-2">
+        <Link href="/" className="inline-block font-heading text-2xl font-normal text-primary mb-2">
           Henri.
-        </a>
+        </Link>
         <svg
           width="40"
           height="40"

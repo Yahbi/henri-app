@@ -91,7 +91,7 @@ export function GodModeSwitcher() {
         fontFamily: "system-ui, -apple-system, sans-serif",
         fontSize: 12,
         boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-        border: "1px solid rgba(212,136,106,0.5)",
+        border: "1px solid color-mix(in srgb, var(--primary) 50%, transparent)",
       }}
       aria-label="Dev role switcher"
     >
@@ -106,7 +106,7 @@ export function GodModeSwitcher() {
           padding: "4px 10px",
           borderRadius: 6,
           border: "1px solid rgba(255,255,255,0.15)",
-          background: role === "contractor" ? "#D4886A" : "transparent",
+          background: role === "contractor" ? "var(--primary)" : "transparent",
           color: role === "contractor" ? "#fff" : "#F5F1EA",
           cursor: loading ? "progress" : "pointer",
           fontWeight: 600,
@@ -123,7 +123,7 @@ export function GodModeSwitcher() {
           padding: "4px 10px",
           borderRadius: 6,
           border: "1px solid rgba(255,255,255,0.15)",
-          background: role === "homeowner" ? "#D4886A" : "transparent",
+          background: role === "homeowner" ? "var(--primary)" : "transparent",
           color: role === "homeowner" ? "#fff" : "#F5F1EA",
           cursor: loading ? "progress" : "pointer",
           fontWeight: 600,

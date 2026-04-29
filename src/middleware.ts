@@ -57,6 +57,23 @@ export async function middleware(request: NextRequest) {
   // having a live Stripe subscription. Everyone else still hits the
   // license → plan → payment → territory gates below.
   if (user && isGodModeEmail(user.email)) {
+    // Audit S6 fix (2026-04-27): structured audit log for god-mode
+    // bypass — every entry is a privileged short-circuit through
+    // middleware gating. Without this, a compromised god-mode email
+    // (or a misconfigured GOD_MODE_EMAILS env var) leaves no audit
+    // trail. Use console.warn directly because middleware runs on
+    // Edge runtime and `@/lib/logger` is not Edge-compatible.
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        msg: "god-mode bypass invoked",
+        email: user.email,
+        user_id: user.id,
+        path: pathname,
+        ip: request.headers.get("x-forwarded-for") ?? "unknown",
+        ts: new Date().toISOString(),
+      }),
+    );
     return response;
   }
 

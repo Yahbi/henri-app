@@ -73,9 +73,9 @@ function toneClasses(tone: "cool" | "primary" | "success" | "hot") {
     case "primary":
       return "bg-primary-10 text-primary border-primary/30";
     case "success":
-      return "bg-[rgba(61,153,112,0.10)] text-success border-success/30";
+      return "bg-[color-mix(in_srgb,hsl(var(--success))_10%,transparent)] text-success border-success/30";
     case "hot":
-      return "bg-[rgba(212,136,106,0.08)] text-hot border-hot/30";
+      return "bg-[color-mix(in_srgb,var(--hot)_8%,transparent)] text-hot border-hot/30";
   }
 }
 
@@ -166,6 +166,10 @@ export function PermitTimeline({
       }
     })();
     return () => { cancelled = true; };
+    // `permit` as an object-prop gets a new identity every render in
+    // callers that inline the object literal (see LeadDetailDrawer).
+    // The fields we actually read from it are listed explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [permitId, permit.applied_date, permit.issued_date, permit.completed_date, permit.status]);
 
   // Always render the timeline scaffold when we have a permit backing

@@ -12,8 +12,8 @@ export const maxDuration = 300;
 /*  pipeline status, license/insurance alerts, and engagement updates.        */
 /* -------------------------------------------------------------------------- */
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "digest@henri.app";
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://henri.app";
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "digest@meethenri.com";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://meethenri.com";
 
 function buildDigestHtml(data: {
   name: string;

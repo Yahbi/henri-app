@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2, Printer, X, Send, Copy, Check } from "lucide-react";
 import { useLeads } from "@/hooks/useLeads";
-import { useEstimates } from "@/hooks/useEstimates";
+import { useEstimates, type EstimateCreateInput } from "@/hooks/useEstimates";
 import { getTradeTierPrices } from "@/lib/constants/trade-costs";
+import { resolveTaxRate } from "@/lib/tax/zip-fallback";
+import { Card } from "@/components/ui/card";
 
 /* ─── Types ─── */
 interface LineItem {
@@ -196,18 +198,41 @@ function SendModal({ id, total, address, onClose }: { id: string; total: number;
 }
 
 /* ─── Estimate Builder Modal ─── */
-function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSaved: () => void; onSave: (data: any) => Promise<{ success: boolean; error?: string }> }) {
+function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSaved: () => void; onSave: (data: EstimateCreateInput) => Promise<{ success: boolean; error?: string }> }) {
   const { data: leads } = useLeads();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [selectedLeadId, setSelectedLeadId] = useState("");
   const [taxRate, setTaxRate] = useState(8.75);
+  // Phase 1.6: track whether the contractor has manually overridden the
+  // tax rate. Once they edit the input, we stop auto-prefilling on
+  // lead change. Until then, picking a lead from a Hartford ZIP
+  // auto-sets 6.35%, picking a Houston ZIP auto-sets 8.25%, etc.
+  const [taxRateSource, setTaxRateSource] = useState<"manual" | "zip" | "state" | "unknown">("manual");
   const [activeTier, setActiveTier] = useState<Tier>("better");
   const [lineItems, setLineItems] = useState<LineItem[]>([
     { material: "", quantity: 1, unit: "item", unitPrice: 0 },
   ]);
 
   const selectedLead = leads?.find((l) => l.id === selectedLeadId);
+
+  // Phase 1.6 Day 1: auto-prefill tax rate from the lead's ZIP/state
+  // when a lead is selected. Resolves via src/lib/tax/zip-fallback.ts:
+  //   1. ZIP exact match (top-50 metros) → most precise (~95% of traffic)
+  //   2. State-level average → ±2% accuracy
+  //   3. Unknown → falls back to the 8.75 default; contractor sets manually
+  // Skip auto-prefill once the contractor has manually edited.
+  useEffect(() => {
+    if (!selectedLead) return;
+    if (taxRateSource === "manual") return;
+    const resolved = resolveTaxRate({
+      zip: selectedLead.zip ?? undefined,
+      state: selectedLead.state ?? undefined,
+    });
+    setTaxRate(Number((resolved.rate * 100).toFixed(3)));
+    setTaxRateSource(resolved.source);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLead?.id]);
 
   const addLine = () => setLineItems((prev) => [...prev, { material: "", quantity: 1, unit: "item", unitPrice: 0 }]);
   const removeLine = (i: number) => setLineItems((prev) => prev.filter((_, idx) => idx !== i));
@@ -246,11 +271,23 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
       if (tier === "better") return tradeTiersLocal.better / tradeTiersLocal.good;
       return tradeTiersLocal.best / tradeTiersLocal.good;
     };
-    const buildTier = (tier: Tier) => ({
-      label: tierTemplates[tier].label,
-      items: lineItems,
-      total: baseSubtotal * mult(tier),
-    });
+    // Translate the page-local LineItem shape (material / unitPrice /
+    // unit) into the EstimateLineItem shape the API + DB expect
+    // (description / unit_price / quantity / total). Keeps the API
+    // payload canonical while the UI state stays readable.
+    const buildTier = (tier: Tier) => {
+      const m = mult(tier);
+      return {
+        label: tierTemplates[tier].label,
+        total: baseSubtotal * m,
+        line_items: lineItems.map((li) => ({
+          description: li.unit ? `${li.material} (${li.unit})` : li.material,
+          quantity: li.quantity,
+          unit_price: li.unitPrice * m,
+          total: li.quantity * li.unitPrice * m,
+        })),
+      };
+    };
 
     const result = await onSave({
       trade: "general",
@@ -362,7 +399,23 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
               <label htmlFor="est-tax" className="text-xs font-medium text-muted-foreground">Tax rate %</label>
               <input id="est-tax" type="number" min="0" max="30" step="0.01"
                 className="mt-1 w-24 px-2 py-1.5 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring"
-                value={taxRate} onChange={(e) => setTaxRate(parseFloat(e.target.value) || 0)} />
+                value={taxRate}
+                onChange={(e) => {
+                  setTaxRate(parseFloat(e.target.value) || 0);
+                  // Manual edit — stop auto-prefilling on next lead change.
+                  setTaxRateSource("manual");
+                }} />
+              {/* Phase 1.6 source attribution: shows where the rate came
+               * from. "Stripe Tax" is the future Phase 2.4 label. */}
+              {taxRateSource === "zip" && (
+                <p className="mt-1 text-[10px] text-muted-foreground">via ZIP {selectedLead?.zip} lookup</p>
+              )}
+              {taxRateSource === "state" && (
+                <p className="mt-1 text-[10px] text-muted-foreground">via {selectedLead?.state} state-average estimate</p>
+              )}
+              {taxRateSource === "manual" && (
+                <p className="mt-1 text-[10px] text-muted-foreground">manually set</p>
+              )}
             </div>
             <div className="flex flex-col items-end gap-1 text-sm">
               <div className="flex justify-between w-52">
@@ -406,13 +459,28 @@ export default function EstimatePage() {
   const [sendTarget, setSendTarget] = useState<{ id: string; total: number; address: string } | null>(null);
   const { estimates: rawEstimates, isLoading, createEstimate, refresh } = useEstimates();
 
-  const estimates: EstimateRecord[] = rawEstimates.map((e) => ({
-    id: e.id,
-    address: e.description || e.customer_name || "Estimate",
-    total: typeof e.total === "number" ? e.total : 0,
-    status: e.status,
-    created_at: e.created_at,
-  }));
+  const estimates: EstimateRecord[] = rawEstimates.map((e) => {
+    // `quotes` doesn't store a flat `total` — each tier carries its own
+    // total. Prefer the selected-tier's total; fall back to the `amount`
+    // virtual field (set by the API route when flattening); final
+    // fallback is 0. Same logic as the send modal uses.
+    const tierTotal =
+      (e.selected_tier && e[`tier_${e.selected_tier}` as const]?.total) ??
+      e.tier_good?.total ??
+      e.tier_better?.total ??
+      e.tier_best?.total ??
+      e.amount ??
+      0;
+    return {
+      id: e.id,
+      // Row label priority: contact name (if sent to a homeowner) →
+      // description (job scope one-liner) → generic "Estimate".
+      address: e.contact_name || e.description || "Estimate",
+      total: typeof tierTotal === "number" ? tierTotal : 0,
+      status: e.status,
+      created_at: e.created_at,
+    };
+  });
 
   const loaded = !isLoading;
 
@@ -441,22 +509,22 @@ export default function EstimatePage() {
       {/* Quick Stats */}
       {loaded && estimates.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="rounded-lg border border-border bg-card p-4">
+          <Card className="p-4">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Estimates</p>
             <p className="text-2xl font-heading font-normal text-foreground mt-1">{stats.total}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
+          </Card>
+          <Card className="p-4">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Accepted</p>
             <p className="text-2xl font-heading font-normal text-green-400 mt-1">{stats.accepted}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
+          </Card>
+          <Card className="p-4">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Pending</p>
             <p className="text-2xl font-heading font-normal text-blue-400 mt-1">{stats.pending}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
+          </Card>
+          <Card className="p-4">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Avg. Value</p>
             <p className="text-2xl font-heading font-normal text-primary mt-1">${stats.avgValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-          </div>
+          </Card>
         </div>
       )}
 
@@ -464,7 +532,7 @@ export default function EstimatePage() {
       {loaded && estimates.length > 0 && (
         <div>
           <h2 className="text-lg font-heading font-normal text-foreground mb-3">Recent Estimates</h2>
-          <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <Card className="overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-bg-subtle">
@@ -498,7 +566,7 @@ export default function EstimatePage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
         </div>
       )}
 

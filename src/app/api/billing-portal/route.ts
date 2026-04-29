@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createBillingPortalSession } from "@/lib/stripe/client";
+import { logger } from "@/lib/logger";
 
 /* POST /api/billing-portal — redirect to Stripe billing portal */
 export async function POST(req: NextRequest) {
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
-    console.error("Billing portal error:", error);
+    logger.error("Billing portal error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "Failed to create portal session" }, { status: 500 });
   }
 }

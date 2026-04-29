@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useTheme } from "@/components/ThemeProvider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
@@ -9,18 +8,17 @@ import { cn } from "@/lib/utils/cn";
 // Honest stats — sourced from live Supabase counts (audit 2026-04-22):
 //   permits.total          ≈ 925k  (rounded down to 900k+ for headroom)
 //   permit_sources.enabled ≈ 1,861 covering 46 US states / DC
-//   lead-delivery latency is a product promise, not a data claim
+//   refresh cadence        = every 30 min (vercel.json /api/cron/scrape)
 // If these grow past the rounded numbers, bump them — don't inflate.
+// Previously shipped "< 15min Lead Delivery", which was not defensible
+// against the actual cron cadence. Replaced with the factual cadence.
 const stats = [
   { label: "900k+ Permits Tracked", top: "12%", left: "8%", delay: "0s" },
   { label: "45+ States Covered", top: "38%", left: "2%", delay: "0.2s" },
-  { label: "< 15min Lead Delivery", top: "64%", left: "6%", delay: "0.4s" },
+  { label: "Refreshed every 30 min", top: "64%", left: "6%", delay: "0.4s" },
 ] as const;
 
 export function Hero() {
-  const { theme } = useTheme();
-  const isDark = theme === "dark" || theme === "dusk";
-
   return (
     <section className="relative min-h-screen flex items-center overflow-hidden bg-background">
       {/* Gradient mesh background */}

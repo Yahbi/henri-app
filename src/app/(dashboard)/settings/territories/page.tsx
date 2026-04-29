@@ -47,6 +47,8 @@ export default function TerritoriesPage() {
     setLoading(false);
   }, [user]);
 
+  // Fetch territories on mount; setState happens after IO inside loadTerritories
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadTerritories(); }, [loadTerritories]);
 
   function formatDate(dateStr: string) {

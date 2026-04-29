@@ -63,7 +63,10 @@ function toGeoJSON(leads: LeadData[]): GeoJSON.FeatureCollection {
 export function LeadLayer({ map, leads, onSelectLead }: LeadLayerProps) {
   const addedRef   = useRef(false);
   const leadsRef   = useRef(leads);
-  leadsRef.current = leads;   // keep current for click-handler closures
+  // Keep ref current for click-handler closures; must run in effect (not render) per react-hooks/refs
+  useEffect(() => {
+    leadsRef.current = leads;
+  }, [leads]);
 
   /* ── Add / re-add source + layers ─────────────────────────────────────── */
   useEffect(() => {

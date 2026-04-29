@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
+import { ReviewRespondBodySchema, parseBody } from "@/lib/schemas/api";
 
 /**
  * POST /api/reviews/respond
@@ -18,18 +19,10 @@ import { logApiError } from "@/lib/log";
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as { review_id?: string; reply?: string };
-    const reviewId = (body.review_id ?? "").trim();
-    const reply = (body.reply ?? "").trim();
-    if (!reviewId || !reply) {
-      return NextResponse.json(
-        { error: "review_id and reply required" },
-        { status: 400 },
-      );
-    }
-    if (reply.length > 4000) {
-      return NextResponse.json({ error: "Reply too long" }, { status: 400 });
-    }
+    const raw = await req.json();
+    const parsed = parseBody(ReviewRespondBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { review_id: reviewId, reply } = parsed.data;
 
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();

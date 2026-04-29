@@ -60,6 +60,8 @@ export function ParcelLayer({ map, visible, bounds }: ParcelLayerProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // Reset-on-dep-change + async fetch drives parcel visibility; setState in effect is required
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (!visible || !map || !bounds) {
       setGeojson(null);
       return;
@@ -111,6 +113,7 @@ export function ParcelLayer({ map, visible, bounds }: ParcelLayerProps) {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [visible, map, bounds]);
 
   useEffect(() => {

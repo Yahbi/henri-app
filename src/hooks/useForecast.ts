@@ -90,7 +90,7 @@ export function useForecast(planPrice = 749): UseForecastReturn {
       ltv,
       breakEvenMonths: ltv > 0 ? Math.ceil(planPrice / (ltv * 0.063)) : null,
     };
-  }, [leads]);
+  }, [leads, planPrice]);
 
   return {
     forecast,

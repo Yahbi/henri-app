@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchLivePermits } from "@/lib/permits/live";
 import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/utils/rate-limit";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("[/api/permits/live] Failed to fetch live permits:", err);
+    logger.error("[/api/permits/live] Failed to fetch live permits", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to fetch live permit data" },
       { status: 500 },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { logger } from "@/lib/logger";
 
 export interface ContractorSearchResult {
   id: string;
@@ -72,7 +73,7 @@ export function useContractorSearch(
         setContractors(data.contractors ?? []);
       } catch (err) {
         if (currentId !== requestIdRef.current) return;
-        console.error("useContractorSearch error:", err);
+        logger.error("useContractorSearch error", { error: err instanceof Error ? err.message : String(err) });
         setError(err instanceof Error ? err.message : "Unknown error");
         setContractors([]);
       } finally {

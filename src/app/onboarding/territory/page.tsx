@@ -551,7 +551,7 @@ export default function TerritoryPage() {
                 <MapPin className="h-10 w-10 text-muted-foreground/30 mb-3" />
                 <p className="text-sm font-medium text-foreground">Search for your city</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  We'll show you every available ZIP code in that area.
+                  We&apos;ll show you every available ZIP code in that area.
                 </p>
               </div>
             )}

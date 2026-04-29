@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useUser } from "@/hooks/useUser";
 import { LicensingSection } from "@/components/settings/LicensingSection";
-import { createClient } from "@/lib/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
 import {
   Building2,
@@ -16,7 +16,6 @@ import {
   MapPin,
   CreditCard,
   Bell,
-  Shield,
   AlertTriangle,
   ChevronRight,
   LogOut,
@@ -63,11 +62,9 @@ function Section({
   className?: string;
 }) {
   return (
-    <div
-      className={`rounded-xl border border-border bg-card p-6 ${className ?? ""}`}
-    >
+    <Card className={`p-6 ${className ?? ""}`}>
       {children}
-    </div>
+    </Card>
   );
 }
 
@@ -538,8 +535,10 @@ export default function SettingsPage() {
                 Cancel subscription
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Cancel anytime. Your account stays active until the end of the
-                current billing cycle. No refunds for digital products.
+                Cancel anytime. Your account stays active through the end of the
+                current billing cycle &mdash; no further charges. After that, your
+                account data is removed prior to the next billing date. No
+                refunds for digital products.
               </p>
             </div>
             <Link
@@ -562,7 +561,7 @@ export default function SettingsPage() {
                 </p>
               </div>
               <a
-                href="mailto:support@henri.app"
+                href="mailto:support@meethenri.com"
                 className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-accent transition-colors"
               >
                 <LifeBuoy className="h-3.5 w-3.5" />

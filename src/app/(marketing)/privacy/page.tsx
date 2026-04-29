@@ -276,10 +276,10 @@ export default function PrivacyPolicyPage() {
               <p className="mt-3">
                 To exercise any of these rights, contact us at{" "}
                 <a
-                  href="mailto:privacy@henri.app"
+                  href="mailto:privacy@meethenri.com"
                   className="text-[#D4886A] underline underline-offset-2"
                 >
-                  privacy@henri.app
+                  privacy@meethenri.com
                 </a>
                 . We will respond to your request within 30 days.
               </p>
@@ -329,10 +329,10 @@ export default function PrivacyPolicyPage() {
               <p>
                 To submit a CCPA request, email us at{" "}
                 <a
-                  href="mailto:privacy@henri.app"
+                  href="mailto:privacy@meethenri.com"
                   className="text-[#D4886A] underline underline-offset-2"
                 >
-                  privacy@henri.app
+                  privacy@meethenri.com
                 </a>{" "}
                 with the subject line &quot;CCPA Request.&quot;
               </p>
@@ -388,10 +388,10 @@ export default function PrivacyPolicyPage() {
               If you have questions or concerns about this Privacy Policy or our
               data practices, please contact us at{" "}
               <a
-                href="mailto:privacy@henri.app"
+                href="mailto:privacy@meethenri.com"
                 className="text-[#D4886A] underline underline-offset-2"
               >
-                privacy@henri.app
+                privacy@meethenri.com
               </a>
               .
             </p>

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { QuoteRequestBodySchema, parseBody } from "@/lib/schemas/api";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/quotes — list quotes for authenticated user ─── */
 export async function GET(request: NextRequest) {
@@ -43,7 +45,7 @@ export async function GET(request: NextRequest) {
     const { data: quotes, error, count } = await query;
 
     if (error) {
-      console.error("Quotes fetch error:", error);
+      logger.error("Quotes fetch error", { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
         { error: "Failed to fetch quotes" },
         { status: 500 }
@@ -55,7 +57,7 @@ export async function GET(request: NextRequest) {
       total: count ?? 0,
     });
   } catch (err) {
-    console.error("Quotes GET error:", err);
+    logger.error("Quotes GET error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -76,7 +78,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await req.json();
+    const raw = await req.json();
+    const parsed = parseBody(QuoteRequestBodySchema, raw);
+    if (parsed.response) return parsed.response;
     const {
       contractor_id,
       trade,
@@ -86,26 +90,7 @@ export async function POST(req: NextRequest) {
       contact_name,
       contact_email,
       contact_phone,
-    } = body as {
-      contractor_id?: string;
-      trade?: string;
-      zip?: string;
-      description?: string;
-      scope_notes?: string;
-      contact_name?: string;
-      contact_email?: string;
-      contact_phone?: string;
-    };
-
-    if (!contractor_id || !trade || !zip || !description) {
-      return NextResponse.json(
-        {
-          error:
-            "contractor_id, trade, zip, and description are required",
-        },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     /* Verify the contractor exists and is active */
     const { data: contractor, error: cErr } = await supabase
@@ -153,7 +138,7 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (intakeErr) {
-        console.error("Intake insert error:", intakeErr);
+        logger.error("Intake insert error", { error: intakeErr instanceof Error ? intakeErr.message : String(intakeErr) });
       } else {
         intakeId = newIntake?.id ?? null;
       }
@@ -179,7 +164,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (quoteErr) {
-      console.error("Quote insert error:", quoteErr);
+      logger.error("Quote insert error", { error: quoteErr instanceof Error ? quoteErr.message : String(quoteErr) });
       return NextResponse.json(
         { error: "Failed to create quote request" },
         { status: 500 }
@@ -201,7 +186,7 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    console.error("Quotes POST error:", err);
+    logger.error("Quotes POST error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

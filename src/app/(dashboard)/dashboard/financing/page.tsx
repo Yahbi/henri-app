@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useFinancing } from "@/hooks/useFinancing";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
 import { ComingSoon, STUBS_ENABLED } from "@/components/ComingSoon";
 
 import { FINANCING_PARTNERS } from "@/lib/constants/financing-partners";
@@ -61,23 +62,23 @@ function FinancingPageInner() {
 
       {/* Financing Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="rounded-lg border border-border bg-card p-4">
+        <Card className="p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Quotes</p>
           {isLoading ? (
             <Skeleton className="h-8 w-16 mt-1" />
           ) : (
             <p className="text-2xl font-heading font-normal text-foreground mt-1">{stats.total_quotes}</p>
           )}
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        </Card>
+        <Card className="p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Financed Deals</p>
           {isLoading ? (
             <Skeleton className="h-8 w-16 mt-1" />
           ) : (
             <p className="text-2xl font-heading font-normal text-green-400 mt-1">{stats.quotes_with_financing}</p>
           )}
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        </Card>
+        <Card className="p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Avg Ticket</p>
           {isLoading ? (
             <Skeleton className="h-8 w-16 mt-1" />
@@ -86,21 +87,21 @@ function FinancingPageInner() {
               ${stats.avg_ticket_size.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </p>
           )}
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        </Card>
+        <Card className="p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Approval Rate</p>
           {isLoading ? (
             <Skeleton className="h-8 w-16 mt-1" />
           ) : (
             <p className="text-2xl font-heading font-normal text-blue-400 mt-1">{stats.approval_rate}%</p>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Calculator Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Input Form */}
-        <div className="rounded-lg border border-border bg-card p-6 space-y-5">
+        <Card className="p-6 space-y-5">
           <h2 className="text-lg font-heading font-normal text-foreground">
             Project Details
           </h2>
@@ -154,11 +155,11 @@ function FinancingPageInner() {
               </select>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* Results */}
         <div className="space-y-4">
-          <div className="rounded-lg border border-border bg-card p-5 space-y-1">
+          <Card className="p-5 space-y-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">
               Monthly Payment
             </p>
@@ -168,9 +169,9 @@ function FinancingPageInner() {
             <p className="text-xs text-muted-foreground">
               For {term} months at {rate}% APR
             </p>
-          </div>
+          </Card>
 
-          <div className="rounded-lg border border-border bg-card p-5 space-y-1">
+          <Card className="p-5 space-y-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">
               Total Interest
             </p>
@@ -180,9 +181,9 @@ function FinancingPageInner() {
             <p className="text-xs text-muted-foreground">
               Over the life of the loan
             </p>
-          </div>
+          </Card>
 
-          <div className="rounded-lg border border-border bg-card p-5 space-y-1">
+          <Card className="p-5 space-y-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">
               Total Cost
             </p>
@@ -192,7 +193,7 @@ function FinancingPageInner() {
             <p className="text-xs text-muted-foreground">
               Principal + interest
             </p>
-          </div>
+          </Card>
         </div>
       </div>
 
@@ -203,9 +204,9 @@ function FinancingPageInner() {
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {partners.map((p) => (
-            <div
+            <Card
               key={p.name}
-              className="rounded-lg border border-border bg-card p-5 space-y-3"
+              className="p-5 space-y-3"
             >
               <h3 className="text-base font-heading font-normal text-foreground">
                 {p.name}
@@ -220,7 +221,7 @@ function FinancingPageInner() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">{p.description}</p>
-            </div>
+            </Card>
           ))}
         </div>
       </div>
@@ -229,7 +230,7 @@ function FinancingPageInner() {
       {!isLoading && deals.length > 0 && (
         <div>
           <h2 className="text-lg font-heading font-normal text-foreground mb-3">Recent Deals</h2>
-          <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <Card className="overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-bg-subtle">
@@ -254,7 +255,7 @@ function FinancingPageInner() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
         </div>
       )}
     </div>

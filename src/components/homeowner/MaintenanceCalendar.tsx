@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { CheckCircle, Clock, AlertTriangle } from "lucide-react";
+import { CheckCircle, AlertTriangle } from "lucide-react";
 
 /* ─── Maintenance Task Database ─── */
 interface MaintenanceTask {

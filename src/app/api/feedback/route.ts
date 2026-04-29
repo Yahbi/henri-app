@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logApiError } from "@/lib/log";
+import { logger } from "@/lib/logger";
 import { Resend } from "resend";
 import { z } from "zod";
 import * as fs from "fs/promises";
@@ -36,7 +37,7 @@ import * as path from "path";
  */
 
 const FEEDBACK_INBOX = process.env.FEEDBACK_INBOX ?? "y.abismuth@gmail.com";
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "henri@henri.app";
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "henri@meethenri.com";
 
 function escapeHtml(s: string): string {
   return s
@@ -48,10 +49,13 @@ function escapeHtml(s: string): string {
 }
 
 function buildSubject(role: string, category: string, rating?: number | null): string {
-  const stars = rating ? ` (${"★".repeat(rating)})` : "";
+  // No star glyphs per brand rules (CLAUDE.md: "No emojis anywhere in code,
+  // copy, logs, or UI"). Render as a plain "N/5" fraction instead — clearer
+  // than a glyph run and copy-pastes cleanly into plain-text readers.
+  const ratingText = rating ? ` (${rating}/5)` : "";
   const cat = category.replace(/_/g, " ");
   const roleShort = role === "anonymous" ? "anon" : role;
-  return `[Henri feedback] ${roleShort} · ${cat}${stars}`;
+  return `[Henri feedback] ${roleShort} · ${cat}${ratingText}`;
 }
 
 interface FeedbackSubmission {
@@ -66,7 +70,16 @@ interface FeedbackSubmission {
 }
 
 function buildFeedbackHtml(s: FeedbackSubmission): string {
-  const stars = s.rating ? "★".repeat(s.rating) + "☆".repeat(5 - s.rating) : "—";
+  // Render rating as a filled/empty bar string rather than star glyphs.
+  // Same reason as buildSubject — brand rule is no emoji/glyph art. Five
+  // block chars keep the visual weight close to the old star run without
+  // violating the rule. (U+25A0 filled / U+25A1 empty are geometric shapes,
+  // not emoji — same category as "—" we already use for the null case.)
+  const rating = s.rating ?? 0;
+  const ratingBar = s.rating
+    ? "■".repeat(rating) + "□".repeat(5 - rating)
+    : "—";
+  const ratingLabel = s.rating ? `${s.rating}/5 ${ratingBar}` : "—";
   const categoryLabel = s.category.replace(/_/g, " ");
   return `
 <!DOCTYPE html>
@@ -91,7 +104,7 @@ function buildFeedbackHtml(s: FeedbackSubmission): string {
           </tr>
           <tr>
             <td style="padding:6px 0;color:#64748b;">Rating</td>
-            <td style="padding:6px 0;color:#D4886A;font-size:16px;">${stars}</td>
+            <td style="padding:6px 0;color:#D4886A;font-size:14px;font-family:monospace;letter-spacing:2px;">${escapeHtml(ratingLabel)}</td>
           </tr>
           ${s.email ? `
           <tr>
@@ -201,12 +214,12 @@ export async function POST(request: NextRequest) {
       if (!dbErr) {
         dbOk = true;
       } else if (/Could not find the table/i.test(dbErr.message)) {
-        console.warn("feedback table missing — apply migration 00030");
+        logger.warn("feedback table missing — apply migration 00030");
       } else {
-        console.warn("feedback DB insert failed:", dbErr.message);
+        logger.warn("feedback DB insert failed", { error: dbErr.message });
       }
     } catch (e) {
-      console.warn("feedback DB insert threw:", e);
+      logger.warn("feedback DB insert threw", { error: e instanceof Error ? e.message : String(e) });
     }
 
     // 2) Email delivery — fires only when RESEND_API_KEY is set.
@@ -222,10 +235,10 @@ export async function POST(request: NextRequest) {
           html: buildFeedbackHtml(submission),
         });
         if (!emailErr) emailed = true;
-        else console.warn("feedback email send failed:", emailErr);
+        else logger.warn("feedback email send failed", { error: emailErr instanceof Error ? emailErr.message : String(emailErr) });
       }
     } catch (e) {
-      console.warn("feedback email threw:", e);
+      logger.warn("feedback email threw", { error: e instanceof Error ? e.message : String(e) });
     }
 
     // 3) Local JSONL fallback — guaranteed writable in dev, skipped
@@ -244,7 +257,7 @@ export async function POST(request: NextRequest) {
       // Vercel FS read-only, or permission issue — not fatal when
       // one of the other paths succeeded.
       if (!dbOk && !emailed) {
-        console.warn("feedback file-append failed:", e);
+        logger.warn("feedback file-append failed", { error: e instanceof Error ? e.message : String(e) });
       }
     }
 

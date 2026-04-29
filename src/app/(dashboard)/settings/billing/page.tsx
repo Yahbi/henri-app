@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, CreditCard, ExternalLink, Zap, Plus } from "lucide-react";
+import { Check, CreditCard, ExternalLink, Zap } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useUser } from "@/hooks/useUser";
 
@@ -264,15 +264,41 @@ export default function BillingPage() {
                 key={plan.name}
                 className={cn(
                   "relative bg-card border rounded-xl p-5 flex flex-col",
-                  plan.highlighted ? "border-primary ring-2 ring-primary/30 shadow-lg" : "border-border",
-                  isCurrent && "border-primary/40"
+                  /* Three visual states, mutually exclusive by priority:
+                   *   1. isCurrent → emerald ring, muted card background
+                   *   2. highlighted → terracotta ring + shadow ("Popular")
+                   *   3. default → plain border
+                   * Before this change, the active-plan border
+                   * (primary/40) was nearly identical to the
+                   * highlighted-plan border (primary) — scan-readers
+                   * couldn't distinguish "my plan" from "the upsell".
+                   * Using emerald for active clearly signals "locked in"
+                   * rather than "featured offer". */
+                  isCurrent
+                    ? "border-emerald-500/40 ring-2 ring-emerald-500/20 bg-emerald-500/[0.03]"
+                    : plan.highlighted
+                      ? "border-primary ring-2 ring-primary/30 shadow-lg"
+                      : "border-border"
                 )}
               >
-                {plan.highlighted && (
+                {/* Popular ribbon — only when NOT also the current plan
+                 * (avoids a ribbon pile-up if the user is on Pro). */}
+                {plan.highlighted && !isCurrent && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                     <span className="inline-flex items-center gap-1 bg-primary text-white px-2.5 py-0.5 rounded-full text-[11px] font-semibold shadow">
                       <Zap className="h-2.5 w-2.5" />
                       Popular
+                    </span>
+                  </div>
+                )}
+                {/* Active ribbon — emerald to distinguish from terracotta
+                 * "Popular". Sits in the top-right corner instead of
+                 * centered so the two ribbons never collide. */}
+                {isCurrent && (
+                  <div className="absolute -top-3 right-3">
+                    <span className="inline-flex items-center gap-1 bg-emerald-500 text-white px-2.5 py-0.5 rounded-full text-[11px] font-semibold shadow">
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                      Active
                     </span>
                   </div>
                 )}
@@ -296,12 +322,17 @@ export default function BillingPage() {
                 </ul>
 
                 {isCurrent ? (
-                  <button disabled className="w-full py-2 text-sm font-medium border border-border rounded-lg text-muted-foreground cursor-default">
-                    Current Plan
-                  </button>
+                  /* Muted, non-clickable "currently active" chip rather
+                   * than a button styled to look actionable. The emerald
+                   * ribbon above already conveys the state; the CTA area
+                   * just needs to confirm it without competing with the
+                   * upgrade CTAs on adjacent cards. */
+                  <div className="w-full py-2 text-center text-xs font-medium text-emerald-600 bg-emerald-500/10 rounded-lg">
+                    Currently active
+                  </div>
                 ) : plan.slug === "enterprise" ? (
                   <a
-                    href="mailto:sales@henri.app?subject=Enterprise inquiry"
+                    href="mailto:sales@meethenri.com?subject=Enterprise inquiry"
                     className="w-full py-2 text-sm font-medium border border-border rounded-lg text-center hover:bg-accent transition-colors block"
                   >
                     Contact Sales
@@ -326,43 +357,14 @@ export default function BillingPage() {
         </div>
       </div>
 
-      {/* Add-ons */}
-      <div>
-        <h2 className="text-base font-semibold text-foreground mb-4">Add-ons</h2>
-        <div className="bg-card border border-border rounded-xl p-6 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Extra ZIP Territory</h3>
-            <p className="text-sm text-muted-foreground">Add territories beyond your plan limit.</p>
-            <p className="text-lg font-bold text-foreground mt-1">
-              $19 <span className="text-sm font-normal text-muted-foreground">/mo per ZIP</span>
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const res = await fetch("/api/billing/extra-zip", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ quantity: 1 }),
-                });
-                if (!res.ok) throw new Error();
-                const { url } = (await res.json()) as { url: string };
-                window.location.href = url;
-              } catch {
-                setBanner({
-                  tone: "error",
-                  text: "Couldn't open checkout for the Extra ZIP add-on. Please retry.",
-                });
-              }
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            Add Territory ($19/mo)
-          </button>
-        </div>
-      </div>
+      {/* Add-ons section removed 2026-04-26 per user direction.
+       *
+       * Previously rendered an "Extra ZIP Territory ($19/mo per ZIP)"
+       * add-on that POSTed to /api/billing/extra-zip. The route still
+       * exists for any in-flight subscription items, but the entry
+       * point is gone — contractors should change plans (Founder →
+       * Starter → Pro → Enterprise) to expand their ZIP allowance,
+       * not stack add-ons. Cleaner billing model. */}
 
       {/* Confirmation dialog */}
       {confirmPlan && (
@@ -398,22 +400,37 @@ export default function BillingPage() {
        * Phase 0a wedge #8 — cash-flow / lock-in transparency. The
        * pricing page already carries the "flat monthly, no per-lead
        * fees" claim; this footer reminds contractors of the cancel
-       * + data-export promise once they're already paying customers,
-       * which is where the lock-in anxiety actually bites.
+       * policy at the moment lock-in anxiety actually bites.
+       *
+       * Policy (mirrors Stripe `cancel_at_period_end: true` semantics):
+       *   1. Cancel anytime from this page.
+       *   2. Account stays active through the end of the current
+       *      billing cycle. No partial-cycle deletion.
+       *   3. After the cycle ends, the subscription terminates — no
+       *      next charge, no auto-renewal — and account data is
+       *      removed from active systems prior to what would have
+       *      been the next billing date.
+       *   4. No refunds (digital product per Terms).
+       *
+       * The earlier "Export your leads as JSON at Settings → Export"
+       * line was removed 2026-04-27 because the /settings/export
+       * route does not exist; the truthfulness contract requires
+       * we don't claim features we don't ship.
        */}
       <div className="mt-10 border-t border-border pt-6 text-sm text-muted-foreground space-y-1.5">
         <p className="text-foreground font-medium">No lock-in, ever.</p>
         <p>
-          Cancel anytime from this page &mdash; the change takes effect at the end of your
-          current billing cycle, no penalty.
+          Cancel anytime from this page. Your account stays active through the
+          end of your current billing cycle &mdash; no further charges occur after
+          cancellation, and no auto-renewal kicks in.
         </p>
         <p>
-          Flat monthly pricing. No per-lead fees, no auto-renewing annual contracts,
-          no retention-desk phone tag.
+          Flat monthly pricing. No per-lead fees, no annual contracts, no
+          retention-desk phone tag.
         </p>
         <p>
-          Your data is yours. Export your leads, outreach history, and estimates as JSON
-          at any time from Settings &rarr; Export.
+          After cancellation, your account data is removed from active systems
+          prior to the next billing date. No refunds for digital products (per our Terms).
         </p>
       </div>
     </div>

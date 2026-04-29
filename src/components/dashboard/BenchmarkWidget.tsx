@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus, Award } from "lucide-react";
 import { useLeads } from "@/hooks/useLeads";
 
@@ -70,13 +70,15 @@ function MetricRow({ label, yours, peer, unit, lowerIsBetter = false }: {
 /* ─── Component ─── */
 export function BenchmarkWidget() {
   const { data: leadsRaw } = useLeads();
-  const leads = leadsRaw ?? [];
+  const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
+
+  // Mount-time reference so the 30-day window is stable across renders
+  const [mountNow] = useState(() => Date.now());
 
   const myStats = useMemo(() => {
     if (!leads.length) return null;
 
-    const now = Date.now();
-    const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+    const thirtyDaysAgo = mountNow - 30 * 24 * 60 * 60 * 1000;
     const recent = leads.filter((l) => new Date(l.created_at).getTime() >= thirtyDaysAgo);
 
     const total = recent.length;
@@ -98,7 +100,7 @@ export function BenchmarkWidget() {
     const compositeScore = Math.round((responseScore + closeScore + volumeScore) / 3);
 
     return { closeRate, avgResponseH, compositeScore, total };
-  }, [leads]);
+  }, [leads, mountNow]);
 
   const currentTier = tiers.find((t) => (myStats?.compositeScore ?? 0) >= t.minScore) ?? tiers[tiers.length - 1];
   const nextTier = tiers[tiers.indexOf(currentTier) - 1];

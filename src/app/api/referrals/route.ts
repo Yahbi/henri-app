@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 /* ─── GET /api/referrals — list my referrals + stats ─── */
 export async function GET() {
@@ -28,7 +29,7 @@ export async function GET() {
     .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("Referrals fetch error:", error);
+    logger.error("Referrals fetch error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "Failed to fetch referrals" }, { status: 500 });
   }
 
@@ -50,7 +51,7 @@ export async function GET() {
 
   return NextResponse.json({
     referralCode,
-    referralLink: `https://henri.app/signup?ref=${referralCode}`,
+    referralLink: `https://meethenri.com/signup?ref=${referralCode}`,
     referrals: rows,
     stats,
   });
@@ -108,7 +109,7 @@ export async function POST(req: Request) {
     .single();
 
   if (error) {
-    console.error("Referral insert error:", error);
+    logger.error("Referral insert error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "Failed to create referral" }, { status: 500 });
   }
 

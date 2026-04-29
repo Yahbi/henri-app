@@ -32,13 +32,26 @@ interface LeadsPanelProps {
   totalGeocoded?: number;
 }
 
+/* Filter dot colours — fed to inline `style={{ background: f.dot }}` so
+ * we use CSS `var()` references that resolve through globals.css.
+ * Migrated from raw hex literals on 2026-04-25 per design-system audit
+ * priority action #4. */
 const FILTERS: { value: FilterType; label: string; dot?: string }[] = [
-  { value: "all", label: "All leads", dot: "#D4886A" },
-  { value: "hot", label: "Hot (75+)", dot: "#D4886A" },
-  { value: "warm", label: "Warm (50-74)", dot: "#D4A24A" },
-  { value: "cool", label: "Cool (<50)", dot: "#4A7FC0" },
-  { value: "cascade", label: "Cascade only" },
+  { value: "all",       label: "All leads",          dot: "var(--hot)" },
+  { value: "hot",       label: "Hot (75+)",          dot: "var(--hot)" },
+  { value: "warm",      label: "Warm (50-74)",       dot: "var(--warm)" },
+  { value: "cool",      label: "Cool (<50)",         dot: "var(--cool)" },
+  { value: "cascade",   label: "Cascade only" },
   { value: "homeowner", label: "Homeowner requests" },
+];
+
+/* Sort options — fed to the custom popover. Was a native <select>
+ * until 2026-04-26; the open panel rendered with OS chrome (white
+ * in dusk/dark). Custom popover uses theme tokens correctly. */
+const SORT_OPTIONS: { value: SortType; label: string }[] = [
+  { value: "score",  label: "Score" },
+  { value: "newest", label: "Newest" },
+  { value: "value",  label: "Value" },
 ];
 
 function formatTotalValue(total: number): string {
@@ -62,6 +75,7 @@ export function LeadsPanel({
   const [filter, setFilter] = useState<FilterType>("all");
   const [sort, setSort] = useState<SortType>("score");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
   const [search, setSearch] = useState("");
 
   // Phase 0a: fetch exclusivity locks for every rendered lead. Returns
@@ -76,29 +90,7 @@ export function LeadsPanel({
   // always shows how many are being held back + a one-click clear.
   const { prefs: capacity, clear: clearCapacity } = useCapacityPrefs();
 
-  // Collapsed rail: only the expand button + a count badge. Consumes the
-  // parent-provided narrow width so the map gets the rest of the screen.
-  if (collapsed) {
-    return (
-      <div className="flex flex-col items-center justify-start h-full bg-card border-r border-border py-3 gap-3">
-        <button
-          type="button"
-          onClick={onToggleCollapsed}
-          aria-label="Expand leads panel"
-          className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-muted transition-colors"
-        >
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        </button>
-        <div
-          className="writing-mode-vertical text-[11px] font-medium text-muted-foreground rotate-180 select-none"
-          style={{ writingMode: "vertical-rl" }}
-        >
-          {leads.length} lead{leads.length === 1 ? "" : "s"}
-        </div>
-      </div>
-    );
-  }
-
+  // All remaining hooks MUST run before the collapsed early-return.
   const filtered = useMemo(() => {
     let result = [...leads];
 
@@ -147,10 +139,76 @@ export function LeadsPanel({
     return capacityFiltered.reduce((sum, l) => sum + (l.rawValue ?? 0), 0);
   }, [capacityFiltered]);
 
+  /* ── Address-collision detection ──
+   *
+   * One permit can back multiple leads (one per trade slot) per wedge
+   * contract #1. When that happens, two cards in the leads list show
+   * identical summary text (same address, city, sometimes same trade
+   * badges if the trades overlap into a superset like "Cascade · general
+   * · commercial"). Without disambiguation the user can't tell which
+   * card is which, even though they're genuinely distinct lead rows.
+   *
+   * This memo builds a Set of `fullAddress` strings that appear more
+   * than once in the currently-rendered list. `LeadCard` checks this
+   * set and appends a trade + permit-UUID suffix chip when it's a
+   * collision — visible disambiguation without cluttering the common
+   * case (one lead per address). */
+  const collidingAddresses = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const l of capacityFiltered) {
+      const key = l.fullAddress || l.addr;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const set = new Set<string>();
+    for (const [key, count] of counts) {
+      if (count > 1) set.add(key);
+    }
+    return set;
+  }, [capacityFiltered]);
+
+  // Collapsed rail: only the expand button + a count badge. Consumes the
+  // parent-provided narrow width so the map gets the rest of the screen.
+  if (collapsed) {
+    return (
+      /* Same complementary landmark as the expanded form so keyboard
+       * users don't lose the panel when it collapses. aria-label hints
+       * that it's collapsed so screen readers announce state. */
+      <aside
+        role="complementary"
+        aria-label="Leads list (collapsed)"
+        className="flex flex-col items-center justify-start h-full bg-card border-r border-border py-3 gap-3"
+      >
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-label="Expand leads panel"
+          className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-muted transition-colors"
+        >
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </button>
+        <div
+          className="writing-mode-vertical text-[11px] font-medium text-muted-foreground rotate-180 select-none"
+          style={{ writingMode: "vertical-rl" }}
+        >
+          {leads.length} lead{leads.length === 1 ? "" : "s"}
+        </div>
+      </aside>
+    );
+  }
+
   const activeFilter = FILTERS.find((f) => f.value === filter)!;
 
   return (
-    <div className="flex flex-col h-full bg-card border-r border-border">
+    /* `<aside role="complementary">` + aria-label so screen readers can
+     * jump between the map, the leads panel, and the detail drawer with
+     * a single landmark keypress (H / D in NVDA, VoiceOver rotor). The
+     * panel is semantically a complement to the map, not a navigation
+     * structure — `<aside>` is the correct landmark. */
+    <aside
+      role="complementary"
+      aria-label="Leads list"
+      className="flex flex-col h-full bg-card border-r border-border"
+    >
       {/* Header */}
       <div className="px-4 py-3 border-b border-border shrink-0">
         <div className="flex items-center justify-between gap-2">
@@ -224,17 +282,36 @@ export function LeadsPanel({
             )}
           </div>
 
-          {/* Sort */}
-          <div className="flex items-center gap-1 ml-auto">
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortType)}
-              className="text-xs bg-transparent border border-border rounded-lg px-2 py-1.5 text-muted-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
+          {/* Sort — custom popover (NOT a native select) so the open panel
+           * inherits theme tokens. Native <option> elements render with
+           * the OS color scheme, which produced white-on-white text in
+           * dusk/dark mode. Mirrors the Filter dropdown above so both
+           * controls render identically across light / dusk / dark. */}
+          <div className="relative ml-auto">
+            <button
+              type="button"
+              onClick={() => setSortOpen((o) => !o)}
+              aria-haspopup="listbox"
+              aria-expanded={sortOpen}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-accent transition-colors"
             >
-              <option value="score">Score &#8595;</option>
-              <option value="newest">Newest</option>
-              <option value="value">Value</option>
-            </select>
+              {SORT_OPTIONS.find((o) => o.value === sort)?.label ?? "Score"}
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            </button>
+            {sortOpen && (
+              <div className="absolute top-full right-0 mt-1 w-32 bg-card border border-border rounded-lg shadow-lg z-30 py-1">
+                {SORT_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => { setSort(o.value); setSortOpen(false); }}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors text-foreground"
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -263,8 +340,9 @@ export function LeadsPanel({
               : "No leads match this filter"
         }
         locks={locks}
+        collidingAddresses={collidingAddresses}
       />
-    </div>
+    </aside>
   );
 }
 
@@ -275,12 +353,18 @@ interface VirtualListProps {
   activeLead: LeadData | null;
   onSelectLead: (lead: LeadData) => void;
   emptyMessage: string;
-  /** Phase 0a: lock summaries keyed by lead_id. Empty when feature
-   *  inactive. Cards render no badge in that case. */
-  locks: Record<string, import("@/lib/exclusivity/locks").ExclusivityLockSummary>;
+  /** Phase 0a: lock + watcher summaries keyed by lead_id. Empty when
+   *  feature inactive (migration 00031 not applied). Cards render no
+   *  badges in that case. Each summary carries both the caller's lock
+   *  state AND the coarse wedge-#6 watcher bucket. */
+  locks: Record<string, import("@/lib/exclusivity/locks").ExclusivityLeadSummary>;
+  /** Addresses that appear more than once in `leads` — their LeadCards
+   *  render a trade + permit-UUID disambiguation suffix. See the
+   *  address-collision memo in the parent. */
+  collidingAddresses: Set<string>;
 }
 
-function VirtualizedLeadList({ leads, activeLead, onSelectLead, emptyMessage, locks }: VirtualListProps) {
+function VirtualizedLeadList({ leads, activeLead, onSelectLead, emptyMessage, locks, collidingAddresses }: VirtualListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(0);
@@ -343,6 +427,7 @@ function VirtualizedLeadList({ leads, activeLead, onSelectLead, emptyMessage, lo
               active={activeLead?.id === lead.id}
               onClick={() => handleClick(lead)}
               exclusivity={locks[lead.id]}
+              disambiguate={collidingAddresses.has(lead.fullAddress || lead.addr)}
             />
           </div>
         ))}

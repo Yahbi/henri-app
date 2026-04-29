@@ -6,7 +6,9 @@ import { useLeads } from "@/hooks/useLeads";
 import { useUser } from "@/hooks/useUser";
 import { useIntelligence } from "@/hooks/useIntelligence";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, MapPin, Zap, BarChart3, Loader2 } from "lucide-react";
+import { formatCurrency } from "@/types/lead";
 
 /* ─── Plan prices ─── */
 const PLAN_PRICES: Record<string, number> = {
@@ -44,7 +46,7 @@ function SourceBar({ data, planPrice }: { data: { source: string; count: number 
               />
             </div>
             <div className="flex justify-end text-[10px] text-muted-foreground">
-              <span>~${cpl.toFixed(0)} CPL</span>
+              <span>~{formatCurrency(cpl)} CPL</span>
             </div>
           </div>
         );
@@ -57,7 +59,7 @@ export default function ROIPage() {
   const { profile } = useUser();
   const { data: leadsRaw, isLoading: leadsLoading } = useLeads();
   const { data: intel, isLoading: intelLoading } = useIntelligence();
-  const leads = leadsRaw ?? [];
+  const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
 
   const planPrice = profile?.plan ? (PLAN_PRICES[profile.plan] ?? 749) : 749;
   const leadCount = useLeadCount();
@@ -80,7 +82,9 @@ export default function ROIPage() {
   const [leadsPerMonth, setLeadsPerMonth] = useState(initialLeadsPerMonth);
 
   // Hydrate from localStorage if present (client-side only).
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    // Mount-once hydration from localStorage; cannot derive at render (SSR mismatch)
     if (typeof window === "undefined") return;
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
@@ -96,6 +100,7 @@ export default function ROIPage() {
       /* malformed — ignore, use defaults */
     }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
   // Persist whenever a slider moves.
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -190,7 +195,7 @@ export default function ROIPage() {
       {tab === "intelligence" && (
         <>
           {/* Monthly Intel Report Card */}
-          <div className="rounded-xl border border-primary/20 bg-card p-6 space-y-4">
+          <Card className="border-primary/20 p-6 space-y-4">
             <div className="flex items-center gap-2">
               <Zap className="h-5 w-5 text-primary" />
               <h2 className="text-lg font-heading font-normal text-foreground">Monthly Intelligence Report</h2>
@@ -271,11 +276,11 @@ export default function ROIPage() {
                 </span>
               </div>
             )}
-          </div>
+          </Card>
 
           {/* Lead Source Breakdown + Market Insights */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="rounded-lg border border-border bg-card p-6">
+            <Card className="p-6">
               <h3 className="text-base font-heading font-normal text-foreground mb-4">Lead Source Performance</h3>
               {!intelLoading && summary && leadSources.length > 0 ? (
                 <SourceBar data={leadSources} planPrice={planPrice} />
@@ -290,10 +295,10 @@ export default function ROIPage() {
                   No lead source data available yet
                 </p>
               )}
-            </div>
+            </Card>
 
             {/* Category breakdown */}
-            <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+            <Card className="p-6 space-y-4">
               <h3 className="text-base font-heading font-normal text-foreground">Permit Categories</h3>
               {!intelLoading && summary && categories.length > 0 ? (
                 <div className="space-y-3">
@@ -328,15 +333,15 @@ export default function ROIPage() {
                   No category data available yet
                 </p>
               )}
-            </div>
+            </Card>
           </div>
 
           {/* Hottest ZIPs */}
           {!intelLoading && summary && hottestZips.length > 1 && (
-            <div className="rounded-lg border border-border bg-card p-6">
+            <Card className="p-6">
               <h3 className="text-base font-heading font-normal text-foreground mb-3">Demand Heatmap</h3>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                {hottestZips.map((z, i) => (
+                {hottestZips.map((z) => (
                   <div key={z.zip} className="rounded-lg bg-bg-subtle p-3 text-center space-y-1">
                     <p className="text-lg font-heading font-normal text-foreground">{z.zip}</p>
                     <div className="h-1.5 rounded-full bg-border overflow-hidden">
@@ -349,7 +354,7 @@ export default function ROIPage() {
                   </div>
                 ))}
               </div>
-            </div>
+            </Card>
           )}
         </>
       )}
@@ -364,7 +369,7 @@ export default function ROIPage() {
               ))}
             </div>
           ) : territoryStats.length > 0 ? (
-            <div className="rounded-lg border border-border bg-card overflow-hidden">
+            <Card className="overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-bg-subtle">
@@ -387,7 +392,7 @@ export default function ROIPage() {
                         <td className="px-4 py-3 text-foreground">{row.leads}</td>
                         <td className="px-4 py-3 text-foreground">{row.contactRate}%</td>
                         <td className="px-4 py-3 text-foreground">{row.closeRate}%</td>
-                        <td className="px-4 py-3 text-foreground">${row.revenue.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-foreground">{formatCurrency(row.revenue)}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                             perf === "strong" ? "bg-green-500/10 text-green-400" :
@@ -402,7 +407,7 @@ export default function ROIPage() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </Card>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 border border-dashed border-border rounded-xl text-center">
               <MapPin className="h-8 w-8 text-muted-foreground/40 mb-3" />
@@ -413,7 +418,7 @@ export default function ROIPage() {
 
           {/* Top Performing ZIPs */}
           {territoryStats.length > 0 && (
-            <div className="rounded-lg border border-border bg-card p-6">
+            <Card className="p-6">
               <h3 className="text-base font-heading font-normal text-foreground mb-3">Top Performing ZIPs</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {territoryStats.slice(0, 3).map((zip, i) => (
@@ -427,11 +432,11 @@ export default function ROIPage() {
                       <span className="text-sm font-medium text-foreground">ZIP {zip.zip}</span>
                     </div>
                     <p className="text-xs text-muted-foreground">{zip.leads} leads · {zip.closeRate}% close rate</p>
-                    <p className="text-lg font-heading font-normal text-foreground">${zip.revenue.toLocaleString()}</p>
+                    <p className="text-lg font-heading font-normal text-foreground">{formatCurrency(zip.revenue)}</p>
                   </div>
                 ))}
               </div>
-            </div>
+            </Card>
           )}
         </>
       )}
@@ -439,7 +444,7 @@ export default function ROIPage() {
       {/* ─── ROI Calculator Tab ─── */}
       {tab === "calculator" && (
         <>
-          <div className="rounded-lg border border-border bg-card p-6 space-y-5">
+          <Card className="p-6 space-y-5">
             <h2 className="text-lg font-heading font-normal text-foreground">Your Business Numbers</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div className="space-y-1.5">
@@ -471,31 +476,31 @@ export default function ROIPage() {
                   className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
               </div>
             </div>
-          </div>
+          </Card>
 
           <div>
             <h2 className="text-lg font-heading font-normal text-foreground mb-4">Your Projected Returns</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="rounded-lg border border-border bg-card p-5 space-y-1">
+              <Card className="p-5 space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Monthly Revenue</p>
-                <p className="text-2xl font-heading font-normal text-primary">${monthlyRevenue.toLocaleString()}</p>
+                <p className="text-2xl font-heading font-normal text-primary">{formatCurrency(monthlyRevenue)}</p>
                 <p className="text-xs text-muted-foreground">{closedDeals.toFixed(1)} closed deals/mo</p>
-              </div>
-              <div className="rounded-lg border border-border bg-card p-5 space-y-1">
+              </Card>
+              <Card className="p-5 space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Annual Revenue</p>
-                <p className="text-2xl font-heading font-normal text-primary">${annualRevenue.toLocaleString()}</p>
+                <p className="text-2xl font-heading font-normal text-primary">{formatCurrency(annualRevenue)}</p>
                 <p className="text-xs text-muted-foreground">Projected 12-month total</p>
-              </div>
-              <div className="rounded-lg border border-border bg-card p-5 space-y-1">
+              </Card>
+              <Card className="p-5 space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Cost Per Lead</p>
-                <p className="text-2xl font-heading font-normal text-primary">${costPerLead.toFixed(2)}</p>
+                <p className="text-2xl font-heading font-normal text-primary">{formatCurrency(costPerLead)}</p>
                 <p className="text-xs text-muted-foreground">Based on {leadsPerMonth} leads/mo</p>
-              </div>
-              <div className="rounded-lg border border-border bg-card p-5 space-y-1">
+              </Card>
+              <Card className="p-5 space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">ROI Multiplier</p>
-                <p className="text-2xl font-heading font-normal text-primary">{roiMultiplier.toFixed(0)}x</p>
-                <p className="text-xs text-muted-foreground">Return on ${plan}/mo investment</p>
-              </div>
+                <p className="text-2xl font-heading font-normal text-primary">{roiMultiplier.toFixed(1)}x</p>
+                <p className="text-xs text-muted-foreground">Return on {formatCurrency(plan)}/mo investment</p>
+              </Card>
             </div>
           </div>
         </>

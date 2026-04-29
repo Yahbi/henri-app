@@ -15,6 +15,10 @@ export interface ContractorProfile {
   phone: string | null;
   plan: string | null;
   onboarding_completed: boolean;
+  /** Twilio number assigned to this contractor for missed-call SMS
+   *  text-back (wedge bullet #5). Populated from migration 00035.
+   *  When null, the missed-call webhook short-circuits silently. */
+  twilio_tracked_number: string | null;
   created_at: string;
 
   /* Computed fields */
@@ -34,6 +38,8 @@ export interface ContractorProfileUpdate {
   phone?: string;
   profile_public?: boolean;
   service_area?: string;
+  /** E.164 phone number routed to Twilio for missed-call SMS text-back. */
+  twilio_tracked_number?: string | null;
 }
 
 export interface NotificationPrefs {

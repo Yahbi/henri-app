@@ -5,6 +5,8 @@ import { requireContractor } from "@/lib/auth/requireContractor";
 import { TerritoryClaimBodySchema, parseBody } from "@/lib/schemas/api";
 import { logApiError } from "@/lib/log";
 import { fetchAllTerritories } from "@/lib/territories/fetch-all";
+import { PLAN_ZIP_LIMITS } from "@/lib/plans/constants";
+import { isGodModeEmail } from "@/lib/auth/god-mode";
 
 export async function GET() {
   try {
@@ -48,6 +50,41 @@ export async function POST(request: NextRequest) {
     const parsed = parseBody(TerritoryClaimBodySchema, raw);
     if (parsed.response) return parsed.response;
     const { zip } = parsed.data;
+
+    // Audit G2 fix (2026-04-27): enforce per-plan ZIP cap before
+    // calling claim_territory(). The PG function only checks per-ZIP
+    // slot availability — NOT per-contractor plan caps. Without this
+    // gate a Founder ($149/mo, 3 ZIPs declared on the pricing page)
+    // could claim 50 ZIPs through this endpoint and silently get
+    // Pro-tier coverage. God-mode users (founder/dev allowlist) skip
+    // the cap so they can preview the full corpus.
+    if (!isGodModeEmail(user.email)) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("plan")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const plan = profile?.plan ?? "starter";
+      const maxZips = PLAN_ZIP_LIMITS[plan] ?? 5;
+
+      const { count } = await supabase
+        .from("territories")
+        .select("*", { count: "exact", head: true })
+        .eq("contractor_id", user.id);
+
+      if ((count ?? 0) >= maxZips) {
+        return NextResponse.json(
+          {
+            error: `Plan limit reached (${count}/${maxZips} ZIPs). Upgrade for more territories.`,
+            current_count: count,
+            max_allowed: maxZips,
+            plan,
+          },
+          { status: 403 },
+        );
+      }
+    }
 
     const result = await claimTerritory(zip, user.id);
 

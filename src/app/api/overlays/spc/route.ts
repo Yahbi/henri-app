@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 
 /**
  * GET /api/overlays/spc
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
       headers: { "Cache-Control": "public, max-age=1800" },
     });
   } catch (err) {
-    console.error("spc outlook fetch failed:", err);
+    logger.error("spc outlook fetch failed", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { type: "FeatureCollection", features: [] },
       { status: 200, headers: { "Cache-Control": "no-store" } },

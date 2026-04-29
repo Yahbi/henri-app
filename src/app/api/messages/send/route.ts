@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
+import { personalizeOutreach } from "@/lib/agents/outreach-personalizer";
+import { getMiningLlmClient } from "@/lib/predictive/openai-client";
+import { MessageSendBodySchema, parseBody } from "@/lib/schemas/api";
+import type { Lead } from "@/types/lead";
 
 /**
  * POST /api/messages/send
@@ -18,24 +22,10 @@ import { logApiError } from "@/lib/log";
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as {
-      lead_id?: string;
-      channel?: string;
-      body?: string;
-      subject?: string;
-    };
-    const leadId = (body.lead_id ?? "").trim();
-    const channel = (body.channel ?? "sms").toLowerCase();
-    const text = (body.body ?? "").trim();
-    if (!leadId || !text) {
-      return NextResponse.json(
-        { error: "lead_id and body required" },
-        { status: 400 },
-      );
-    }
-    if (!["sms", "email"].includes(channel)) {
-      return NextResponse.json({ error: "channel must be sms or email" }, { status: 400 });
-    }
+    const raw = await req.json();
+    const parsed = parseBody(MessageSendBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { lead_id: leadId, channel, body: text, subject } = parsed.data;
 
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -45,12 +35,36 @@ export async function POST(req: NextRequest) {
 
     const { data: lead } = await supabase
       .from("leads")
-      .select("id, phone, email, owner_name, notes")
+      .select(
+        "id, phone, email, owner_name, notes, trade, permit_type, permit_description, permit_value, year_built, address, city, state, zip",
+      )
       .eq("id", leadId)
       .eq("contractor_id", user.id)
       .single();
     if (!lead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+    }
+
+    // Phase 2.2: Outreach Agent personalization. If LLM_OUTREACH_ENABLED=1
+    // we rewrite the first sentence to reference permit-specific context
+    // (scope, value, neighborhood, age). Fails closed — any LLM error
+    // sends the original template verbatim. Wedge contract bullet #5
+    // (speed-to-lead) preserved via 800ms timeout.
+    let outreachSource: "llm" | "template-fallback" = "template-fallback";
+    let textToSend = text;
+    if (process.env.LLM_OUTREACH_ENABLED === "1") {
+      const personalized = await personalizeOutreach(
+        {
+          template: text,
+          lead: lead as unknown as Lead,
+          channel: channel as "sms" | "email",
+          budgetMs: 800,
+        },
+        // Reuse the mining client — same OpenAI instance, different prompt.
+        getMiningLlmClient(),
+      );
+      textToSend = personalized.body;
+      outreachSource = personalized.source;
     }
 
     let providerOk = false;
@@ -82,7 +96,7 @@ export async function POST(req: NextRequest) {
               body: new URLSearchParams({
                 From: from,
                 To: String(lead.phone),
-                Body: text,
+                Body: textToSend,
               }).toString(),
             },
           );
@@ -101,7 +115,7 @@ export async function POST(req: NextRequest) {
         );
       }
       const resendKey = process.env.RESEND_API_KEY;
-      const fromAddr = process.env.RESEND_FROM_EMAIL ?? "henri@henri.app";
+      const fromAddr = process.env.RESEND_FROM_EMAIL ?? "henri@meethenri.com";
       if (!resendKey) {
         providerError = "RESEND_API_KEY not configured";
       } else {
@@ -115,8 +129,8 @@ export async function POST(req: NextRequest) {
             body: JSON.stringify({
               from: fromAddr,
               to: [lead.email],
-              subject: body.subject ?? "Message from your contractor",
-              text,
+              subject: subject ?? "Message from your contractor",
+              text: textToSend,
             }),
           });
           providerOk = res.ok;
@@ -130,7 +144,9 @@ export async function POST(req: NextRequest) {
     // Always log to notes so the UI reflects activity even when provider
     // is down. Prefix with [out channel YYYY-MM-DD] for regex parsers.
     const now = new Date().toISOString();
-    const entry = `[out ${channel} ${now.slice(0, 10)}] ${text}`;
+    // Log the ACTUAL sent text (post-personalization) so the contractor
+    // can see what the homeowner received, not the original template.
+    const entry = `[out ${channel} ${now.slice(0, 10)}${outreachSource === "llm" ? " AI" : ""}] ${textToSend}`;
     const joined = lead.notes ? `${lead.notes}\n${entry}` : entry;
     await supabase.from("leads").update({ notes: joined }).eq("id", leadId);
 

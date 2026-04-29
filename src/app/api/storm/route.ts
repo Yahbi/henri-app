@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllTerritoryZips } from "@/lib/territories/fetch-all";
+import { logger } from "@/lib/logger";
 
 /* ─── ZIP prefix (first 3 digits) → state code mapping ─── */
 const ZIP_PREFIX_TO_STATE: Record<string, string> = {
@@ -213,7 +214,7 @@ const alertCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 const NWS_API_BASE = "https://api.weather.gov";
-const NWS_USER_AGENT = "(Henri App, contact@henri.app)";
+const NWS_USER_AGENT = "(Henri App, contact@meethenri.com)";
 
 /* ─── Helpers ─── */
 
@@ -251,9 +252,11 @@ async function fetchAlertsForState(state: string): Promise<NWSAlert[]> {
     );
 
     if (!response.ok) {
-      console.error(
-        `NWS API error for state ${state}: ${response.status} ${response.statusText}`
-      );
+      logger.error("NWS API error", {
+        state,
+        status: response.status,
+        statusText: response.statusText,
+      });
       return [];
     }
 
@@ -282,7 +285,10 @@ async function fetchAlertsForState(state: string): Promise<NWSAlert[]> {
 
     return alerts;
   } catch (err) {
-    console.error(`Failed to fetch NWS alerts for state ${state}:`, err);
+    logger.error("Failed to fetch NWS alerts", {
+      state,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return [];
   }
 }
@@ -386,7 +392,7 @@ export async function GET() {
       fetched_at: new Date().toISOString(),
     });
   } catch (err) {
-    console.error("Error fetching storm alerts:", err);
+    logger.error("Error fetching storm alerts", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
       { error: "Failed to fetch storm alerts" },
       { status: 500 }
