@@ -47,7 +47,7 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
-          NEXT_PUBLIC_APP_URL: https://henri.app
+          NEXT_PUBLIC_APP_URL: https://meethenri.com
           NEXT_PUBLIC_MAPBOX_TOKEN: pk.placeholder
 
   e2e:

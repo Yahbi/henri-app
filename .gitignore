@@ -51,6 +51,13 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Launch automation scripts (reference deploy tokens at runtime; never
+# commit values into source). Diagnostic scripts in scripts/ are fine
+# to commit; only the deploy-flow ones are ignored.
+/scripts/_deploy-vercel.ts
+/scripts/_setup-cloudflare-dns.ts
+/scripts/_supabase-management.ts
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

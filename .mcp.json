@@ -1,20 +1,23 @@
 {
   "_comment": [
-    "Project-level MCP config for Henri. Added 2026-04-22 to unblock the",
-    "wedge + FSM plan phases that need programmatic DB + outbound",
-    "delivery access. Each server below requires an env-sourced secret —",
-    "paste the matching key into .env.local (already gitignored) and",
-    "restart Claude Code; the server auto-activates.",
+    "Project-level MCP config for Henri. Added 2026-04-22 + expanded 2026-04-29",
+    "post-launch. Each server below requires an env-sourced secret — paste",
+    "the matching key into .env.local (already gitignored) and restart Claude",
+    "Code; the server auto-activates.",
     "",
     "Once live, these servers give Claude:",
     "  - supabase  → apply_migration, execute_sql, list_tables, RLS mgmt",
     "  - resend    → send feedback/outreach/invoice emails from templates",
-    "  - stripe    → read subscription state, refund flows (rare)",
     "  - playwright→ deterministic browser automation for contractor-side QA",
+    "  - sentry    → query errors, manage releases, alert mgmt (post-DSN)",
+    "  - stripe    → create products, configure webhooks, query subs",
+    "  - github    → repo ops, PRs, issues, releases",
+    "  - fetch     → generic HTTP for one-off API probes",
     "",
-    "Secrets NEVER live here. .mcp.json IS committed to git (project",
-    "shape is part of the repo), but every `env` line references a",
-    "process variable that the user sets outside the repo."
+    "Secrets NEVER live here. .mcp.json IS committed to git (project shape",
+    "is part of the repo), but every `env` line references a process",
+    "variable that the user sets outside the repo (in .env.local, locally,",
+    "and in Vercel env vars at deploy time)."
   ],
   "mcpServers": {
     "supabase": {
@@ -22,23 +25,76 @@
       "args": [
         "-y",
         "@supabase/mcp-server-supabase@latest",
-        "--project-ref=ivfxylgoxgrxttknewsf"
+        "--read-only",
+        "--project-ref=<project-ref>"
       ],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+        "SUPABASE_ACCESS_TOKEN": "<personal-access-token>"
       }
     },
     "resend": {
       "command": "npx",
-      "args": ["-y", "mcp-send-email"],
+      "args": [
+        "-y",
+        "mcp-send-email"
+      ],
       "env": {
         "RESEND_API_KEY": "${RESEND_API_KEY}",
-        "SENDER_EMAIL_ADDRESS": "henri@henri.app"
+        "SENDER_EMAIL_ADDRESS": "henri@meethenri.com"
       }
     },
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"]
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ]
+    },
+    "playwright-server": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
+    },
+    "fetch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-fetch"
+      ]
+    },
+    "sentry": {
+      "_comment": "Activates once SENTRY_AUTH_TOKEN is set. Get a User Auth Token at https://sentry.io/settings/account/api/auth-tokens/ with scopes: project:read, event:read, project:releases.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@sentry/mcp-server@latest",
+        "--auth-token",
+        "${SENTRY_AUTH_TOKEN}"
+      ]
+    },
+    "stripe": {
+      "_comment": "Activates once STRIPE_SECRET_KEY is set in .env.local. Use a restricted key (Products + Webhooks scope) for safer automation, or the full secret key (sk_live_) if you want all surfaces.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@stripe/mcp",
+        "--tools=all"
+      ],
+      "env": {
+        "STRIPE_API_KEY": "${STRIPE_SECRET_KEY}"
+      }
+    },
+    "github": {
+      "_comment": "Activates once GITHUB_TOKEN is set. Generate a fine-grained token at https://github.com/settings/personal-access-tokens with read+write on the henri-app repo only.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
     }
   }
 }
