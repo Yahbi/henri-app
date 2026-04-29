@@ -49,21 +49,23 @@ function SignupInner() {
       return;
     }
     const supabase = createClient();
-    // Role carries through the OAuth redirect as a query param so the
-    // /auth/callback handler can stamp `profiles.role` when it creates
-    // the row. Homeowners land on their dashboard; contractors enter
-    // the onboarding funnel at the license step.
-    const redirectTo =
-      role === "homeowner"
-        ? `${window.location.origin}/homeowner?new=1`
-        : `${window.location.origin}/onboarding/license`;
+    // Route through /auth/callback so the PKCE code exchange happens
+    // server-side and the session cookies get set before the user
+    // hits any role-gated route. The `next` param is the post-auth
+    // destination; `role` lets the callback stamp `profiles.role`
+    // when it creates the row. Homeowners land on their dashboard;
+    // contractors enter the onboarding funnel at the license step.
+    // (`queryParams` would be passed to Google, not back to us, which
+    // is why role is encoded into `redirectTo` instead.)
+    const next =
+      role === "homeowner" ? "/homeowner?new=1" : "/onboarding/license";
+    const callback = new URL("/auth/callback", window.location.origin);
+    callback.searchParams.set("next", next);
+    callback.searchParams.set("role", role);
 
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: {
-        redirectTo,
-        queryParams: { role },
-      },
+      options: { redirectTo: callback.toString() },
     });
     if (oauthError) setError(oauthError.message);
   }

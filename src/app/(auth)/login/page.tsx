@@ -29,9 +29,16 @@ export default function LoginPage() {
   const signInWithGoogle = async () => {
     setAuthError(null);
     const supabase = createClient();
+    // Direct Google → /dashboard would skip the PKCE code-exchange
+    // and the session cookies would never be set. Route through
+    // /auth/callback (`src/app/auth/callback/route.ts`) which
+    // exchanges the code server-side and then forwards to the
+    // intended destination via the `next` query param.
+    const callback = new URL("/auth/callback", window.location.origin);
+    callback.searchParams.set("next", "/dashboard");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/dashboard` },
+      options: { redirectTo: callback.toString() },
     });
     if (error) setAuthError(error.message);
   };
