@@ -118,10 +118,18 @@ function formatDate(dateStr: string | undefined): string {
 
 /* ── Constants ─────────────────────────────────────────────────────────── */
 
-const MIN_HEIGHT = 140;
-// Allow the banner to expand to 92% of the container height when the user
-// drags it up. Prior 75% cap cut off content on short laptop screens.
-const MAX_HEIGHT_RATIO = 0.92;
+// Floor: keep enough for the drag handle + the lead-header strip to stay
+// reachable. 80px is the visual minimum below which the drawer becomes
+// hard to grab again. Below this, drag releases snap up to MIN_HEIGHT.
+const MIN_HEIGHT = 80;
+// Ceiling: 100% of parent so the user can fully cover the map / list area
+// when they want a focused, full-bleed read on a single lead. Prior 92%
+// cap was per audit feedback ("let the user set up how large the banner
+// should be by stretching it") — but 92% still left a thin strip of map
+// visible that some users found distracting. Going to 1.0 gives full
+// freedom; the dashboard tabs remain accessible above the parent
+// container so navigation isn't blocked.
+const MAX_HEIGHT_RATIO = 1.0;
 
 interface LeadDetailDrawerProps {
   lead: LeadData | null;
@@ -165,7 +173,6 @@ export function LeadDetailDrawer({
   useEffect(() => {
     // Sync prop down when not actively dragging; cannot derive because we own localHeight during drags
     if (!dragging.current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocalHeight(Math.max(MIN_HEIGHT, height || MIN_HEIGHT));
     }
   }, [height]);
@@ -542,7 +549,9 @@ export function LeadDetailDrawer({
               lead.permitAge ??
               (effectiveFiled
                 ? Math.floor(
-                    (Date.now() - new Date(effectiveFiled).getTime()) / 86400000,
+                    // eslint-disable-next-line react-hooks/purity -- intentional wall-clock for "filed N days ago" display; not stored in state
+                    (Date.now() - new Date(effectiveFiled).getTime()) /
+                      86400000,
                   )
                 : null);
             return (

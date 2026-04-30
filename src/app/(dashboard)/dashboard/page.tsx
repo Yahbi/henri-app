@@ -271,7 +271,11 @@ function DashboardContent() {
       const raw = localStorage.getItem(BOTTOM_HEIGHT_STORAGE_KEY);
       if (!raw) return;
       const n = Number(raw);
-      if (Number.isFinite(n) && n >= 140 && n <= 4000) {
+      // Bounds match LeadDetailDrawer's MIN_HEIGHT (80) so a height saved
+      // at the floor restores correctly. Upper bound 4000 covers any
+      // monitor we might realistically see; tighter caps would silently
+      // drop legitimate values for portrait/external displays.
+      if (Number.isFinite(n) && n >= 80 && n <= 4000) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setBottomHeightState(n);
       }
