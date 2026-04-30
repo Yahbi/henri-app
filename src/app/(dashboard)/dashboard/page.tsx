@@ -616,9 +616,18 @@ function DashboardContent() {
             onSelectLead={handleSelectLead}
           />
 
-          {/* Lead detail drawer — bottom panel, resizable */}
+          {/* Lead detail drawer — bottom panel, resizable.
+           *
+           * `key={activeLead.id}` forces a clean unmount + remount when
+           * the user switches between leads. Without the key, React
+           * reuses the same component instance and prior drag state
+           * (`dragging.current`, in-flight document mouse listeners,
+           * stale closures over the old lead) can leak across leads
+           * and cause the drawer to "disappear" — the documented
+           * top-3 root cause from the 2026-04-30 banner audit. */}
           {activeLead && (
             <LeadDetailDrawer
+              key={activeLead.id}
               lead={activeLead}
               onClose={() => setActiveLead(null)}
               height={bottomHeight}

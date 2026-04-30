@@ -133,7 +133,12 @@
   --animate-accordion-up: accordion-up 0.2s ease-out;
   --animate-fade-in: fade-in 0.3s ease-out;
   --animate-slide-in-from-bottom: slide-in-from-bottom 0.3s ease-out;
-  --animate-slide-up-panel: slide-up-panel 0.25s ease-out;
+  /* `forwards` holds the post-animation state (translateY(0)) so the
+   * drawer doesn't snap back to translateY(100%) (off-screen) after the
+   * 0.25s slide. Without it, some browser/Tailwind-utility combos
+   * revert the transform when the animation completes — the user
+   * reports the drawer "disappearing" right after it opens. */
+  --animate-slide-up-panel: slide-up-panel 0.25s ease-out forwards;
   --animate-toast-slide-in: toast-slide-in 0.3s ease-out;
   --animate-toast-slide-out: toast-slide-out 0.3s ease-in forwards;
 

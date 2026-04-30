@@ -185,6 +185,26 @@ export function LeadDetailDrawer({
     if (lead) dragging.current = false;
   }, [lead]);
 
+  // Defensive unmount cleanup. If the drawer unmounts mid-drag (parent
+  // sets activeLead=null while the user is dragging), we need to:
+  //   1. clear `dragging.current` so any straggler `mousemove`/`mouseup`
+  //      events still attached to `document` bail early via their
+  //      `if (!dragging.current) return` guard,
+  //   2. reset the global body cursor + user-select that we set during
+  //      drag so the page doesn't end up stuck with row-resize cursor.
+  // Without this, the bug manifests as: drawer unmounts, document
+  // listeners fire, attempt setLocalHeight on an unmounted component,
+  // React logs a warning + the page is left with a weird cursor.
+  useEffect(() => {
+    return () => {
+      dragging.current = false;
+      if (typeof document !== "undefined") {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+    };
+  }, []);
+
   // Observe the parent container — `parentMaxHeight` powers both
   // aria-valuemax on the resize handle and the visible "you can drag
   // up to N px" calculation. Without this, a window resize would let
