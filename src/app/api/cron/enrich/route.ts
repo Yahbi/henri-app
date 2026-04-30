@@ -26,31 +26,46 @@ export const maxDuration = 300;
  * and wedge #3 ("capacity filter") by populating `assessed_value` that
  * the capacity filter's value-band uses.
  *
- * Gated by CRON_SECRET. Schedule in vercel.json: every 30 min.
- * Throughput: BATCH_SIZE=600 @ CONCURRENCY=4 = 75s typical, 280s worst case.
+ * Gated by CRON_SECRET. Schedule in vercel.json: 13:00, 13:15, 14:00, 14:15.
+ * Throughput: BATCH_SIZE=1200 @ CONCURRENCY=6 = 100s typical, 240s worst case.
  */
 
-// Throughput notes (2026-04-23 Phase 3 tune):
-//   Founder has ~138k leads, ~92% still missing owner_name after the last
-//   backfill round. At BATCH_SIZE=400 single-worker that was 400 leads /
-//   cron * ~5 s/lead = 2,000s / cron — hitting the 300s maxDuration wall
-//   after ~60 leads. The 4-worker concurrency below parallelises across
-//   independent county endpoints (each worker picks its own lead, so two
-//   workers rarely hit the same jurisdiction simultaneously).
+// Throughput notes (2026-04-30 Phase 3.1 retune):
+//   Phase 3 settled at BATCH_SIZE=600 @ CONCURRENCY=4 = ~75s typical. Live
+//   audit on 2026-04-30 showed only 0.24% of leads enriched (400 / 165k)
+//   because the cron was running once a day at 13:00. At 600 leads/cron the
+//   165k backlog clears in ~275 days. Bumping to BATCH_SIZE=1200 @
+//   CONCURRENCY=6 + 4 daily slots (13:00 / 13:15 / 14:00 / 14:15) brings
+//   throughput to 4,800 leads/day, clearing the backlog in ~35 days while
+//   staying inside the 300s maxDuration and well under Supabase's 100
+//   connection pool.
 //
-//   Math at CONCURRENCY=4, REQ_INTERVAL_MS=500:
+//   Original Phase 3 context (kept for history): Founder had ~138k leads,
+//   ~92% still missing owner_name after the last backfill round. At
+//   BATCH_SIZE=400 single-worker that was 400 leads / cron * ~5 s/lead =
+//   2,000s / cron — hitting the 300s maxDuration wall after ~60 leads.
+//   The 4-worker concurrency parallelises across independent county
+//   endpoints (each worker picks its own lead, so two workers rarely
+//   hit the same jurisdiction simultaneously).
+//
+//   Math at CONCURRENCY=6, REQ_INTERVAL_MS=500:
 //     per-worker: 1 req/500ms = 2 req/s
-//     total:      4 workers  = 8 req/s globally
-//     600 leads  = 600 / 8   = 75 s per batch
-//   Keeps us comfortably inside the 300 s maxDuration with headroom for
-//   slow endpoints.
+//     total:      6 workers  = 12 req/s globally
+//     1200 leads = 1200 / 12 = 100 s per batch
+//   With slow-endpoint variance the worst case is ~240s — still 60s
+//   under maxDuration. If we hit the deadline at scale, the deadline
+//   guard exits cleanly without dropping work.
 //
 //   Per-jurisdiction politeness: even when two workers do end up in the
 //   same state, the 500ms interval per-worker means at most 2 req/s to
 //   any single county server — the same rate as the old single-worker
 //   path. No heuristic throttling needed.
-const BATCH_SIZE = 600;
-const CONCURRENCY = 4;
+//
+//   Pool pressure: 6 workers × 1 SELECT-then-UPDATE per lead = at most
+//   6 concurrent Supabase connections. Plus the initial SELECT BATCH_SIZE
+//   query. Total upper bound ~7 connections — fine against the 100-pool.
+const BATCH_SIZE = 1200;
+const CONCURRENCY = 6;
 
 // Polite rate limit — county GIS servers are free, don't hammer them.
 // This is per-worker; with CONCURRENCY=4 the global rate is 4x.

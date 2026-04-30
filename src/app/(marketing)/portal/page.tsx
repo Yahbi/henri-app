@@ -197,9 +197,16 @@ export default function PortalPage() {
 
   const handleTradeClick = useCallback(
     (trade: string) => {
-      openChat("", trade);
+      /* Pass through whatever ZIP the user already typed in the hero
+       * form so the chat doesn't ask for it again. If they clicked a
+       * trade card before entering a ZIP, zipInput is "" and the chat
+       * opens at Step1 (Address). If they typed a ZIP AND clicked a
+       * trade, both initialZip + initialTrade are set and the chat
+       * skips ahead to Step2 (Timeline). Pre-04-30 this passed "" and
+       * forced a double-ask. */
+      openChat(zipInput.trim(), trade);
     },
-    [openChat]
+    [openChat, zipInput]
   );
 
   return (

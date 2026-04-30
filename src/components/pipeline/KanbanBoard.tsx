@@ -362,6 +362,23 @@ export function KanbanBoard() {
   const handleDragStart = useCallback((e: React.DragEvent, lead: KanbanLead, fromCol: string) => {
     setDraggedLead({ lead, fromCol });
     e.dataTransfer.effectAllowed = "move";
+    /* Stash the lead identity on the native dataTransfer payload so the
+     * drop handler can recover it even if the React `draggedLead` state
+     * has already been cleared by a `dragend` event that fired before
+     * `drop` (browsers don't guarantee fire order on fast releases).
+     * Pre-04-30 the drop handler relied on state alone and silently
+     * no-op'd when the race lost — leads occasionally refused to move.
+     * Native dataTransfer survives the dragend cleanup. */
+    try {
+      e.dataTransfer.setData(
+        "application/x-henri-lead",
+        JSON.stringify({ leadId: lead.id, fromCol })
+      );
+    } catch {
+      /* Some browsers (older Safari) reject custom MIME types; the
+       * "text/plain" fallback set in KanbanCard.onDragStart still gives
+       * us the lead id, and we'll fall back to React state for fromCol. */
+    }
   }, []);
 
   // Clear `draggedLead` when the user releases outside any column. Without
@@ -375,22 +392,41 @@ export function KanbanBoard() {
     return () => window.removeEventListener("dragend", onEnd);
   }, [draggedLead]);
 
-  const handleDrop = useCallback(async (toCol: string) => {
-    if (!draggedLead) return;
-    const { lead, fromCol } = draggedLead;
+  const handleDrop = useCallback(async (e: React.DragEvent, toCol: string) => {
+    /* Recover lead identity from dataTransfer first — it survives even
+     * if the dragend listener already nulled out `draggedLead` state.
+     * Fall back to state if dataTransfer is empty (older browsers). */
+    let leadId: string | undefined;
+    let fromCol: string | undefined;
+    try {
+      const raw = e.dataTransfer.getData("application/x-henri-lead");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { leadId?: string; fromCol?: string };
+        if (parsed?.leadId) leadId = parsed.leadId;
+        if (parsed?.fromCol) fromCol = parsed.fromCol;
+      }
+    } catch {
+      /* Unparseable payload — fall through to React state below. */
+    }
+    if (!leadId && draggedLead) {
+      leadId = draggedLead.lead.id;
+      fromCol = draggedLead.fromCol;
+    }
     setDraggedLead(null);
+    if (!leadId || !fromCol) return;
     if (fromCol === toCol) return;
 
-    setUpdatingIds((prev) => new Set(prev).add(lead.id));
+    const id = leadId;
+    setUpdatingIds((prev) => new Set(prev).add(id));
     try {
       await updateStatus.mutateAsync({
-        leadId: lead.id,
+        leadId: id,
         update: { status: toCol as LeadStatus },
       });
     } finally {
       setUpdatingIds((prev) => {
         const next = new Set(prev);
-        next.delete(lead.id);
+        next.delete(id);
         return next;
       });
     }
@@ -434,7 +470,7 @@ export function KanbanBoard() {
                     key={col.id}
                     className="w-[270px] shrink-0 flex flex-col bg-bg-subtle rounded-xl"
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
-                    onDrop={() => handleDrop(col.id)}
+                    onDrop={(e) => handleDrop(e, col.id)}
                   >
                     {/* Column header */}
                     <div className="px-3 py-2.5 border-b border-border shrink-0">

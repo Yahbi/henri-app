@@ -150,8 +150,13 @@ async function handler(request: NextRequest): Promise<NextResponse> {
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                  from: "Henri <noreply@meethenri.com>",
+                  /* 2026-04-30 canonical email policy: customer-facing
+                   * sends use support@meethenri.com so replies land in
+                   * the monitored inbox. Pre-04-30 used noreply@ which
+                   * dropped customer responses on the floor. */
+                  from: "Henri <support@meethenri.com>",
                   to: [customerEmail],
+                  reply_to: ["support@meethenri.com"],
                   subject: `How was your experience with ${senderName}?`,
                   html: buildReviewEmailHtml({
                     customerName,

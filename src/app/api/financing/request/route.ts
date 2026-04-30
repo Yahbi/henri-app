@@ -85,6 +85,10 @@ export async function POST(req: NextRequest) {
             to: [lead.email],
             subject: `Financing options from ${partner}`,
             html: `<p>Hi,</p><p>Following up on our discussion, here's the link to apply for financing through ${escapePartnerName(partner)}:</p><p><a href="${escapeAttr(partnerUrl)}">${escapeAttr(partnerUrl)}</a></p><p>Let us know if you have any questions.</p>`,
+            /* 2026-04-30 canonical email policy: route homeowner replies
+             * about financing to support@meethenri.com — the monitored
+             * inbox — instead of bouncing off henri@ unmonitored. */
+            reply_to: ["support@meethenri.com"],
           }),
         });
         emailed = res.ok;

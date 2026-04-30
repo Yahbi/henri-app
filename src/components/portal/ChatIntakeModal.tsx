@@ -91,11 +91,45 @@ export function ChatIntakeModal({
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, step]);
 
-  /* ---- reset on open ---- */
+  /* ---- reset on open ----
+   *
+   * Skip-ahead policy (audit-04-30 fix #1):
+   * - Both initialTrade + valid 5-digit initialZip → start at Step2 (Timeline).
+   *   The user already gave us trade + ZIP on the /portal hero; asking again
+   *   was a UX bug.
+   * - initialTrade only → start at Step1 (Address). They picked a trade card
+   *   without typing a ZIP first.
+   * - initialZip only → start at Step0 (Trade). They typed a ZIP and hit
+   *   "Find my contractor" without picking a card. We still ask for trade
+   *   first; the ZIP is pre-filled when they reach Step1, and Step1 will
+   *   auto-confirm + advance.
+   * - neither → start at Step0.
+   *
+   * Messages are hydrated to match the starting step so the chat looks like
+   * a normal conversation that began at that point. */
   useEffect(() => {
     if (isOpen) {
-      setStep(0);
-      setMessages([{ from: "henri", text: HENRI_MESSAGES[0] }]);
+      const zipIsValid = /^\d{5}$/u.test(initialZip.trim());
+      const hasTrade = !!initialTrade;
+      let startStep = 0;
+      const seedMessages: Message[] = [
+        { from: "henri", text: HENRI_MESSAGES[0] },
+      ];
+      if (hasTrade && zipIsValid) {
+        // Both pre-filled — jump to Step2.
+        seedMessages.push({ from: "user", text: initialTrade });
+        seedMessages.push({ from: "henri", text: HENRI_MESSAGES[1] });
+        seedMessages.push({ from: "user", text: initialZip.trim() });
+        seedMessages.push({ from: "henri", text: HENRI_MESSAGES[2] });
+        startStep = 2;
+      } else if (hasTrade) {
+        // Trade only — jump to Step1.
+        seedMessages.push({ from: "user", text: initialTrade });
+        seedMessages.push({ from: "henri", text: HENRI_MESSAGES[1] });
+        startStep = 1;
+      }
+      setStep(startStep);
+      setMessages(seedMessages);
       setSelectedTrade(initialTrade);
       setAddress(initialZip);
       setTimeline("");
@@ -126,13 +160,70 @@ export function ChatIntakeModal({
     setStep(nextStep);
   }, []);
 
+  /* ---- back nav helper (audit-04-30 fix #1) ----
+   *
+   * Lets the user revise an earlier answer without losing the in-progress
+   * state (their answers stay in useState; only `step` rewinds). The
+   * Henri/User bubbles for steps after `targetStep` are dropped from the
+   * message log so the conversation visually rewinds. The next forward
+   * advance() will re-add bubbles as needed.
+   *
+   * Refinement-loop state (the AI follow-up Q&A between Step4 + Step5)
+   * is intentionally NOT preserved when going back from ≥5 to ≤4 — those
+   * answers depend on the description and become stale if the description
+   * changes. Reset them so the loop re-runs cleanly. */
+  const handleBack = useCallback(() => {
+    setStep((current) => {
+      if (current <= 0) return 0;
+      const target = current - 1;
+      // Rewind the visible chat: keep up to (and including) the henri-prompt
+      // for `target`. Each step adds 2 messages: user-answer + henri-prompt
+      // for next step. Truncate accordingly.
+      setMessages((prev) => {
+        // Find indices of henri prompts
+        const promptIndices = prev
+          .map((m, i) => (m.from === "henri" ? i : -1))
+          .filter((i) => i >= 0);
+        // Keep prompts 0..target inclusive
+        const keepThrough = promptIndices[target] ?? prev.length - 1;
+        return prev.slice(0, keepThrough + 1);
+      });
+      // If rewinding past Step5, reset the refinement loop state
+      if (current >= 5 && target < 5) {
+        setIsRefinement(false);
+        setRefinementIndex(0);
+        setRefinementAnswers([]);
+        setRefinementInput("");
+        setRefinementLoading(false);
+      }
+      return target;
+    });
+  }, []);
+
   /* ---- step handlers ---- */
   const handleTradeSelect = useCallback(
     (trade: string) => {
       setSelectedTrade(trade);
+      /* Skip-ahead policy (audit-04-30 fix #1):
+       * When the homeowner already typed a ZIP on the /portal hero,
+       * `address` state is pre-filled. Asking for it again at Step1
+       * was the double-zip UX bug. Instead, seed the address bubble
+       * + Step2 prompt and jump straight to the Timeline question. */
+      const zipIsValid = /^\d{5}$/u.test(address.trim());
+      if (zipIsValid) {
+        setMessages((prev) => [
+          ...prev,
+          { from: "user", text: trade },
+          { from: "henri", text: HENRI_MESSAGES[1] },
+          { from: "user", text: address.trim() },
+          { from: "henri", text: HENRI_MESSAGES[2] },
+        ]);
+        setStep(2);
+        return;
+      }
       advance(trade, 1);
     },
-    [advance],
+    [advance, address],
   );
 
   const handleAddressSubmit = useCallback(() => {
@@ -441,6 +532,7 @@ export function ChatIntakeModal({
             {/* ---- Step-specific inputs (extracted to ./ChatIntakeModal.steps) ---- */}
             <IntakeStepArea
               step={step}
+              onBack={handleBack}
               selectedTrade={selectedTrade}
               onTradeSelect={handleTradeSelect}
               address={address}

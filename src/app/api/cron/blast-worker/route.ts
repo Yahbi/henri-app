@@ -188,6 +188,11 @@ async function deliverOne(c: BlastCampaign, lead: Lead): Promise<boolean> {
         to: [lead.email],
         subject: c.subject ?? "A quick note from your contractor",
         text: personalized,
+        /* 2026-04-30 canonical email policy: blast-worker outreach
+         * routes homeowner replies to support@ — the monitored inbox.
+         * Henri brokers the reply forward to the contractor's account
+         * so we keep an audit trail and can suppress on opt-out. */
+        reply_to: ["support@meethenri.com"],
       }),
     });
     return res.ok;

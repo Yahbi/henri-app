@@ -131,6 +131,12 @@ export async function POST(req: NextRequest) {
               to: [lead.email],
               subject: subject ?? "Message from your contractor",
               text: textToSend,
+              /* 2026-04-30 canonical email policy: homeowner replies
+               * route to support@meethenri.com — the monitored inbox —
+               * instead of bouncing off henri@ unmonitored. The platform
+               * is the broker; replies route to support and we forward
+               * to the right contractor inbox. */
+              reply_to: ["support@meethenri.com"],
             }),
           });
           providerOk = res.ok;

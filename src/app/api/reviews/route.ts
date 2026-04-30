@@ -235,8 +235,14 @@ export async function POST(req: NextRequest) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              from: "Henri <noreply@meethenri.com>",
+              /* 2026-04-30 canonical email policy: contractor-facing
+               * notifications come from support@ so any "this looks
+               * wrong" reply from the contractor lands in the monitored
+               * inbox. Pre-04-30 used noreply@ which dropped contractor
+               * follow-ups on the floor. */
+              from: "Henri <support@meethenri.com>",
               to: [contractorProfile.email],
+              reply_to: ["support@meethenri.com"],
               subject: `New ${rating}-star review from ${reviewer_name}`,
               html: `
                 <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">

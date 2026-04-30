@@ -38,6 +38,10 @@ import {
 
 export interface IntakeStepAreaProps {
   step: number;
+  /* Back-nav callback (audit-04-30 fix #1). Decrements step + rewinds the
+   * visible chat log. Each step except Step0 + Step7 renders a "← Back"
+   * link that calls this. */
+  onBack: () => void;
 
   // Step 0 — Trade
   selectedTrade: string;
@@ -114,6 +118,26 @@ export function IntakeStepArea(props: IntakeStepAreaProps) {
   );
 }
 
+/* ── BackLink ─────────────────────────────────────────────────────────────
+ *
+ * Tiny shared component for the "← Back" affordance. Rendered in every
+ * step except Step0 (no previous step) and Step7 (terminal — submission
+ * already fired, going back would be confusing). Refinement input also
+ * skips it: the refinement loop is server-driven and rewinding mid-loop
+ * has no clean state. */
+function BackLink({ onBack }: { onBack: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onBack}
+      className="self-start text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+      aria-label="Go back to previous step"
+    >
+      ← Back
+    </button>
+  );
+}
+
 /* ── Step 0: Trade selection ─────────────────────────────────────────── */
 
 function Step0Trade({
@@ -140,6 +164,7 @@ function Step1Address({
   address,
   onAddressChange,
   onAddressSubmit,
+  onBack,
 }: IntakeStepAreaProps) {
   /* Live input-intent hint — updates as the user types so the disabled-
    * Next state is never mysterious. Three states:
@@ -160,7 +185,8 @@ function Step1Address({
   const tone = isZip ? "text-[color:var(--success,_#3D9970)]" : "text-muted-foreground";
 
   return (
-    <div className="pt-2">
+    <div className="flex flex-col gap-2 pt-2">
+      <BackLink onBack={onBack} />
       <div className="flex gap-2">
         <input
           type="text"
@@ -200,17 +226,21 @@ function Step1Address({
 function Step2Timeline({
   timeline,
   onTimelineSelect,
+  onBack,
 }: IntakeStepAreaProps) {
   return (
-    <div className="grid grid-cols-2 gap-2 pt-2">
-      {TIMELINES.map((t) => (
-        <OptionCard
-          key={t}
-          label={t}
-          selected={timeline === t}
-          onClick={() => onTimelineSelect(t)}
-        />
-      ))}
+    <div className="flex flex-col gap-2 pt-2">
+      <BackLink onBack={onBack} />
+      <div className="grid grid-cols-2 gap-2">
+        {TIMELINES.map((t) => (
+          <OptionCard
+            key={t}
+            label={t}
+            selected={timeline === t}
+            onClick={() => onTimelineSelect(t)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -220,17 +250,21 @@ function Step2Timeline({
 function Step3Budget({
   budget,
   onBudgetSelect,
+  onBack,
 }: IntakeStepAreaProps) {
   return (
-    <div className="flex flex-wrap gap-2 pt-2">
-      {BUDGETS.map((b) => (
-        <OptionCard
-          key={b}
-          label={b}
-          selected={budget === b}
-          onClick={() => onBudgetSelect(b)}
-        />
-      ))}
+    <div className="flex flex-col gap-2 pt-2">
+      <BackLink onBack={onBack} />
+      <div className="flex flex-wrap gap-2">
+        {BUDGETS.map((b) => (
+          <OptionCard
+            key={b}
+            label={b}
+            selected={budget === b}
+            onClick={() => onBudgetSelect(b)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -241,9 +275,11 @@ function Step4Description({
   description,
   onDescriptionChange,
   onDescriptionSubmit,
+  onBack,
 }: IntakeStepAreaProps) {
   return (
     <div className="flex flex-col gap-2 pt-2">
+      <BackLink onBack={onBack} />
       <textarea
         value={description}
         onChange={(e) => onDescriptionChange(e.target.value)}
@@ -313,9 +349,11 @@ function Step5Photos({
   onPhotoSkip,
   onPhotoContinue,
   onFileChange,
+  onBack,
 }: IntakeStepAreaProps) {
   return (
     <div className="flex flex-col gap-3 pt-2">
+      <BackLink onBack={onBack} />
       <input
         ref={fileInputRef}
         type="file"
@@ -379,9 +417,11 @@ function Step6Contact({
   onContactPhoneChange,
   onContactEmailChange,
   onContactSubmit,
+  onBack,
 }: IntakeStepAreaProps) {
   return (
     <div className="flex flex-col gap-3 pt-2">
+      <BackLink onBack={onBack} />
       <div>
         <input
           type="text"

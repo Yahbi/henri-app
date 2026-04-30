@@ -102,8 +102,13 @@ export async function POST(req: NextRequest) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              from: "Henri <noreply@meethenri.com>",
+              /* 2026-04-30 canonical email policy: customer-facing
+               * sends use support@meethenri.com so replies land in the
+               * monitored inbox. Pre-04-30 used noreply@ which dropped
+               * customer "I never worked with this contractor" replies. */
+              from: "Henri <support@meethenri.com>",
               to: [customer_email],
+              reply_to: ["support@meethenri.com"],
               subject: `${senderName} is requesting your feedback`,
               html: `
                 <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">

@@ -61,8 +61,12 @@ export async function POST(req: Request) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: "Henri <noreply@meethenri.com>",
+          /* 2026-04-30 canonical email policy: customer-facing sends
+           * use support@meethenri.com so referral-recipient replies land
+           * in the monitored inbox instead of being lost to noreply@. */
+          from: "Henri <support@meethenri.com>",
           to: [email],
+          reply_to: ["support@meethenri.com"],
           subject: `${senderName} invited you to Henri`,
           html: `
             <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">

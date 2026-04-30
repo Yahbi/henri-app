@@ -49,6 +49,18 @@
       "schedule": "0 13 * * *"
     },
     {
+      "path": "/api/cron/enrich",
+      "schedule": "15 13 * * *"
+    },
+    {
+      "path": "/api/cron/enrich",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/enrich",
+      "schedule": "15 14 * * *"
+    },
+    {
       "path": "/api/cron/geocode-backfill",
       "schedule": "0 14 * * *"
     },

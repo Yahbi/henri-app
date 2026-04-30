@@ -102,7 +102,15 @@ export async function POST(req: NextRequest) {
             to: [recipient],
             subject: `Your estimate from ${companyName}`,
             html,
-            reply_to: profile?.email ? [profile.email] : undefined,
+            /* 2026-04-30 canonical email policy: prefer routing customer
+             * replies straight to the contractor's address so estimate
+             * questions hit the person who wrote it. When the contractor
+             * profile is missing an email, fall back to support@ instead
+             * of `undefined` so we never leave Reply-To on the FROM line
+             * (which would route to henri@ — unmonitored). */
+            reply_to: profile?.email
+              ? [profile.email]
+              : ["support@meethenri.com"],
           }),
         });
         emailSent = res.ok;
