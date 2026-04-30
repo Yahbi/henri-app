@@ -24,6 +24,8 @@ import type maplibregl from "maplibre-gl";
 import { useLeads } from "@/hooks/useLeads";
 import { useGodMode } from "@/hooks/useGodMode";
 import { useLeadCount } from "@/hooks/useLeadCount";
+import { useUser } from "@/hooks/useUser";
+import { WeeklyBriefingBanner } from "@/components/dashboard/WeeklyBriefing";
 import { useFEMAFlood, useCensusOverlay, useWeatherAlerts } from "@/hooks/useOverlayData";
 import { useToast } from "@/components/ui/toast";
 import { formatCurrency } from "@/types/lead";
@@ -374,6 +376,10 @@ function DashboardContent() {
   // god-mode to sidestep the same bad plan.
   const godMode = useGodMode();
   const leadCount = useLeadCount();
+  // Tier A+ Sprint 3 — A2 weekly-briefing banner reads the contractor's
+  // weekly_briefings row keyed on this user. Hides itself when the cron
+  // hasn't run yet (graceful degrade) — never blank shells.
+  const { user } = useUser();
   // First-paint fetch policy:
   //   - regular contractor: 1,000 rows with the wide SELECT (permits join)
   //     and `geocoded_only=true`. Subscription-tier ZIP cap keeps the
@@ -488,6 +494,10 @@ function DashboardContent() {
 
   return (
     <div className="relative flex-1 flex flex-col overflow-hidden">
+      {/* Tier A+ Sprint 3 — A2 weekly-briefing banner. Renders at the top
+       * of the dashboard once /api/cron/weekly-briefing has produced a row
+       * for this contractor. Collapsible + dismissible per ISO week. */}
+      <WeeklyBriefingBanner contractorId={user?.id ?? null} />
       {leadsError && (
         <div
           role="alert"

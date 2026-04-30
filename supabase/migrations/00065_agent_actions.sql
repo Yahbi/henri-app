@@ -69,9 +69,12 @@ CREATE INDEX IF NOT EXISTS agent_actions_contractor_id_created_at_idx
 CREATE INDEX IF NOT EXISTS agent_actions_action_created_at_idx
   ON public.agent_actions (action, created_at DESC);
 
--- Index for monthly cost rollups by contractor
-CREATE INDEX IF NOT EXISTS agent_actions_contractor_month_idx
-  ON public.agent_actions (contractor_id, date_trunc('month', created_at));
+-- Note: original plan included a (contractor_id, date_trunc('month', created_at))
+-- index for cost rollups, but Postgres rejects date_trunc on timestamptz as an
+-- index expression because it's STABLE (timezone-dependent) not IMMUTABLE
+-- (error 42P17). The (contractor_id, created_at DESC) index above serves the
+-- monthly rollup query efficiently via a range scan — Postgres tail-scans the
+-- recent month with no plan flip. Drop the partial; keep the simpler index.
 
 -- RLS — contractor reads their own
 ALTER TABLE public.agent_actions ENABLE ROW LEVEL SECURITY;

@@ -7,6 +7,11 @@ import { logger } from "@/lib/logger";
 import { evaluateRules, type AddressPermitHistory } from "@/lib/predictive/rules";
 import { mineDescription, mergeSuggestions } from "@/lib/predictive/llm-mining";
 import { getMiningLlmClient } from "@/lib/predictive/openai-client";
+import {
+  buildValueModel,
+  forecastValue,
+  type ValueModel,
+} from "@/lib/predictive/value-forecast";
 import type { Lead } from "@/types/lead";
 import { extractOwnerFields, normalizeAddrKey } from "./helpers";
 
@@ -199,6 +204,49 @@ export async function GET(request: NextRequest) {
       uniqueTrades
     );
 
+    /* Tier A+ Sprint 2 (F2.2) — value-forecast model.
+     *
+     * Build once per cron run from leads that DO have a permit_value
+     * (the ~30% with actuals). Bucket on (permit_type × ZIP3 × year_built).
+     * Used downstream to populate `predicted_value` for permits whose
+     * `estimated_value` is null — the scoring engine treats it as the
+     * value when no actual is present (model.ts buildSignals).
+     *
+     * Graceful-degrade: if the query errors or returns no training rows,
+     * `valueModel` stays null and `predicted_value` is never populated —
+     * scoring falls back to "no value" (signal=0). Honest: no fabricated
+     * values ever flow into the scorer.
+     *
+     * Cap at 100k training rows to keep the cron query fast (~2s). */
+    let valueModel: ValueModel | null = null;
+    try {
+      const { data: trainingRows } = await supabase
+        .from("leads")
+        .select("permit_type, zip, year_built, permit_value")
+        .not("permit_value", "is", null)
+        .gt("permit_value", 0)
+        .limit(100_000);
+      if (trainingRows && trainingRows.length > 0) {
+        valueModel = buildValueModel(
+          trainingRows.map((r) => ({
+            permit_type: (r.permit_type as string | null) ?? null,
+            zip: (r.zip as string | null) ?? null,
+            year_built: (r.year_built as number | null) ?? null,
+            estimated_value: r.permit_value as number,
+          })),
+        );
+        logger.info("value-forecast model built", {
+          training_rows: trainingRows.length,
+          buckets: valueModel.buckets.size,
+        });
+      }
+    } catch (e) {
+      logger.warn("value-forecast model build failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+      valueModel = null;
+    }
+
     /* Per-address history rollup (populates cascade_flag, pipeline_value, etc.)
      * Keyed by the same `address_norm` format used by build-address-history.ts.
      * `normalizeAddrKey` lives in `./helpers` so the round-robin + key-norm
@@ -255,10 +303,35 @@ export async function GET(request: NextRequest) {
       const history = addrKey ? historyMap.get(addrKey) : undefined;
       const cascadeCount = history?.permit_count ?? 1;
 
+      /* Tier A+ Sprint 2 (F2.2) — when the permit has no actual estimated_value,
+       * try the value-forecast model. Returns null when the bucket has too few
+       * samples to be meaningful (sample_size < 5 internally). Never overrides
+       * an existing actual. */
+      let predictedValue: number | null = null;
+      if (permit.estimated_value == null && valueModel != null) {
+        const yearBuilt =
+          (permit.raw_json as Record<string, unknown> | null)?.year_built as
+            | number
+            | null
+            | undefined ?? null;
+        const forecast = forecastValue(
+          {
+            permit_type: permit.permit_type,
+            zip: permit.zip,
+            year_built: yearBuilt,
+          },
+          valueModel,
+        );
+        if (forecast && forecast.sample_size >= 20) {
+          predictedValue = forecast.predicted_value;
+        }
+      }
+
       const signals = buildSignals({
         permit: {
           issue_date: permit.issued_date ?? permit.applied_date,
           estimated_value: permit.estimated_value,
+          predicted_value: predictedValue,
           description: permit.description,
           permit_type: permit.permit_type,
           zip: permit.zip,

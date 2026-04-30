@@ -11,6 +11,9 @@ import {
 import {
   REPAIR_DRIVING_EVENTS,
   buildStormPrediction,
+  computeStormHistoricalRates,
+  NO_HISTORICAL_RATE,
+  type HistoricalRate,
   type StormEvent,
 } from "@/lib/predictive/storm-impact";
 import {
@@ -163,7 +166,35 @@ export async function GET(request: NextRequest) {
   }
 
   /* ── Step 3: Storm predictions per lead. For each lead with a ZIP,
-   * count recent storm events at that ZIP. Compute repair-likelihood. */
+   * count recent storm events at that ZIP. Compute repair-likelihood
+   * using a real per-event-type historical baseline (computeStormHistoricalRates).
+   * Event types with insufficient sample fall back to NO_HISTORICAL_RATE
+   * (rate=0, sampleSize=N) — the UI hides those panels (graceful-degrade,
+   * never invents a rate). */
+  let historicalRates: Map<string, HistoricalRate> = new Map();
+  if (Date.now() < deadline) {
+    try {
+      // Reserve ~60s of the cron budget for the rate computation; if we're
+      // already short on time, skip it and fall back to zero rates (which
+      // still surfaces storm-event counts on the panel, just without a
+      // likelihood number).
+      const ratesDeadline = Math.min(deadline, Date.now() + 60_000);
+      historicalRates = await computeStormHistoricalRates(supabase, {
+        deadline: ratesDeadline,
+      });
+      logger.info("storm historical rates computed", {
+        event_types: Array.from(historicalRates.entries()).map(([k, v]) => ({
+          type: k,
+          rate60d: v.rate60d,
+          rate90d: v.rate90d,
+          sample: v.sampleSize,
+        })),
+      });
+    } catch (e) {
+      errors.push(`storm-rates: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   if (Date.now() < deadline) {
     try {
       const { data: leads } = await supabase
@@ -188,17 +219,17 @@ export async function GET(request: NextRequest) {
         const events = (stormRows ?? []) as StormEvent[];
         if (events.length === 0) continue;
 
-        // Stub historical rates — refined in subsequent sprints. For now,
-        // use modest constants until we build the (ZIP × event) baseline.
-        const historicalRate60d = 0.25;
-        const historicalRate90d = 0.35;
-        const sampleSize = 100; // Placeholder
+        // Use the real per-event-type historical rate. The predominant
+        // event type drives the lead's prediction. When that event type
+        // has insufficient sample → NO_HISTORICAL_RATE → rate=0 surfaced.
+        const primaryType = events[0].event_type;
+        const rate = historicalRates.get(primaryType) ?? NO_HISTORICAL_RATE;
 
         const prediction = buildStormPrediction(
           events,
-          historicalRate60d,
-          historicalRate90d,
-          sampleSize,
+          rate.rate60d,
+          rate.rate90d,
+          rate.sampleSize,
         );
 
         const { error: upErr } = await supabase

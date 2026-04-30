@@ -165,6 +165,132 @@ function clampLikelihood(p: number): number {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Historical-rate computation
+ *
+ * Per-event-type baseline. For each repair-driving event type, look at
+ * storms that occurred 60 days to 2 years ago (old enough to observe
+ * follow-on permit behaviour, recent enough to remain relevant), then
+ * count what fraction had at least one permit filed within 60d / 90d in
+ * the same ZIP. Returns a Map<event_type → {rate60d, rate90d, sampleSize}>.
+ *
+ * Sample-size threshold: events with < MIN_HISTORICAL_SAMPLE storms in the
+ * window are treated as "no signal" — rates default to 0, and the UI
+ * hides the storm panel for leads in those event types. This is the
+ * honest path: when we don't have data, we don't fabricate a rate.
+ *
+ * Called once per cron run (weekly) — output is cached in memory and
+ * applied to every lead's storm prediction in the same run. NO PII —
+ * only ZIP + permit applied_date are read.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export interface HistoricalRate {
+  rate60d: number;
+  rate90d: number;
+  sampleSize: number;
+}
+
+export const NO_HISTORICAL_RATE: HistoricalRate = { rate60d: 0, rate90d: 0, sampleSize: 0 };
+
+/** Minimum storm-event sample to treat the historical rate as meaningful. */
+export const MIN_HISTORICAL_SAMPLE = 10;
+/** Cap per event-type to bound cron cost. */
+export const MAX_HISTORICAL_SAMPLE = 200;
+
+export interface ComputeRatesOptions {
+  /** Soft deadline (epoch ms). Function bails early if exceeded. */
+  deadline?: number;
+  /** Override sample cap (default MAX_HISTORICAL_SAMPLE). */
+  maxSamplePerType?: number;
+  /** Override the look-back floor (default 730 days). */
+  lookbackDays?: number;
+}
+
+/** Compute the historical post-storm permit-pull rate per event type.
+ *
+ *  Strategy: pull a sample of storms 60d-2y old per event type, then for
+ *  each storm count whether any permit was filed at the same ZIP within
+ *  60/90 days. Rate = storms_with_permit_within_window / total_storms.
+ *
+ *  Returns a Map keyed on the canonical event type name. Event types
+ *  with too-small samples map to NO_HISTORICAL_RATE so the cron renders
+ *  zero likelihood (graceful-degrade).
+ */
+export async function computeStormHistoricalRates(
+  supabase: SupabaseClient,
+  options: ComputeRatesOptions = {},
+): Promise<Map<string, HistoricalRate>> {
+  const result = new Map<string, HistoricalRate>();
+  const deadline = options.deadline ?? Number.POSITIVE_INFINITY;
+  const maxSample = options.maxSamplePerType ?? MAX_HISTORICAL_SAMPLE;
+  const lookbackDays = options.lookbackDays ?? 730;
+
+  const twoYearsAgo = new Date(Date.now() - lookbackDays * 86_400_000).toISOString();
+  const sixtyDaysAgoOutcome = new Date(Date.now() - 60 * 86_400_000).toISOString();
+
+  for (const eventType of REPAIR_DRIVING_EVENTS) {
+    if (Date.now() > deadline) break;
+
+    // Pull a sample of storms of this type that are old enough to have
+    // observable follow-on permits. Filter to rows with a non-null ZIP
+    // since we join on it.
+    const { data: storms } = await supabase
+      .from("storm_events")
+      .select("zip, begin_date")
+      .eq("event_type", eventType)
+      .lte("begin_date", sixtyDaysAgoOutcome)
+      .gte("begin_date", twoYearsAgo)
+      .not("zip", "is", null)
+      .limit(maxSample);
+
+    if (!storms || storms.length < MIN_HISTORICAL_SAMPLE) {
+      result.set(eventType, { ...NO_HISTORICAL_RATE, sampleSize: storms?.length ?? 0 });
+      continue;
+    }
+
+    let withPermit60 = 0;
+    let withPermit90 = 0;
+
+    for (const storm of storms) {
+      if (Date.now() > deadline) break;
+      const startIso = storm.begin_date as string;
+      const startMs = new Date(startIso).getTime();
+      if (!Number.isFinite(startMs)) continue;
+      const end60 = new Date(startMs + 60 * 86_400_000).toISOString();
+      const end90 = new Date(startMs + 90 * 86_400_000).toISOString();
+
+      // Single round-trip per storm per window. count='exact', head=true
+      // returns just the count without the rows. With the
+      // (state, zip, begin_date) index on storm_events and the (zip, applied_date)
+      // index on permits, each query is single-digit ms.
+      const [c60Res, c90Res] = await Promise.all([
+        supabase
+          .from("permits")
+          .select("id", { count: "exact", head: true })
+          .eq("zip", storm.zip as string)
+          .gte("applied_date", startIso)
+          .lte("applied_date", end60),
+        supabase
+          .from("permits")
+          .select("id", { count: "exact", head: true })
+          .eq("zip", storm.zip as string)
+          .gte("applied_date", startIso)
+          .lte("applied_date", end90),
+      ]);
+      if ((c60Res.count ?? 0) > 0) withPermit60++;
+      if ((c90Res.count ?? 0) > 0) withPermit90++;
+    }
+
+    result.set(eventType, {
+      rate60d: withPermit60 / storms.length,
+      rate90d: withPermit90 / storms.length,
+      sampleSize: storms.length,
+    });
+  }
+
+  return result;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Read API — used by the dashboard
  * ────────────────────────────────────────────────────────────────────────── */
 

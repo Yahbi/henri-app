@@ -92,17 +92,17 @@ describe("computeCost", () => {
   it("computes haiku rates correctly", () => {
     // $0.001/1k in + $0.005/1k out
     // 4000 in + 200 out = 0.004 + 0.001 = $0.005
-    const cost = computeCost("claude-haiku-4-5", 4000, 200);
+    const cost = computeCost("claude-3-5-haiku-20241022", 4000, 200);
     expect(cost).toBeCloseTo(0.005, 5);
   });
   it("computes sonnet rates correctly", () => {
     // $0.003/1k in + $0.015/1k out
     // 8000 in + 1000 out = 0.024 + 0.015 = $0.039
-    const cost = computeCost("claude-sonnet-4-5", 8000, 1000);
+    const cost = computeCost("claude-3-5-sonnet-20241022", 8000, 1000);
     expect(cost).toBeCloseTo(0.039, 5);
   });
   it("returns 0 for zero tokens", () => {
-    expect(computeCost("claude-haiku-4-5", 0, 0)).toBe(0);
+    expect(computeCost("claude-3-5-haiku-20241022", 0, 0)).toBe(0);
   });
 });
 

@@ -318,6 +318,15 @@ export function buildSignals(params: {
   permit: {
     issue_date?: string | null;
     estimated_value?: number | null;
+    /**
+     * Tier A+ Sprint 2 (F2.2) — predicted permit value for permits where
+     * `estimated_value` is null. Computed by the value-forecast model
+     * (src/lib/predictive/value-forecast.ts). When supplied AND
+     * `estimated_value` is null, the scoring engine treats it as the
+     * permit value. Never overrides an actual `estimated_value`. Pass
+     * null/undefined to fall back to "no value" behaviour.
+     */
+    predicted_value?: number | null;
     description?: string | null;
     permit_type?: string | null;
     zip?: string | null;
@@ -389,10 +398,17 @@ export function buildSignals(params: {
   /* Property value: prefer assessed_value, fall back to property_value */
   const propertyValue = params.lead?.assessed_value ?? params.lead?.property_value ?? null;
 
+  /* Permit value: prefer the actual estimated_value. When null, fall back
+   * to the value-forecast prediction (Sprint 2 F2.2). Never overrides an
+   * actual value. Returns null only when both inputs are null — the value
+   * scorer then assigns 0 to that signal (no fabricated value). */
+  const permitValueResolved =
+    params.permit.estimated_value ?? params.permit.predicted_value ?? null;
+
   return {
     permitAge,
     daysSinceCreated,
-    permitValue: params.permit.estimated_value ?? null,
+    permitValue: permitValueResolved,
     propertyValue,
     projectType: trade,
     hasPhone: !!params.lead?.phone,

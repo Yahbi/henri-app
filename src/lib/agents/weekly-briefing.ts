@@ -81,7 +81,7 @@ export async function generateWeeklyBriefing(
     systemPrompt: SYSTEM_PROMPT,
     estimatedTokens: 1500,
     maxTokens: 500,
-    model: "claude-sonnet-4-5", // Sonnet for quality; 1× per week per contractor
+    model: "claude-3-5-sonnet-20241022", // Sonnet for quality; 1× per week per contractor
     disclaimerRendered: true,
   });
 }

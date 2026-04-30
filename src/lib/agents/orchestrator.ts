@@ -24,8 +24,8 @@ import { logger } from "@/lib/logger";
 
 /** Pricing per 1k tokens (USD). Update when models change. */
 const PRICING = {
-  "claude-haiku-4-5": { in: 0.001, out: 0.005 },
-  "claude-sonnet-4-5": { in: 0.003, out: 0.015 },
+  "claude-3-5-haiku-20241022": { in: 0.001, out: 0.005 },
+  "claude-3-5-sonnet-20241022": { in: 0.003, out: 0.015 },
 } as const;
 
 export type AgentModel = keyof typeof PRICING;
@@ -40,7 +40,7 @@ export interface AgentInput {
   targetId?: string;
   /** Pre-validated, untrusted-data-safe prompt content. */
   prompt: string;
-  /** Model to use. Default: claude-haiku-4-5 for cost. */
+  /** Model to use. Default: claude-3-5-haiku-20241022 for cost. */
   model?: AgentModel;
   /** Max output tokens (cost cap). Default 1000. */
   maxTokens?: number;
@@ -171,7 +171,7 @@ export async function logAgentAction(
     action: input.action,
     target_table: input.targetTable ?? null,
     target_id: input.targetId ?? null,
-    model: input.model ?? "claude-haiku-4-5",
+    model: input.model ?? "claude-3-5-haiku-20241022",
     model_version: null,
     prompt_hash: hashContent(input.prompt),
     output_hash: result.output ? hashContent(result.output) : null,
@@ -339,7 +339,7 @@ export async function runAgent(
   supabase: SupabaseClient,
   input: RunAgentInput,
 ): Promise<AgentResult> {
-  const model: AgentModel = input.model ?? "claude-haiku-4-5";
+  const model: AgentModel = input.model ?? "claude-3-5-haiku-20241022";
   const maxTokens = input.maxTokens ?? 1000;
 
   // 1. Kill switch

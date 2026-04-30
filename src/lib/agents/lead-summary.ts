@@ -124,7 +124,7 @@ export async function generateLeadSummary(
     systemPrompt: SYSTEM_PROMPT,
     estimatedTokens: 4500, // ~4k system + facts + ~500 output
     maxTokens: 500,
-    model: "claude-haiku-4-5",
+    model: "claude-3-5-haiku-20241022",
     disclaimerRendered: true,
   });
 }

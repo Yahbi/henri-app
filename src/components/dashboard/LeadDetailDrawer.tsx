@@ -15,6 +15,7 @@ import { CrossTradeOpportunities } from "./CrossTradeOpportunities";
 import { CascadePredictionPanel } from "./CascadePrediction";
 import { StormImpactPanel } from "./StormImpact";
 import { PermitAnomalyPanel } from "./PermitAnomaly";
+import { LeadSummaryPanel } from "./LeadSummary";
 import { usePredictions } from "@/hooks/usePredictions";
 import { ApplicantBadge } from "./ApplicantBadge";
 import { DrawerResizeHandle } from "./DrawerResizeHandle";
@@ -335,6 +336,12 @@ export function LeadDetailDrawer({
               ))}
             </div>
           </div>
+
+          {/* ── Tier A+ Sprint 3: A1 LLM lead-summary panel ──
+           * Renders 2-3 sentence narrative summarizing the predictive
+           * panels below. Auto-fires on lead-open; "Regenerate" available.
+           * Hides itself when no output. Disclaimer rendered. */}
+          <LeadSummaryPanel leadId={lead.id} />
 
           {/* ── Tier A+ Sprint 1: Predictive panels ──
            * Each panel hides itself when there's nothing to show. They render

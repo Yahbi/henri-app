@@ -461,6 +461,18 @@ export type NotificationPrefsPatchBody = z.infer<
   typeof NotificationPrefsPatchBodySchema
 >;
 
+/* ── POST /api/agents/lead-summary — Tier A+ Sprint 3 (A1 agent trigger) ──
+ *
+ * The contractor's UI fires this when opening a lead. Body is just the
+ * lead UUID — the server fetches the lead + predictions itself, so the
+ * client cannot influence the prompt content. Defends against client-side
+ * injection at the API boundary.
+ */
+export const LeadSummaryRequestSchema = z.object({
+  lead_id: UuidSchema,
+});
+export type LeadSummaryRequestBody = z.infer<typeof LeadSummaryRequestSchema>;
+
 /**
  * Small helper for API routes that validates a body or returns a
  * 400 with the first issue. Keeps handlers terse and consistent.
