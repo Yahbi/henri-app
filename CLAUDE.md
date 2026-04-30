@@ -149,6 +149,33 @@ export ENIGMA_API_KEY=<your-personal-token>
 
 Then `/plugin marketplace list` to confirm. The Enigma plugin's tools become available like any other MCP server.
 
+## Sentry setup (audit-04-30 fix #1 runbook)
+
+Code is fully wired (server-side `instrumentation.ts`, client-side `instrumentation-client.ts`, logger sink at `src/lib/logger.ts:101`, `@sentry/nextjs ^10.50.0` in deps). Activation requires only env vars.
+
+**One-time setup:**
+
+1. **Create Sentry account** (free tier, 5k events/mo) at https://sentry.io/signup/. Pick "Next.js" as platform.
+2. **Create a project** for `meethenri.com` — copy the DSN. It looks like `https://abc123@o456.ingest.sentry.io/789`.
+3. **Add DSN to `.env.local`** (for dev testing) — append:
+   ```bash
+   # Sentry — server-side error capture (instrumentation.ts)
+   SENTRY_DSN=https://YOUR_DSN_HERE
+   # Sentry — client-side error capture (instrumentation-client.ts).
+   # Same DSN as server-side; the NEXT_PUBLIC_ prefix exposes it to the
+   # browser bundle (intentional — Sentry's threat model accepts public DSNs).
+   NEXT_PUBLIC_SENTRY_DSN=https://YOUR_DSN_HERE
+   ```
+4. **Add DSN to `.env.example`** (no secret — placeholder only) — same lines but with `https://YOUR_DSN_HERE`.
+5. **Set both env vars in Vercel**: dashboard → Project Settings → Environment Variables → add `SENTRY_DSN` (Production scope) and `NEXT_PUBLIC_SENTRY_DSN` (Production + Preview). Trigger a redeploy.
+6. **Verify**: hit a known-error path (e.g. malformed POST to a Zod-validated route or click a known crash boundary). Within 30s, the event lands in your Sentry project's Issues tab.
+
+**Optional later:**
+- `SENTRY_AUTH_TOKEN` — only needed for source-map uploads (better stack traces). Set up via `npx @sentry/wizard` if/when stack traces feel useful.
+- Tune `tracesSampleRate` from 0.1 once you have a Sentry usage baseline.
+
+**Why two env vars**: Next.js inlines `NEXT_PUBLIC_*` to the client bundle (server can read `SENTRY_DSN` privately). Both should be the same Sentry project DSN.
+
 ## Enrichment-source env vars (free-tier APIs added 2026-04-26)
 
 Set in `.env.local` (development) and Vercel env (production). All optional — modules graceful-degrade to null when unset.
