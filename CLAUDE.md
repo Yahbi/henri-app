@@ -75,6 +75,10 @@
 - Apply path when Supabase CLI + `SUPABASE_ACCESS_TOKEN` are available: `pnpm migrate` (see `.claude/commands/migrate.md`).
 - Fallback apply path: paste into https://app.supabase.com/project/ivfxylgoxgrxttknewsf/sql/new.
 - Every migration is idempotent (`IF NOT EXISTS`, `DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN NULL; END $$` for enums). Re-run must be safe.
+- **Numbering gaps are intentional, not missing files.** Two known gaps as of 2026-04-30:
+  - `00038` — skipped during the 2026-04-22 phase-3 RLS pass (the planned migration was folded into `00037` + `00039` to avoid a triple round-trip apply).
+  - `00048`–`00049` — skipped during the 2026-04-26 audit pass (the planned migrations were superseded by `00050` + `00051` after the audit reshaped the schema). The numbers were left empty rather than re-shuffled to keep prior commit hashes stable.
+  Postgres doesn't care about gaps — numbering is for human ordering only. If you reach this section because an audit flagged the gaps, the gap is intentional. Do not "fill" them with new migrations.
 
 ## Verification gate (run before saying "done")
 1. `pnpm tsc --noEmit` — typecheck clean.

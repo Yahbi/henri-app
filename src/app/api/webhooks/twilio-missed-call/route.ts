@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { wasProcessed, markProcessed } from "@/lib/webhooks/idempotency";
 import { createHmac } from "crypto";
 
 /**
- * /api/webhooks/twilio-missed-call — Phase 0a wedge #6 (speed-to-lead).
+ * /api/webhooks/twilio-missed-call — Phase 0a wedge #5 (speed-to-lead).
  *
  * Twilio posts here when a call to a contractor's tracked number goes
  * unanswered or is missed.
+ *
+ * Idempotency (audit-04-30 fix #3): Twilio retries on receiver timeout.
+ * We dedupe on `CallSid` via `wasProcessed()` to prevent (a) duplicate
+ * `missed_call_events` rows and (b) duplicate auto-reply SMS that would
+ * make the speed-to-lead moment look broken instead of fast. Pattern
+ * matches the status webhook at /api/webhooks/twilio/route.ts.
  */
 
 export const runtime = "nodejs";
@@ -75,8 +82,28 @@ export async function POST(request: NextRequest) {
     const status = (body.CallStatus ?? "").toLowerCase();
     const isMissed = ["no-answer", "busy", "failed", "canceled"].includes(status);
 
-    // Find the contractor whose tracked number was called (body.To).
     const admin = createAdminClient();
+
+    /* Idempotency guard (audit-04-30 fix #3) — skip duplicate Twilio
+     * deliveries. Twilio retries up to 7 times on receiver timeout; without
+     * this guard, each retry inserts another `missed_call_events` row + sends
+     * another auto-reply SMS. Graceful-degrade: when migration 00054 isn't
+     * applied, `wasProcessed()` returns false and the route falls back to
+     * the prior behavior (the duplicate-event bug we're fixing here, but
+     * the route doesn't crash). */
+    if (body.CallSid) {
+      const seen = await wasProcessed(admin, "twilio", `missed-call:${body.CallSid}`);
+      if (seen) {
+        return NextResponse.json({
+          ok: true,
+          recorded: false,
+          auto_reply_sent: false,
+          reason: "duplicate Twilio delivery (already processed)",
+        });
+      }
+    }
+
+    // Find the contractor whose tracked number was called (body.To).
     let contractorId: string | null = null;
     try {
       const { data } = await admin
@@ -163,6 +190,22 @@ export async function POST(request: NextRequest) {
           message: e instanceof Error ? e.message : String(e),
         });
       }
+    }
+
+    /* Mark this CallSid as processed so Twilio retries no-op (see fix #3
+     * comment at top of file). Best-effort \u2014 failure here logs but doesn't
+     * propagate; the actual webhook work has already succeeded. */
+    if (body.CallSid) {
+      await markProcessed(admin, "twilio", `missed-call:${body.CallSid}`, {
+        event_type: status || "unknown",
+        raw_meta: {
+          from: body.From ?? null,
+          to: body.To ?? null,
+          duration: body.CallDuration ?? null,
+          contractor_id: contractorId,
+          auto_reply_sent: autoReplySent,
+        },
+      });
     }
 
     return NextResponse.json({

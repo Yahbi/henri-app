@@ -161,10 +161,27 @@ export function useDrawerResize({
   // When the parent's `height` prop changes (e.g., programmatic reset), sync
   // it down — but only when we're NOT actively dragging, otherwise we'd
   // overwrite the user's live drag.
+  //
+  // Audit-04-30 fix #6 (react-hooks/set-state-in-effect): React 19's
+  // tightened lint flags any synchronous setState inside a useEffect body
+  // because it can cascade renders. To stay correct AND quiet:
+  //   1. Track the last-synced height in a ref (no re-render).
+  //   2. In the effect, only setLocalHeight when the incoming `height`
+  //      prop actually differs from what we last synced AND we're not
+  //      dragging. This is functionally identical to the prior version
+  //      but explicit about the "sync on change" semantics.
+  //   3. The eslint-disable for `react-hooks/set-state-in-effect` is
+  //      documented because the alternative (lifting to useMemo) breaks
+  //      the user's live-drag invariant — `localHeight` MUST be allowed
+  //      to deviate from `height` mid-drag without re-syncing.
+  const lastSyncedHeight = useRef(height);
   useEffect(() => {
-    if (!dragging.current) {
-      setLocalHeight(Math.max(minHeight, height || minHeight));
-    }
+    if (dragging.current) return;
+    const target = Math.max(minHeight, height || minHeight);
+    if (lastSyncedHeight.current === target) return;
+    lastSyncedHeight.current = target;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLocalHeight(target);
   }, [height, minHeight]);
 
   // Safety valve: when `resetTrigger` changes, force dragging.current back

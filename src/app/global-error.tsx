@@ -127,6 +127,16 @@ export default function GlobalError({
             >
               Try again
             </button>
+            {/* Intentional `<a>` instead of next/link <Link> (audit-04-30
+              * fix #7 acknowledgement): global-error.tsx REPLACES the root
+              * layout when active. The Next.js router context is part of
+              * what crashed; using <Link> here would either fail to render
+              * or trigger a second layout-mount that crashes again. A
+              * raw <a> with `href="/"` does a full page reload, which is
+              * EXACTLY what we want here — recover from a layout crash
+              * by tearing the broken React tree down and rebooting from
+              * scratch. The lint rule doesn't know this context. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/"
               style={{
