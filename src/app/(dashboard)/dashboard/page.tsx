@@ -256,7 +256,12 @@ function DashboardContent() {
    * commits the height via `setBottomHeight`; we mirror that into
    * localStorage so the next click on a lead reopens at the same size
    * instead of resetting to BOTTOM_PANEL_DEFAULT every time. */
-  const BOTTOM_HEIGHT_STORAGE_KEY = "henri.dashboard.bottomHeight";
+  // localStorage key bumped to v2 (2026-04-30) — earlier broken drag
+  // attempts polluted some users' v1 storage with stuck-at-MIN_HEIGHT
+  // values that kept reloading the drawer at 80px. v2 starts everyone
+  // fresh at BOTTOM_PANEL_DEFAULT (420px); old v1 entries are simply
+  // ignored. Future bumps: add v3, v4, etc. — never reuse a key.
+  const BOTTOM_HEIGHT_STORAGE_KEY = "henri.dashboard.bottomHeight.v2";
   const [leftWidth, setLeftWidth] = useState(LEFT_PANEL_DEFAULT);
   const [bottomHeight, setBottomHeightState] = useState(BOTTOM_PANEL_DEFAULT);
   const [leftCollapsed, setLeftCollapsed] = useState(false);

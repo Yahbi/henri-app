@@ -500,28 +500,35 @@ export function LeadDetailDrawer({
         onKeyDown={onKeyDown}
         title="Drag to resize · double-click to toggle · arrow keys also work"
         className={cn(
-          "group flex justify-center items-center gap-2 py-2 cursor-row-resize select-none shrink-0 touch-none",
-          "border-b border-transparent hover:border-border/60 hover:bg-bg-subtle/40",
-          "focus-visible:outline-none focus-visible:bg-bg-subtle focus-visible:border-primary/40",
+          // Big, obvious drag affordance. py-3 + always-visible label and
+          // grip icon, plus a subtle primary-tinted background that gets
+          // brighter on hover. Prior implementation had opacity-0 on the
+          // label so users couldn't tell the strip was draggable; the
+          // user audit kept reporting "drag doesn't work" partly because
+          // they were clicking adjacent (non-drag) areas.
+          "group flex justify-center items-center gap-2 py-3 cursor-row-resize select-none shrink-0 touch-none",
+          "bg-bg-subtle/30 border-b border-border/40",
+          "hover:bg-primary/10 hover:border-primary/30",
+          "focus-visible:outline-none focus-visible:bg-primary/15 focus-visible:border-primary/50",
           "transition-colors",
         )}
       >
         <div
           className={cn(
-            "h-1 w-12 rounded-full bg-border",
-            "group-hover:w-16 group-hover:bg-primary/60",
+            "h-1 w-12 rounded-full bg-primary/40",
+            "group-hover:w-16 group-hover:bg-primary",
             "group-focus-visible:w-16 group-focus-visible:bg-primary",
             "transition-all",
           )}
         />
-        <div className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 text-[10px] font-medium text-foreground/70">
           <GripHorizontal className="h-3 w-3" />
           <span>Drag to resize</span>
         </div>
         <div
           className={cn(
-            "h-1 w-12 rounded-full bg-border",
-            "group-hover:w-16 group-hover:bg-primary/60",
+            "h-1 w-12 rounded-full bg-primary/40",
+            "group-hover:w-16 group-hover:bg-primary",
             "group-focus-visible:w-16 group-focus-visible:bg-primary",
             "transition-all",
           )}
