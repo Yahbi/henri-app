@@ -271,13 +271,24 @@ function DashboardContent() {
       const raw = localStorage.getItem(BOTTOM_HEIGHT_STORAGE_KEY);
       if (!raw) return;
       const n = Number(raw);
-      // Bounds match LeadDetailDrawer's MIN_HEIGHT (80) so a height saved
-      // at the floor restores correctly. Upper bound 4000 covers any
-      // monitor we might realistically see; tighter caps would silently
-      // drop legitimate values for portrait/external displays.
-      if (Number.isFinite(n) && n >= 80 && n <= 4000) {
+      // Bounds: minimum 200 (not 80) so a previously-saved tiny height
+      // from earlier broken drag-resize attempts doesn't lock the user
+      // at the MIN_HEIGHT floor. Anything below 200 falls through to
+      // BOTTOM_PANEL_DEFAULT, which the user can then drag to whatever
+      // size they want. Upper bound 4000 covers any monitor we might
+      // realistically see.
+      if (Number.isFinite(n) && n >= 200 && n <= 4000) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setBottomHeightState(n);
+      } else if (Number.isFinite(n) && n < 200) {
+        // Clear any stuck small value so it doesn't keep loading on
+        // every visit. Next user-committed height (≥200) writes a
+        // healthy value back.
+        try {
+          localStorage.removeItem(BOTTOM_HEIGHT_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
       }
     } catch {
       // ignore — fall back to default

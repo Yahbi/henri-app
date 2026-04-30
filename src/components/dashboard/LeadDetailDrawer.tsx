@@ -318,11 +318,21 @@ export function LeadDetailDrawer({
       dragging.current = true;
       startY.current = e.clientY;
       startH.current = localHeight;
+      // DIAGNOSTIC (temporary): trace mouse-down so we can see if the
+      // handler fires on click. Remove after the banner-resize bug is
+      // confirmed solved.
+
+      console.log("[drawer] onMouseDown", {
+        startY: e.clientY,
+        startH: localHeight,
+        target: (e.target as HTMLElement).tagName,
+      });
       // Closure-local: the latest height during this specific drag.
       // Read by onUp to commit to the parent without violating React's
       // no-setState-in-updater rule. Initialised to startH so a click
       // without movement still commits sensibly.
       let currentHeight = localHeight;
+      let moveCount = 0;
 
       const onMove = (ev: MouseEvent) => {
         if (!dragging.current) return;
@@ -336,6 +346,18 @@ export function LeadDetailDrawer({
         );
         currentHeight = next;
         setLocalHeight(next);
+        // DIAGNOSTIC (temporary): log every 5th move so we can confirm
+        // the move handler is firing and the height is updating.
+        moveCount += 1;
+        if (moveCount % 5 === 1) {
+
+          console.log("[drawer] onMove", {
+            clientY: ev.clientY,
+            delta,
+            next,
+            parentHeight,
+          });
+        }
       };
 
       const onUp = () => {
@@ -345,6 +367,14 @@ export function LeadDetailDrawer({
         document.removeEventListener("mouseup", onUp);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
+        // DIAGNOSTIC (temporary): trace commit so we can see what value
+        // is being persisted.
+
+        console.log("[drawer] onUp commit", {
+          currentHeight,
+          moveCount,
+          finalCommitted: Math.max(MIN_HEIGHT, currentHeight),
+        });
         // Commit OUTSIDE of any state-updater — straight call to the
         // parent's setBottomHeight (which writes to localStorage).
         onHeightChange(Math.max(MIN_HEIGHT, currentHeight));
