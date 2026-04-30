@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe/client";
 import { logApiError } from "@/lib/log";
 import { ChangePlanBodySchema, parseBody } from "@/lib/schemas/api";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* Schema lives in `src/lib/schemas/api.ts` (`ChangePlanBodySchema`) so
  * every request body across the API surface goes through the same
@@ -49,10 +50,9 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     const { data: profile } = await supabase
       .from("profiles")

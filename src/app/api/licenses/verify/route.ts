@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /**
  * POST /api/licenses/verify
@@ -20,10 +21,10 @@ import { logApiError } from "@/lib/log";
 export async function POST(_req: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    /* Audit-04-29: was bare auth.getUser() — now contractor-gated. */
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     // Read whatever license-related columns exist on the profile. `select("*")`
     // is fine here because the caller is self-scoped by eq("id", user.id),

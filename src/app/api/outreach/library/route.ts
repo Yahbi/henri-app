@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
 import { logApiError } from "@/lib/log";
+import {
+  OutreachLibraryCopyBodySchema,
+  parseBody,
+} from "@/lib/schemas/api";
 
 /**
  * /api/outreach/library — Phase 0a wedge #10.
@@ -58,10 +62,10 @@ export async function POST(request: NextRequest) {
     const gate = await requireContractor(supabase);
     if (gate.response) return gate.response;
 
-    const body = (await request.json()) as { template_id?: string; rename?: string };
-    if (!body?.template_id) {
-      return NextResponse.json({ error: "template_id is required" }, { status: 400 });
-    }
+    const raw = await request.json().catch(() => ({}));
+    const parsed = parseBody(OutreachLibraryCopyBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const body = parsed.data;
 
     // Read the library row.
     const { data: lib, error: libErr } = await supabase

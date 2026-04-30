@@ -4,6 +4,7 @@ import { sendEstimateEmail } from "@/lib/resend/estimate-email";
 import { hasResend } from "@/lib/env";
 import { logApiError } from "@/lib/log";
 import { EstimateCreateBodySchema, parseBody } from "@/lib/schemas/api";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* ─── GET /api/estimates — list estimates for authenticated contractor ─── */
 export async function GET(request: NextRequest) {
@@ -62,28 +63,12 @@ export async function GET(request: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    /* Verify the user is a contractor */
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role !== "contractor") {
-      return NextResponse.json(
-        { error: "Only contractors can create estimates" },
-        { status: 403 }
-      );
-    }
+    /* requireContractor centralizes the auth + role-gate. Replaces the
+     * previous inline `auth.getUser()` + manual `profile.role !== "contractor"`
+     * check that lived in this handler before audit-04-29. */
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     const raw = await req.json();
     const parsed = parseBody(EstimateCreateBodySchema, raw);

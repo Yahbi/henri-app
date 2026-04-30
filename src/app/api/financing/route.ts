@@ -2,34 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { FinancingAttachBodySchema, parseBody } from "@/lib/schemas/api";
 import { logger } from "@/lib/logger";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* ─── GET /api/financing — financing stats & recent deals for contractor ─── */
 export async function GET(_request: NextRequest) {
   try {
     const supabase = await createClient();
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    /* Verify contractor role */
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role !== "contractor") {
-      return NextResponse.json(
-        { error: "Contractor access only" },
-        { status: 403 }
-      );
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     /* Fetch all quotes for this contractor.
      * Quotes store amount in one of three JSONB tier columns (tier_good,
@@ -146,29 +127,9 @@ export async function GET(_request: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    /* Verify contractor role */
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role !== "contractor") {
-      return NextResponse.json(
-        { error: "Contractor access only" },
-        { status: 403 }
-      );
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     const raw = await req.json();
     const parsed = parseBody(FinancingAttachBodySchema, raw);

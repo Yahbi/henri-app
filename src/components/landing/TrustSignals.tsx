@@ -105,8 +105,8 @@ export function TrustSignals() {
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
             <span>
-              <span className="font-semibold text-foreground">Google OAuth</span>{" "}
-              only — no passwords to leak
+              <span className="font-semibold text-foreground">Passwordless</span>{" "}
+              sign-in — no passwords to leak
             </span>
           </div>
           <span aria-hidden="true" className="hidden h-4 w-px bg-border sm:block" />

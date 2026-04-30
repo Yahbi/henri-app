@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createBillingPortalSession } from "@/lib/stripe/client";
 import { logApiError } from "@/lib/log";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /**
  * POST /api/billing/portal
@@ -24,10 +25,9 @@ import { logApiError } from "@/lib/log";
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     const { data: profile } = await supabase
       .from("profiles")

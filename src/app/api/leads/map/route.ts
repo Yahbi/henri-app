@@ -17,6 +17,7 @@ import { logger } from "@/lib/logger";
 import { hasSupabase } from "@/lib/env";
 import { isGodModeEmail, GOD_MODE_MAP_LIMIT } from "@/lib/auth/god-mode";
 import { fetchAllTerritoryZips } from "@/lib/territories/fetch-all";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 export const runtime = "nodejs";
 
@@ -33,15 +34,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const supabase = await createClient();
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     /* ── Parse query params ────────────────────────────────────────────── */
     const { searchParams } = new URL(request.url);

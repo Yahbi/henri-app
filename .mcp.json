@@ -21,15 +21,15 @@
   ],
   "mcpServers": {
     "supabase": {
+      "_comment": "Project ref is ivfxylgoxgrxttknewsf (public — it's in every Supabase URL). Token is sourced from $SUPABASE_ACCESS_TOKEN at runtime; set it via [Environment]::SetEnvironmentVariable('SUPABASE_ACCESS_TOKEN', 'sbp_...', 'User') in PowerShell, then restart Claude Code so the env propagates. --read-only removed 2026-04-29 so apply_migration + execute_sql work for ops; flip back to read-only if you want a stricter mode for daily work.",
       "command": "npx",
       "args": [
         "-y",
         "@supabase/mcp-server-supabase@latest",
-        "--read-only",
-        "--project-ref=<project-ref>"
+        "--project-ref=ivfxylgoxgrxttknewsf"
       ],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "<personal-access-token>"
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
       }
     },
     "resend": {

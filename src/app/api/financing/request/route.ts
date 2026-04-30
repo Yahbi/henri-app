@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
 import { FinancingRequestBodySchema, parseBody } from "@/lib/schemas/api";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /**
  * POST /api/financing/request
@@ -26,10 +27,9 @@ export async function POST(req: NextRequest) {
     const { lead_id: leadId, partner, partner_url: partnerUrl } = parsed.data;
 
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     // Verify the lead belongs to this contractor before logging anything.
     const { data: lead } = await supabase

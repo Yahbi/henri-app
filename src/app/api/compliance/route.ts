@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllTerritories } from "@/lib/territories/fetch-all";
 import { logger } from "@/lib/logger";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* ─── Helpers ─── */
 
@@ -97,15 +98,9 @@ function computeComplianceScore(
 export async function GET() {
   try {
     const supabase = await createClient();
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     // Fetch license data from contractor_licenses
     const { data: licenseRows, error: licenseError } = await supabase
@@ -211,15 +206,9 @@ export async function GET() {
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     const body = await request.json();
     const { license_number, license_state, license_type, license_expiry } =

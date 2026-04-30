@@ -333,6 +333,114 @@ export const QuotePatchBodySchema = z
   .strict();
 export type QuotePatchBody = z.infer<typeof QuotePatchBodySchema>;
 
+/* ── Audit-04-29 fixes — Zod schemas for the 9 unvalidated body POSTs ── */
+//
+// All 9 POST handlers below previously read `body as { … }` with no schema,
+// so a malformed payload fell through to ad-hoc null/length checks at best.
+// Each schema below caps free-text / arrays / number ranges so a malicious
+// caller can't pump 100KB junk into a downstream Resend / Twilio / RPC call,
+// and rejects unknown keys via .strict() where the route reads a fixed set.
+
+/* ── POST /api/homeowner/maintenance — toggle a maintenance task ── */
+// task_id is a slug from a static homeowner-portal task list, not a UUID,
+// so accept any short non-empty string.
+export const HomeownerMaintenanceBodySchema = z.object({
+  task_id: z.string().min(1, "task_id required").max(120),
+  completed: z.boolean().optional(),
+});
+export type HomeownerMaintenanceBody = z.infer<
+  typeof HomeownerMaintenanceBodySchema
+>;
+
+/* ── POST /api/homeowner/messages — append homeowner-side message ── */
+// `message` is concatenated into a leads.notes line — cap to keep the
+// notes column from ballooning past Postgres TOAST limits and to discourage
+// injection of large prompt-style payloads.
+export const HomeownerMessageBodySchema = z.object({
+  lead_id: UuidSchema,
+  message: z.string().min(1, "message required").max(4000),
+});
+export type HomeownerMessageBody = z.infer<typeof HomeownerMessageBodySchema>;
+
+/* ── POST /api/outreach/library — clone a library template ── */
+export const OutreachLibraryCopyBodySchema = z.object({
+  template_id: UuidSchema,
+  // The clone-rename optionally lets the contractor name the local copy.
+  rename: z.string().max(120).optional(),
+});
+export type OutreachLibraryCopyBody = z.infer<
+  typeof OutreachLibraryCopyBodySchema
+>;
+
+/* ── POST /api/outreach — queue a new outreach message ── */
+// Body cap: 4000 chars matches MessageSendBodySchema (Twilio multipart
+// SMS ceiling is 1600; email body cap mirrors leads.notes max).
+export const OutreachQueueBodySchema = z.object({
+  lead_id: UuidSchema,
+  channel: z.enum(["sms", "email"]),
+  message: z.string().min(1, "message required").max(4000),
+  template_name: z.string().max(120).optional(),
+});
+export type OutreachQueueBody = z.infer<typeof OutreachQueueBodySchema>;
+
+/* ── POST /api/referrals/invite — send a referral invite email ── */
+const ReferralTypeSchema = z.enum(["contractor", "homeowner"]);
+export const ReferralInviteBodySchema = z.object({
+  email: EmailSchema,
+  type: ReferralTypeSchema.optional(),
+});
+export type ReferralInviteBody = z.infer<typeof ReferralInviteBodySchema>;
+
+/* ── POST /api/referrals — record an invite (email + name) ── */
+export const ReferralCreateBodySchema = z.object({
+  email: EmailSchema,
+  name: z.string().max(120).optional(),
+  type: ReferralTypeSchema.optional(),
+});
+export type ReferralCreateBody = z.infer<typeof ReferralCreateBodySchema>;
+
+/* ── POST /api/referrals/validate — process referral signup ── */
+// `code` matches the HENRI-XXXXXX format created by the get_or_create_
+// referral_code RPC; we accept any reasonable length range to be lenient
+// to format changes. role narrows to the two real values.
+export const ReferralValidateBodySchema = z.object({
+  code: z.string().min(3).max(60),
+  userId: UuidSchema,
+  email: EmailSchema,
+  role: z.enum(["contractor", "homeowner"]).optional(),
+});
+export type ReferralValidateBody = z.infer<typeof ReferralValidateBodySchema>;
+
+/* ── POST /api/reviews/request — contractor sends a review request ── */
+// Either email OR phone is needed depending on channel; route enforces
+// that constraint after parsing. Caps mirror MessageSendBodySchema.
+export const ReviewRequestBodySchema = z.object({
+  lead_id: UuidSchema.optional(),
+  customer_name: z.string().min(1, "customer_name required").max(120),
+  customer_email: EmailSchema.optional(),
+  customer_phone: PhoneSchema,
+  channel: z.enum(["email", "sms"]),
+});
+export type ReviewRequestBody = z.infer<typeof ReviewRequestBodySchema>;
+
+/* ── POST /api/reviews — submit a review ── */
+// Public-facing endpoint (token-or-auth) — caps prevent prompt-injection
+// vectors flowing into the AI response generator and keep emailed bodies
+// within Resend limits.
+export const ReviewSubmitBodySchema = z.object({
+  // Token is any opaque short string when present; `contractor_id` is
+  // ALWAYS required (the route uses it to look up the right contractor
+  // even on the unauthenticated token path).
+  contractor_id: UuidSchema,
+  rating: z.number().int().min(1).max(5),
+  reviewer_name: z.string().min(1, "reviewer_name required").max(120),
+  reviewer_email: EmailSchema.optional(),
+  title: z.string().max(160).optional(),
+  body: z.string().max(4000).optional(),
+  token: z.string().max(120).optional(),
+});
+export type ReviewSubmitBody = z.infer<typeof ReviewSubmitBodySchema>;
+
 /* ── PATCH /api/profile/notifications — boolean prefs only ── */
 export const NotificationPrefsPatchBodySchema = z
   .object({

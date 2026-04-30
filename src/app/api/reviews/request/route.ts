@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
+import { ReviewRequestBodySchema, parseBody } from "@/lib/schemas/api";
 
 /* ─── POST /api/reviews/request — contractor sends a review request ─── */
 export async function POST(req: NextRequest) {
@@ -29,42 +30,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
+    const raw = await req.json().catch(() => ({}));
+    const parsed = parseBody(ReviewRequestBodySchema, raw);
+    if (parsed.response) return parsed.response;
     const {
       lead_id,
       customer_name,
       customer_email,
       customer_phone,
       channel,
-    } = body as {
-      lead_id?: string;
-      customer_name?: string;
-      customer_email?: string;
-      customer_phone?: string;
-      channel?: "email" | "sms";
-    };
+    } = parsed.data;
 
-    if (!customer_name) {
-      return NextResponse.json(
-        { error: "customer_name is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!channel || (channel !== "email" && channel !== "sms")) {
-      return NextResponse.json(
-        { error: "channel must be 'email' or 'sms'" },
-        { status: 400 }
-      );
-    }
-
+    // Schema validates shape; the email/phone-presence-per-channel rule
+    // is a cross-field constraint enforced here so the schema stays simple.
     if (channel === "email" && !customer_email) {
       return NextResponse.json(
         { error: "customer_email is required for email channel" },
         { status: 400 }
       );
     }
-
     if (channel === "sms" && !customer_phone) {
       return NextResponse.json(
         { error: "customer_phone is required for sms channel" },

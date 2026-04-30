@@ -1,18 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllTerritoryZips } from "@/lib/territories/fetch-all";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* ─── GET /api/intelligence — aggregated permit + lead data for ROI Intelligence page ─── */
 export async function GET() {
   const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const gate = await requireContractor(supabase);
+  if (gate.response) return gate.response;
+  const user = gate.user;
 
   /* Get contractor's territories (paginated — PostgREST silently caps
    * unbounded .select() at 1000 rows; founder has 5,601). */

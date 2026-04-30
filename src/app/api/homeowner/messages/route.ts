@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
+import { HomeownerMessageBodySchema, parseBody } from "@/lib/schemas/api";
 
 /**
  * Homeowner-side message thread endpoint.
@@ -127,17 +128,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await request.json().catch(() => ({}))) as {
-      lead_id?: string;
-      message?: string;
-    };
-
-    if (!body.lead_id || !body.message?.trim()) {
-      return NextResponse.json(
-        { error: "lead_id and message are required" },
-        { status: 400 },
-      );
-    }
+    const raw = await request.json().catch(() => ({}));
+    const parsed = parseBody(HomeownerMessageBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const body = parsed.data;
 
     // Access gate — the homeowner must own an intake that matched this lead.
     const { data: intake } = await supabase

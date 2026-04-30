@@ -12,7 +12,7 @@
 - Primary color: `#D4886A` (darker terracotta). Never use `#E8916A`.
 - Typography: Fraunces (serif, `font-heading font-normal`) for headings. DM Sans for body. Never use `font-bold` on Fraunces headings.
 - No emojis anywhere in code, copy, logs, or UI. Use SVG icons (lucide-react) or text labels.
-- Google OAuth only. No GitHub, no Apple.
+- **Passwordless sign-in only.** Two providers: Google OAuth + magic-link email (Supabase Email OTP). No GitHub, no Apple, no passwords stored. Brand rule amended 2026-04-29 (Pro upgrade enabled email OTP) to unblock contractors on Outlook / Yahoo / corporate email — preserves the "no passwords to leak" trust posture. Login + signup forms wire both paths via `supabase.auth.signInWithOAuth({provider: "google"})` and `supabase.auth.signInWithOtp({email})`. Both flows route through `/auth/callback` (`exchangeCodeForSession` handles OAuth codes and OTP codes identically).
 - All components ship from `@/components/ui/*` primitives (Button, Card, Dialog, Input, Select, Badge, Skeleton, Toast, FocusTrap, ExpandableBanner). Never re-implement from scratch.
 
 ## Pricing (source of truth)
@@ -49,7 +49,7 @@
 ## Wedge contract (Phase 0a+ — the reason contractors pick Henri)
 1. **Exclusivity is enforced on the enriched packet, not the data.** Public permit records stay public. Henri gates contact info + scored urgency + outreach bundle. One contractor per permit per trade for a 14-day window (migration `00031`). Auto-release after 72h of no outreach logged ("use-it-or-lose-it").
 2. **Confidence is transparent.** Never hide why a lead scored 65 vs 85. The 6 score signals (`permit_freshness`, `permit_value`, `contact_completeness`, `zip_demand`, `homeowner_engagement`, `historical_conversion`) render in the drawer with their weights, values, and detail reasons.
-3. **Capacity is respected.** Contractor sets radius / value band / start window / max-active-jobs in Settings → Capacity. Out-of-envelope leads are hidden from the Leads tab with a clear "N filtered out, widen to see" counter. Never silently drop rows.
+3. **Capacity is respected.** Contractor sets radius / value band / start window / max-active-jobs in Settings → Capacity. Out-of-envelope leads are hidden from the Leads tab with a clear "N filtered out, widen to see" counter. Never silently drop rows. *Phase 0a — only `value_min` / `value_max` are enforced client-side (`src/lib/capacity/types.ts`).* The radius / start-window / max-active-jobs filters land in **Phase A**, when the scorer applies them server-side and the lead shape carries `miles_from_home`, `est_start_date`, and the contractor active-jobs count is plumbed through. The "N filtered out" counter is mandatory **regardless of which dimensions are active** — never silently drop rows.
 4. **Outreach is permit-specific.** Templates reference the actual permit # + scope + address. Generic spam templates get removed.
 5. **Speed-to-lead is mechanical.** Missed-call text-back via Twilio fires within 10s. Auto-fire outreach-on-lead-create is opt-in per contractor.
 6. **Competitive intel is coarse.** "N other contractors are watching this permit" shows a bucketed count (`1-2`, `3-5`, `5+`), never names. Discourages racing.
@@ -231,7 +231,31 @@ Installed via `npx claude-code-templates@latest` to close audit gaps. Lives unde
 - All Azure / Microsoft / Shopify / Flutter / iOS / mobile / Kubernetes / Terraform / GraphQL items
 - Any neon-* / mongodb / redis / power-bi / snowflake (Henri is pure Postgres/Supabase)
 
-**Hooks status** (2026-04-27 mid-session): the claude-code-templates install shipped 4 Vercel bash hooks (`vercel-environment-sync`, `vercel-auto-deploy`, etc.) with broken single-quote escaping that fired a syntax error on EVERY `Edit` call, blocking every edit. Stripped them out via `python -c json.del('hooks')` and re-added only the 2 working Python hooks (`secret-scanner.py`, `dangerous-command-blocker.py`). If you ever re-install Vercel hooks via `claude-code-templates`, double-check the `bash -c 'INNER'` quoting before they reach `.claude/settings.local.json`.
+## Supabase plan + accepted-risk findings (2026-04-29)
+
+Henri is on **Free plan** as of 2026-04-29. Live data: 1.4M permits + 165K leads → **~3-4 GB DB**, exceeding Free's 500 MB ceiling. Grace period ends 26 May 2026; **Pro upgrade ($25/mo) required by then**.
+
+**Pro-gated security features deferred until upgrade:**
+- `auth_leaked_password_protection` (HaveIBeenPwned check on signup) — Pro-only. Toggle returns "Configuring leaked password protection via HaveIBeenPwned.org is available on Pro Plans and up." Documented as accepted-risk WARN until upgrade.
+
+**Extension-owned advisor findings (cannot fix without superuser):**
+- `spatial_ref_sys` RLS disabled (PostGIS reference table, no PII)
+- `st_estimatedextent(...)` 3 PostGIS variants (SECURITY DEFINER, anon/authenticated callable)
+
+**Intentional design (documented in 00059/00060 migrations):**
+- `claim_territory`, `release_territory`, `get_or_create_referral_code` — SECURITY DEFINER, EXECUTE granted to authenticated only. Called from authenticated app routes; intentional.
+- `get_zip_availability` — SECURITY DEFINER, EXECUTE allowed for anon (public ZIP-availability widget on `/portal`).
+- `intakes_insert_anon` / `reviews_insert` policies use `WITH CHECK (true)` — public homeowner intake + token-based review submission. Mitigated by app-layer rate limiter in `/api/intake` (5/hr/IP) + token validation in `/api/reviews`.
+- `ppp_loans`, `voter_fl/nc/oh` RLS-enabled-no-policy — service-role cron writes only, no policy-gated reads needed (service-role bypasses RLS).
+
+**Migrations 00056–00060 (audit-04-29):**
+- 00056: `cost_benchmarks` RLS hole (CRITICAL — closed)
+- 00057: `zip_demand_scores` RLS hole + 2 functions with mutable search_path (CRITICAL/HYGIENE — closed)
+- 00058: Initial SECURITY DEFINER role-revokes (superseded by 00059)
+- 00059: Real fix — REVOKE EXECUTE FROM PUBLIC + GRANT to authenticated (closed 7 functions)
+- 00060: Lock `contractor_leaderboard` materialized view to service-role
+
+## Hooks status (2026-04-27 mid-session): the claude-code-templates install shipped 4 Vercel bash hooks (`vercel-environment-sync`, `vercel-auto-deploy`, etc.) with broken single-quote escaping that fired a syntax error on EVERY `Edit` call, blocking every edit. Stripped them out via `python -c json.del('hooks')` and re-added only the 2 working Python hooks (`secret-scanner.py`, `dangerous-command-blocker.py`). If you ever re-install Vercel hooks via `claude-code-templates`, double-check the `bash -c 'INNER'` quoting before they reach `.claude/settings.local.json`.
 
 ## Karpathy guidelines + ECC install (2026-04-27)
 

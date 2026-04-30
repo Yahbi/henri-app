@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createCheckoutSession, getStripe } from "@/lib/stripe/client";
 import { CheckoutBodySchema, parseBody } from "@/lib/schemas/api";
 import { logApiError } from "@/lib/log";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* Plan → Stripe Price ID mapping (set STRIPE_*_PRICE_ID in your environment) */
 const PLAN_PRICES: Record<string, string> = {
@@ -25,8 +26,9 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     /* Get or create Stripe customer ID */
     const { data: profile } = await supabase

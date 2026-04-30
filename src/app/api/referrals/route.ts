@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
+import { ReferralCreateBodySchema, parseBody } from "@/lib/schemas/api";
 
 /* ─── GET /api/referrals — list my referrals + stats ─── */
 export async function GET() {
@@ -69,16 +70,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await req.json();
-  const { email, name, type } = body as {
-    email?: string;
-    name?: string;
-    type?: "contractor" | "homeowner";
-  };
-
-  if (!email || !email.includes("@")) {
-    return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = parseBody(ReferralCreateBodySchema, raw);
+  if (parsed.response) return parsed.response;
+  const { email, name, type } = parsed.data;
 
   /* Check for existing referral to this email */
   const { data: existing } = await supabase

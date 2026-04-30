@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* ── Types ── */
 
@@ -78,14 +79,9 @@ export async function GET(
   try {
     const { id } = await params;
     const supabase = await createClient();
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     /* Verify ownership of the lead */
     const { data: lead, error: leadErr } = await supabase

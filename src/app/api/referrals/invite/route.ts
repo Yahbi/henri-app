@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
+import { ReferralInviteBodySchema, parseBody } from "@/lib/schemas/api";
 
 /* ─── POST /api/referrals/invite — send referral invite email ─── */
 export async function POST(req: Request) {
@@ -14,12 +15,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await req.json();
-  const { email, type } = body as { email?: string; type?: "contractor" | "homeowner" };
-
-  if (!email || !email.includes("@")) {
-    return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
-  }
+  const raw = await req.json().catch(() => ({}));
+  const parsed = parseBody(ReferralInviteBodySchema, raw);
+  if (parsed.response) return parsed.response;
+  const { email, type } = parsed.data;
 
   /* Get referral code */
   const { data: codeResult } = await supabase.rpc("get_or_create_referral_code", {

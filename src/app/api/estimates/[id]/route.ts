@@ -4,6 +4,7 @@ import { sendEstimateEmail } from "@/lib/resend/estimate-email";
 import { hasResend } from "@/lib/env";
 import { EstimatePatchBodySchema, parseBody } from "@/lib/schemas/api";
 import { logger } from "@/lib/logger";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* ─── GET /api/estimates/[id] — single estimate detail ─── */
 export async function GET(
@@ -71,14 +72,13 @@ export async function PATCH(
   try {
     const { id } = await params;
     const supabase = await createClient();
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    /* PATCH is contractor-only (homeowner uses /api/quotes/[id] PATCH for
+     * tier-selection). Replace the bare auth.getUser() with the role gate
+     * so a homeowner session probing this route gets a 403 instead of a
+     * 404-after-row-lookup. */
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     /* Fetch the existing estimate — must belong to this contractor */
     const { data: existing, error: fetchErr } = await supabase

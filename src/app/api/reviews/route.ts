@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { generateResponseDraft } from "@/lib/reviews/response-generator";
 import { logger } from "@/lib/logger";
+import { ReviewSubmitBodySchema, parseBody } from "@/lib/schemas/api";
 
 /* ─── GET /api/reviews — list reviews for a contractor (public) ─── */
 export async function GET(request: NextRequest) {
@@ -81,7 +82,9 @@ function detectSentiment(
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const raw = await req.json().catch(() => ({}));
+    const parsed = parseBody(ReviewSubmitBodySchema, raw);
+    if (parsed.response) return parsed.response;
     const {
       token,
       contractor_id,
@@ -90,29 +93,7 @@ export async function POST(req: NextRequest) {
       body: reviewBody,
       reviewer_name,
       reviewer_email,
-    } = body as {
-      token?: string;
-      contractor_id?: string;
-      rating?: number;
-      title?: string;
-      body?: string;
-      reviewer_name?: string;
-      reviewer_email?: string;
-    };
-
-    if (!contractor_id || !rating || !reviewer_name) {
-      return NextResponse.json(
-        { error: "contractor_id, rating, and reviewer_name are required" },
-        { status: 400 }
-      );
-    }
-
-    if (rating < 1 || rating > 5) {
-      return NextResponse.json(
-        { error: "Rating must be between 1 and 5" },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     const adminSupabase = createAdminClient();
     let reviewRequestId: string | null = null;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /**
  * POST /api/compliance/verify
@@ -17,10 +18,13 @@ import { logApiError } from "@/lib/log";
 export async function POST(_req: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    /* Audit-04-29: was bare auth.getUser() — now contractor-gated. The
+     * route reads contractor-scoped license + lead data so a homeowner
+     * session probing this endpoint should get a 403, not a noisy
+     * empty-result 200. */
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     // 1. License check — read profile + (if licensed_until column exists)
     // decide whether leads should be paused.

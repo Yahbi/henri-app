@@ -1,34 +1,55 @@
 ---
-description: Apply all pending Supabase migrations using the CLI, with a pasteable fallback.
+description: Apply all pending Supabase migrations. Tries CLI / RPC / bundle paste, in that order.
 ---
 
 You are about to apply any pending migrations in `supabase/migrations/` to the Henri Supabase project (`ivfxylgoxgrxttknewsf`).
 
-## Preconditions
-1. Supabase CLI must be installed (`supabase --version` should print a semver). If missing, run:
-   - `npm install -g supabase` (preferred), or
-   - `scoop install supabase` (Windows)
-2. `SUPABASE_ACCESS_TOKEN` must exist in the environment (not in `.env.local` — that's a project secret, the CLI uses your personal token). If missing, print:
-   ```
-   Generate a personal token at https://app.supabase.com/account/tokens and run:
-     setx SUPABASE_ACCESS_TOKEN <token>
-   Then re-run `/migrate`.
-   ```
-3. `DATABASE_URL` from the Supabase dashboard → Project Settings → Database → URI (direct, not pooler) should be available; otherwise fall back to the CLI's `--linked` mode.
+## Preferred path: `pnpm migrate`
 
-## Steps
-1. Run `npx --yes supabase@latest link --project-ref ivfxylgoxgrxttknewsf` if the project isn't already linked.
-2. Run `npx --yes supabase@latest db push` to apply every migration in `supabase/migrations/` that hasn't been applied yet.
-3. Run `npx tsx scripts/audit-desktop-sync.ts` to confirm row counts are intact and RLS hasn't broken anything.
-4. If any migration fails, DO NOT retry blindly. Show the error, diagnose, and ask the user whether to fix-forward or roll back the broken file.
+```
+pnpm migrate
+```
 
-## Fallback (no CLI / no token)
-Print the clickable link https://app.supabase.com/project/ivfxylgoxgrxttknewsf/sql/new and the full contents of every `.sql` file in `supabase/migrations/` that isn't already in the schema (cross-reference by filename against `supabase_migrations.schema_migrations` if queryable).
+This runs `scripts/apply-pending-migrations.ts`, which:
+1. Probes each migration's expected columns/tables via PostgREST.
+2. Lists which are applied vs pending.
+3. Tries to apply pending migrations via the `exec_sql(text)` RPC if exposed.
+4. Falls back to writing a single combined SQL file at `supabase/_pending-bundle.sql` for copy-paste into the Supabase SQL editor.
+
+The script is idempotent. Re-running is safe. All migrations use `IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` so partial state is recoverable.
+
+## Fallback path 1: Supabase CLI + access token
+
+Required if the RPC isn't available AND you want automation:
+
+```
+# One-time setup
+npm install -g supabase
+setx SUPABASE_ACCESS_TOKEN <your-personal-token-from-https://app.supabase.com/account/tokens>
+
+# Apply
+npx --yes supabase@latest link --project-ref ivfxylgoxgrxttknewsf
+npx --yes supabase@latest db push
+```
+
+## Fallback path 2: Web SQL editor (always works)
+
+If `pnpm migrate` printed the bundle path:
+
+1. Open <https://app.supabase.com/project/ivfxylgoxgrxttknewsf/sql/new>
+2. Paste the contents of `supabase/_pending-bundle.sql`
+3. Click **Run**
+4. Re-run `pnpm migrate` to verify all green
 
 ## Verification
-After a successful apply, confirm each new table exists:
-```
-npx tsx -e "import {createClient} from '@supabase/supabase-js'; import * as dotenv from 'dotenv'; dotenv.config({path:'.env.local'}); const s=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!); for (const t of ['lead_exclusivity_locks','permit_events','missed_call_events','feedback']) { const {error}=await s.from(t).select('id',{head:true,count:'estimated'}); console.log(t, error?.message ?? 'ok'); }"
-```
 
-Report which tables landed and which the fallback path still needs pasted manually.
+After apply, the script re-probes the schema. You should see all migrations marked "applied" — except `00043_enrich_indexes` which always reports "PENDING" (CREATE INDEX is not directly observable via PostgREST; trust the apply).
+
+## When migrations fail
+
+Do NOT retry blindly. The script will print which migration failed and why. Read the error, fix-forward the SQL, re-run. Common causes:
+- New migration references a column that doesn't exist yet (out-of-order)
+- New migration's `CREATE TABLE` is missing `IF NOT EXISTS`
+- An older migration's idempotency was broken by a manual edit in the web editor
+
+Show the error to the user and ask whether to fix-forward or roll back the file before re-running.

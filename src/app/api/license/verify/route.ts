@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { verifyLicense } from "@/lib/license/verify";
 import { LicenseVerifyBodySchema, parseBody } from "@/lib/schemas/api";
 import { logger } from "@/lib/logger";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* POST /api/license/verify — verify a contractor license */
 export async function POST(req: NextRequest) {
@@ -13,8 +14,9 @@ export async function POST(req: NextRequest) {
     const { license_number, state, license_type, holder_name } = parsed.data;
 
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     // Attempt verification
     const result = await verifyLicense(license_number, state, license_type);

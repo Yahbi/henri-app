@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
 import { EstimateSendBodySchema, parseBody } from "@/lib/schemas/api";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /**
  * POST /api/estimates/send
@@ -28,10 +29,9 @@ export async function POST(req: NextRequest) {
     const { estimate_id: estimateId, to_email: toEmail, message } = parsed.data;
 
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
 
     const { data: estimate, error: estErr } = await supabase
       .from("estimates")

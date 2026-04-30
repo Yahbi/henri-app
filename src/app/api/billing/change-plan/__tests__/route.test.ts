@@ -76,10 +76,24 @@ beforeEach(() => {
   // captures them. Don't re-set here — that would mask the test below
   // that asserts the missing-price-id 400.
 
-  // Default: authenticated, has Stripe customer + active sub on Pro
-  mockGetUser.mockResolvedValue({ data: { user: { id: "user-123" } } });
+  // Default: authenticated, has Stripe customer + active sub on Pro.
+  //
+  // Audit-04-29: the route now uses `requireContractor()` which does its
+  // own `.from("profiles").select("role")` lookup BEFORE the route reads
+  // stripe_customer_id. Both lookups land on this single mocked .single()
+  // return — including `role: "contractor"` here lets the gate pass and
+  // the handler still picks up stripe_customer_id from the same object.
+  mockGetUser.mockResolvedValue({
+    data: { user: { id: "user-123" } },
+    error: null,
+  });
   mockSingle.mockResolvedValue({
-    data: { stripe_customer_id: "cus_abc", plan: "pro" },
+    data: {
+      role: "contractor",
+      stripe_customer_id: "cus_abc",
+      plan: "pro",
+    },
+    error: null,
   });
   mockSubscriptionsList.mockResolvedValue({
     data: [
@@ -99,7 +113,7 @@ beforeEach(() => {
 
 describe("Billing change-plan (P0-9)", () => {
   it("rejects unauthenticated requests with 401", async () => {
-    mockGetUser.mockResolvedValue({ data: { user: null } });
+    mockGetUser.mockResolvedValue({ data: { user: null }, error: null });
     const res = await POST(makeRequest({ plan: "starter" }));
     expect(res.status).toBe(401);
   });
@@ -110,7 +124,13 @@ describe("Billing change-plan (P0-9)", () => {
   });
 
   it("rejects when contractor has no Stripe customer (must checkout first)", async () => {
-    mockSingle.mockResolvedValue({ data: { stripe_customer_id: null, plan: "founder" } });
+    /* Both requireContractor + the handler read .single() — keep role:
+     * "contractor" so the gate passes; null stripe_customer_id triggers
+     * the route's own 400. */
+    mockSingle.mockResolvedValue({
+      data: { role: "contractor", stripe_customer_id: null, plan: "founder" },
+      error: null,
+    });
     const res = await POST(makeRequest({ plan: "starter" }));
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -145,7 +165,14 @@ describe("Billing change-plan (P0-9)", () => {
   });
 
   it("UPGRADE founder→pro applies immediately with prorations", async () => {
-    mockSingle.mockResolvedValue({ data: { stripe_customer_id: "cus_abc", plan: "founder" } });
+    mockSingle.mockResolvedValue({
+      data: {
+        role: "contractor",
+        stripe_customer_id: "cus_abc",
+        plan: "founder",
+      },
+      error: null,
+    });
     const res = await POST(makeRequest({ plan: "pro" }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { upgraded?: boolean; plan?: string };

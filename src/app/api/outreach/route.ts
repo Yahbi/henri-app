@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
+import { OutreachQueueBodySchema, parseBody } from "@/lib/schemas/api";
 
 /* ─── GET /api/outreach — outreach history + stats for the current contractor ─── */
 export async function GET() {
@@ -129,27 +130,10 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { lead_id, channel, template_name, message } = body as {
-      lead_id?: string;
-      channel?: string;
-      template_name?: string;
-      message?: string;
-    };
-
-    if (!lead_id || !channel || !message) {
-      return Response.json(
-        { error: "lead_id, channel, and message are required" },
-        { status: 400 }
-      );
-    }
-
-    if (!["sms", "email"].includes(channel)) {
-      return Response.json(
-        { error: "channel must be 'sms' or 'email'" },
-        { status: 400 }
-      );
-    }
+    const raw = await request.json().catch(() => ({}));
+    const parsed = parseBody(OutreachQueueBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { lead_id, channel, template_name, message } = parsed.data;
 
     /* Look up lead to get recipient info */
     const { data: lead, error: leadErr } = await supabase

@@ -13,7 +13,7 @@ import {
   applyContractorScope,
   applyLeadFilters,
   applyLeadSort,
-  dedupRowsById,
+  mapRowsToLeads,
 } from "./useLeads.helpers";
 
 const LEADS_KEY = "leads";
@@ -38,58 +38,10 @@ const LEADS_KEY = "leads";
  *  probe on subsequent fetches in this page load. Reset by full reload. */
 let extendedColumnsMissing = false;
 
-/* ── Row → Lead mapping ──
- *
- * Extracted so the progressive-paint path (multi-page god-mode pulls)
- * can map each page's rows incrementally and write them to the React
- * Query cache before subsequent pages land. Pure function — no I/O. */
-function mapRowsToLeads(rows: Record<string, unknown>[]): Lead[] {
-  const deduped = dedupRowsById(rows);
-  return deduped.map((row: Record<string, unknown>) => {
-    const permit = row.permits as Record<string, unknown> | null;
-    return {
-      ...row,
-      address:
-        (row.address as string | null) ??
-        (permit?.address as string | null) ??
-        (row.mailing_address as string | null) ??
-        "Unknown",
-      city: (row.city as string | null) ?? (permit?.city as string | null),
-      state: (row.state as string | null) ?? (permit?.state as string | null),
-      zip:
-        (row.zip as string | null) ??
-        (permit?.zip as string | null) ??
-        "",
-      permit_type:
-        (row.permit_type as string | null) ??
-        (permit?.permit_type as string | null),
-      permit_description: permit?.description, // not denormalized; loads via usePermitDetail in drawer
-      permit_value:
-        (row.permit_value as number | null) ??
-        (permit?.estimated_value as number | null),
-      permit_filed_date:
-        (permit?.applied_date as string | null) ??
-        (permit?.issued_date as string | null) ??
-        null,
-      permit_age_days: (() => {
-        const d = (permit?.applied_date ?? permit?.issued_date) as
-          | string
-          | null
-          | undefined;
-        if (!d) return null;
-        return Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
-      })(),
-      latitude:
-        (row.latitude as number | null) ??
-        (permit?.latitude as number | null) ??
-        null,
-      longitude:
-        (row.longitude as number | null) ??
-        (permit?.longitude as number | null) ??
-        null,
-    } as Lead;
-  });
-}
+/* `mapRowsToLeads` lives in `./useLeads.helpers` (extracted 2026-04-29
+ * audit-fix so the row-shape merge logic can be unit-tested without
+ * React Query). The helper handles dedup + the 4-way address fallback +
+ * permit_age_days computation + lat/lng coercion. */
 
 /** Optional progressive-paint hook. When provided, `fetchLeads` calls
  *  `commit(currentRows)` after each successful page lands so React Query's

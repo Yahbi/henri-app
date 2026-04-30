@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
+import {
+  HomeownerMaintenanceBodySchema,
+  parseBody,
+} from "@/lib/schemas/api";
 
 /**
  * Homeowner maintenance-task completion tracking.
@@ -51,14 +55,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await request.json().catch(() => ({}))) as {
-      task_id?: string;
-      completed?: boolean;
-    };
-
-    if (!body.task_id) {
-      return NextResponse.json({ error: "task_id required" }, { status: 400 });
-    }
+    const raw = await request.json().catch(() => ({}));
+    const parsed = parseBody(HomeownerMaintenanceBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const body = parsed.data;
 
     if (body.completed === false) {
       const { error } = await supabase

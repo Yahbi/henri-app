@@ -1,0 +1,505 @@
+"use client";
+
+import { cn } from "@/lib/utils/cn";
+import {
+  TRADES,
+  TIMELINES,
+  BUDGETS,
+  OptionCard,
+  ScoreResult,
+  MatchCard,
+  type MatchContractor,
+} from "./ChatIntakeModal.parts";
+
+/**
+ * ChatIntakeModal.steps.tsx
+ *
+ * Audit-04-29 priority D step 2: extracts the 8-step JSX state machine
+ * out of `ChatIntakeModal.tsx` so the parent file becomes a thin owner of
+ * state + handlers, and the per-step input UI lives in one place.
+ *
+ * Architecture:
+ *   - Parent (`ChatIntakeModal`) owns ALL state (step, answers, refinement
+ *     loop, contractor match) and the `/api/intake` submission logic.
+ *   - This file exports `<IntakeStepArea>`, a switch that renders the
+ *     correct step's input UI for the current `step` value.
+ *   - Each step's JSX is a small subcomponent in this file — none of them
+ *     own state. They take controlled-input values + setters + a primary
+ *     submit handler from the parent.
+ *
+ * Why one file, not 8: the steps share the same prop dictionary (parent
+ * state lives in one component), and React's bundler can't tree-shake
+ * individual step components anyway. One file with named exports is
+ * the same shipped JS, fewer imports for the parent. If a single step
+ * grows past ~100 LOC, split it then.
+ */
+
+/* ── Step input shape ─────────────────────────────────────────────────── */
+
+export interface IntakeStepAreaProps {
+  step: number;
+
+  // Step 0 — Trade
+  selectedTrade: string;
+  onTradeSelect: (trade: string) => void;
+
+  // Step 1 — Address / ZIP
+  address: string;
+  onAddressChange: (value: string) => void;
+  onAddressSubmit: () => void;
+
+  // Step 2 — Timeline
+  timeline: string;
+  onTimelineSelect: (value: string) => void;
+
+  // Step 3 — Budget
+  budget: string;
+  onBudgetSelect: (value: string) => void;
+
+  // Step 4 — Description
+  description: string;
+  onDescriptionChange: (value: string) => void;
+  onDescriptionSubmit: () => void;
+
+  // Refinement (intermediate, between 4 and 5)
+  isRefinement: boolean;
+  refinementInput: string;
+  refinementLoading: boolean;
+  onRefinementInputChange: (value: string) => void;
+  onRefinementAnswer: () => void;
+
+  // Step 5 — Photos
+  photos: string[];
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  onPhotoUpload: () => void;
+  onPhotoSkip: () => void;
+  onPhotoContinue: () => void;
+  onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+
+  // Step 6 — Contact
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+  contactErrors: Record<string, string>;
+  onContactNameChange: (value: string) => void;
+  onContactPhoneChange: (value: string) => void;
+  onContactEmailChange: (value: string) => void;
+  onContactSubmit: () => void;
+
+  // Step 7 — Result
+  isComputing: boolean;
+  score: number | null;
+  matchedContractor: MatchContractor | null;
+  intakeId: string | null;
+  onClose: () => void;
+}
+
+/* ── Dispatcher ───────────────────────────────────────────────────────── */
+
+export function IntakeStepArea(props: IntakeStepAreaProps) {
+  const { step } = props;
+
+  return (
+    <>
+      {step === 0 && <Step0Trade {...props} />}
+      {step === 1 && <Step1Address {...props} />}
+      {step === 2 && <Step2Timeline {...props} />}
+      {step === 3 && <Step3Budget {...props} />}
+      {step === 4 && <Step4Description {...props} />}
+      {props.isRefinement && <RefinementInput {...props} />}
+      {step === 5 && <Step5Photos {...props} />}
+      {step === 6 && <Step6Contact {...props} />}
+      {step === 7 && <Step7Result {...props} />}
+    </>
+  );
+}
+
+/* ── Step 0: Trade selection ─────────────────────────────────────────── */
+
+function Step0Trade({
+  selectedTrade,
+  onTradeSelect,
+}: IntakeStepAreaProps) {
+  return (
+    <div className="grid grid-cols-2 gap-2 pt-2 sm:grid-cols-3">
+      {TRADES.map((trade) => (
+        <OptionCard
+          key={trade}
+          label={trade}
+          selected={selectedTrade === trade}
+          onClick={() => onTradeSelect(trade)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ── Step 1: Address / ZIP ───────────────────────────────────────────── */
+
+function Step1Address({
+  address,
+  onAddressChange,
+  onAddressSubmit,
+}: IntakeStepAreaProps) {
+  /* Live input-intent hint — updates as the user types so the disabled-
+   * Next state is never mysterious. Three states:
+   *   - empty    → no hint (placeholder carries the ask)
+   *   - digits <5 → "Keep typing — N digits for a ZIP"
+   *   - digits =5 → "ZIP code recognised"
+   *   - non-digit → "Or type the full street address" */
+  const trimmed = address.trim();
+  const digitsOnly = /^\d+$/.test(trimmed);
+  const isZip = digitsOnly && trimmed.length === 5;
+  const hint = !trimmed
+    ? null
+    : isZip
+      ? "ZIP code recognised"
+      : digitsOnly
+        ? `Keep typing — ${5 - trimmed.length} more digit${5 - trimmed.length === 1 ? "" : "s"} for a ZIP`
+        : "Or type the full street address — both work";
+  const tone = isZip ? "text-[color:var(--success,_#3D9970)]" : "text-muted-foreground";
+
+  return (
+    <div className="pt-2">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={address}
+          onChange={(e) => onAddressChange(e.target.value)}
+          placeholder="Enter ZIP code or address..."
+          className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onAddressSubmit();
+          }}
+          /* `inputMode="text"` not `numeric` — we accept either a ZIP or a
+           * full street address, so a digits-only keyboard would block the
+           * second path. */
+          inputMode="text"
+          autoComplete="postal-code"
+          autoFocus
+        />
+        <button
+          onClick={onAddressSubmit}
+          disabled={!address.trim()}
+          className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+        >
+          Next
+        </button>
+      </div>
+      {hint && (
+        <p className={`mt-1.5 text-[11px] ${tone}`} aria-live="polite">
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ── Step 2: Timeline ────────────────────────────────────────────────── */
+
+function Step2Timeline({
+  timeline,
+  onTimelineSelect,
+}: IntakeStepAreaProps) {
+  return (
+    <div className="grid grid-cols-2 gap-2 pt-2">
+      {TIMELINES.map((t) => (
+        <OptionCard
+          key={t}
+          label={t}
+          selected={timeline === t}
+          onClick={() => onTimelineSelect(t)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ── Step 3: Budget ──────────────────────────────────────────────────── */
+
+function Step3Budget({
+  budget,
+  onBudgetSelect,
+}: IntakeStepAreaProps) {
+  return (
+    <div className="flex flex-wrap gap-2 pt-2">
+      {BUDGETS.map((b) => (
+        <OptionCard
+          key={b}
+          label={b}
+          selected={budget === b}
+          onClick={() => onBudgetSelect(b)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ── Step 4: Description ─────────────────────────────────────────────── */
+
+function Step4Description({
+  description,
+  onDescriptionChange,
+  onDescriptionSubmit,
+}: IntakeStepAreaProps) {
+  return (
+    <div className="flex flex-col gap-2 pt-2">
+      <textarea
+        value={description}
+        onChange={(e) => onDescriptionChange(e.target.value)}
+        rows={4}
+        placeholder="Describe your project... (e.g., need to replace a 20-year-old roof, approx 2000 sq ft)"
+        className="w-full rounded-lg border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        autoFocus
+      />
+      <button
+        onClick={onDescriptionSubmit}
+        disabled={!description.trim()}
+        className="self-end rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+      >
+        Continue
+      </button>
+    </div>
+  );
+}
+
+/* ── Refinement input (between 4 and 5) ──────────────────────────────── */
+
+function RefinementInput({
+  refinementInput,
+  refinementLoading,
+  onRefinementInputChange,
+  onRefinementAnswer,
+}: IntakeStepAreaProps) {
+  return (
+    <div className="flex gap-2 pt-2">
+      {refinementLoading ? (
+        <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-muted-foreground">
+          <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" />
+          Henri is thinking...
+        </div>
+      ) : (
+        <>
+          <input
+            type="text"
+            value={refinementInput}
+            onChange={(e) => onRefinementInputChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onRefinementAnswer();
+            }}
+            placeholder="Your answer..."
+            className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            autoFocus
+          />
+          <button
+            onClick={onRefinementAnswer}
+            disabled={!refinementInput.trim()}
+            className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── Step 5: Photos ──────────────────────────────────────────────────── */
+
+function Step5Photos({
+  photos,
+  fileInputRef,
+  onPhotoUpload,
+  onPhotoSkip,
+  onPhotoContinue,
+  onFileChange,
+}: IntakeStepAreaProps) {
+  return (
+    <div className="flex flex-col gap-3 pt-2">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={onFileChange}
+      />
+      <button
+        onClick={onPhotoUpload}
+        className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-card px-6 py-8 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary-04"
+      >
+        <svg
+          className="h-6 w-6"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.5}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
+          />
+        </svg>
+        Click to upload photos
+      </button>
+      {photos.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {photos.length} file(s) selected
+        </p>
+      )}
+      <div className="flex gap-2">
+        <button
+          onClick={onPhotoSkip}
+          className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
+        >
+          Skip this step
+        </button>
+        {photos.length > 0 && (
+          <button
+            onClick={onPhotoContinue}
+            className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+          >
+            Continue
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Step 6: Contact info ────────────────────────────────────────────── */
+
+function Step6Contact({
+  contactName,
+  contactPhone,
+  contactEmail,
+  contactErrors,
+  onContactNameChange,
+  onContactPhoneChange,
+  onContactEmailChange,
+  onContactSubmit,
+}: IntakeStepAreaProps) {
+  return (
+    <div className="flex flex-col gap-3 pt-2">
+      <div>
+        <input
+          type="text"
+          value={contactName}
+          onChange={(e) => onContactNameChange(e.target.value)}
+          placeholder="Full name"
+          className={cn(
+            "w-full rounded-lg border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+            contactErrors.name
+              ? "border-destructive focus:ring-destructive"
+              : "border-input",
+          )}
+          autoFocus
+        />
+        {contactErrors.name && (
+          <p className="mt-1 text-xs text-destructive">{contactErrors.name}</p>
+        )}
+      </div>
+      <div>
+        <input
+          type="tel"
+          value={contactPhone}
+          onChange={(e) => onContactPhoneChange(e.target.value)}
+          placeholder="Phone number"
+          className={cn(
+            "w-full rounded-lg border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+            contactErrors.phone
+              ? "border-destructive focus:ring-destructive"
+              : "border-input",
+          )}
+        />
+        {contactErrors.phone && (
+          <p className="mt-1 text-xs text-destructive">{contactErrors.phone}</p>
+        )}
+      </div>
+      <div>
+        <input
+          type="email"
+          value={contactEmail}
+          onChange={(e) => onContactEmailChange(e.target.value)}
+          placeholder="Email address"
+          className={cn(
+            "w-full rounded-lg border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+            contactErrors.email
+              ? "border-destructive focus:ring-destructive"
+              : "border-input",
+          )}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onContactSubmit();
+          }}
+        />
+        {contactErrors.email && (
+          <p className="mt-1 text-xs text-destructive">{contactErrors.email}</p>
+        )}
+      </div>
+      <button
+        onClick={onContactSubmit}
+        className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+      >
+        Find my contractor
+      </button>
+    </div>
+  );
+}
+
+/* ── Step 7: Score + Match ───────────────────────────────────────────── */
+
+function Step7Result({
+  isComputing,
+  score,
+  matchedContractor,
+  intakeId,
+  onClose,
+}: IntakeStepAreaProps) {
+  if (isComputing) {
+    return (
+      <div className="pt-2">
+        <div className="flex flex-col items-center gap-3 py-8">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-border border-t-primary" />
+          <p className="text-sm text-muted-foreground">
+            Scoring your project and finding the best match...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Two render paths after submit:
+  //   1. Score + match card + "Go to project" CTA (real match)
+  //   2. Just the "Go to project" CTA (submit succeeded but no contractor
+  //      matched yet — intake is still persisted so the homeowner can
+  //      revisit the page later)
+  // A third path (submit failed) leaves both null and the chat-bubble
+  // error message renders without this section.
+  if (score == null && !intakeId) return null;
+
+  return (
+    <div className="pt-2">
+      <div className="flex flex-col gap-4">
+        {score != null && score > 0 && (
+          <>
+            <ScoreResult score={score} />
+            <MatchCard contractor={matchedContractor} />
+          </>
+        )}
+        <button
+          onClick={() => {
+            if (intakeId) {
+              window.location.href = `/homeowner/intakes/${intakeId}`;
+            } else {
+              onClose();
+            }
+          }}
+          className="mt-2 w-full rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+        >
+          {intakeId ? "View your project →" : "Done"}
+        </button>
+      </div>
+    </div>
+  );
+}

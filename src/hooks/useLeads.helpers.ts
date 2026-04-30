@@ -171,6 +171,87 @@ export function applyLeadSort<Q extends LeadsQueryBuilder>(
     .order("id", { ascending: true }) as Q;
 }
 
+/* ── Row → Lead mapping ──
+ *
+ * Extracted from useLeads.ts so it can be unit-tested without React Query.
+ * Merges denormalized lead columns (address/city/state/zip/lat/lng) with
+ * the joined `permits(...)` row; reads from lead first, falls back to
+ * permit. Computes permit_age_days from applied_date or issued_date.
+ *
+ * Pure function — no I/O, deterministic. Used by:
+ *   1. fetchLeads' single-page path (limit ≤ 1000)
+ *   2. fetchLeads' progressive-paint path (multi-page god-mode pulls)
+ *
+ * Audit-04-29 fix: previously inline in useLeads.ts and untested. The
+ * fallback-merge logic is subtle (4-way address fallback, lat/lng coercion,
+ * permit_age_days null-safety) so a regression here would silently corrupt
+ * the dashboard's row shape.
+ */
+import type { Lead } from "@/types/lead";
+
+export function mapRowsToLeads(rows: Record<string, unknown>[]): Lead[] {
+  const deduped = dedupRowsById(rows);
+  return deduped.map((row: Record<string, unknown>) => {
+    const permit = row.permits as Record<string, unknown> | null;
+    return {
+      ...row,
+      address:
+        (row.address as string | null) ??
+        (permit?.address as string | null) ??
+        (row.mailing_address as string | null) ??
+        "Unknown",
+      // Audit-04-29: every absent merged field returns `null`, never
+      // `undefined`. Without the trailing `?? null`, `permit?.city` on a
+      // null permit produces `undefined`, breaking downstream null-checks.
+      // permit_filed_date already had this discipline; aligning the rest.
+      city:
+        (row.city as string | null) ??
+        (permit?.city as string | null) ??
+        null,
+      state:
+        (row.state as string | null) ??
+        (permit?.state as string | null) ??
+        null,
+      zip:
+        (row.zip as string | null) ??
+        (permit?.zip as string | null) ??
+        "",
+      permit_type:
+        (row.permit_type as string | null) ??
+        (permit?.permit_type as string | null) ??
+        null,
+      // permit_description is not denormalized; the drawer loads it via
+      // usePermitDetail. Keep the field on the Lead shape for downstream
+      // consumers but populate from the joined row when available.
+      permit_description: (permit?.description as string | null) ?? null,
+      permit_value:
+        (row.permit_value as number | null) ??
+        (permit?.estimated_value as number | null) ??
+        null,
+      permit_filed_date:
+        (permit?.applied_date as string | null) ??
+        (permit?.issued_date as string | null) ??
+        null,
+      permit_age_days: (() => {
+        const d = (permit?.applied_date ?? permit?.issued_date) as
+          | string
+          | null
+          | undefined;
+        if (!d) return null;
+        return Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+      })(),
+      latitude:
+        (row.latitude as number | null) ??
+        (permit?.latitude as number | null) ??
+        null,
+      longitude:
+        (row.longitude as number | null) ??
+        (permit?.longitude as number | null) ??
+        null,
+    } as Lead;
+  });
+}
+
 /** Defensive dedupe — even with a stable tiebreaker, a cached + rewritten
  *  Supabase view or a future refactor could re-introduce row-overlap
  *  across pages. Dedupe on id before mapping so the downstream

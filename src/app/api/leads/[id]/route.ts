@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { LeadPatchBodySchema, parseBody } from "@/lib/schemas/api";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* GET /api/leads/[id] — fetch single lead with permit data */
 export async function GET(
@@ -9,8 +10,9 @@ export async function GET(
 ) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const gate = await requireContractor(supabase);
+  if (gate.response) return gate.response;
+  const user = gate.user;
 
   const { data, error } = await supabase
     .from("leads")
@@ -30,8 +32,9 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const gate = await requireContractor(supabase);
+  if (gate.response) return gate.response;
+  const user = gate.user;
 
   const raw = await req.json();
   const parsed = parseBody(LeadPatchBodySchema, raw);

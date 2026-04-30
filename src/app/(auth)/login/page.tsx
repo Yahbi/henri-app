@@ -14,26 +14,25 @@ import {
 } from "@/components/ui/card";
 
 /**
- * Login page. Google OAuth only, per CLAUDE.md.
+ * Login page. Two passwordless paths per CLAUDE.md (2026-04-29 brand-rule
+ * amendment): Google OAuth + magic-link email. Both preserve the "no
+ * passwords to leak" trust posture. Magic-link unlocks contractors who
+ * don't use Gmail (Outlook / Yahoo / corporate email).
  *
- * Prior version also exposed an email/password form via
- * `supabase.auth.signInWithPassword`. That was removed because:
- *   1. Google is the only provider we have consent for in production.
- *   2. Password users don't get auto-populated profiles from Google scopes
- *      (full_name, avatar_url), leaving onboarding half-broken.
- *   3. The forgot-password flow had no email-template wiring.
+ * Both paths route through the same `/auth/callback` handler — Supabase's
+ * `exchangeCodeForSession` works for OAuth codes AND magic-link OTP codes.
  */
 export default function LoginPage() {
   const [authError, setAuthError] = useState<string | null>(null);
 
+  /* Magic-link state */
+  const [magicEmail, setMagicEmail] = useState("");
+  const [magicSending, setMagicSending] = useState(false);
+  const [magicSent, setMagicSent] = useState(false);
+
   const signInWithGoogle = async () => {
     setAuthError(null);
     const supabase = createClient();
-    // Direct Google → /dashboard would skip the PKCE code-exchange
-    // and the session cookies would never be set. Route through
-    // /auth/callback (`src/app/auth/callback/route.ts`) which
-    // exchanges the code server-side and then forwards to the
-    // intended destination via the `next` query param.
     const callback = new URL("/auth/callback", window.location.origin);
     callback.searchParams.set("next", "/dashboard");
     const { error } = await supabase.auth.signInWithOAuth({
@@ -41,6 +40,35 @@ export default function LoginPage() {
       options: { redirectTo: callback.toString() },
     });
     if (error) setAuthError(error.message);
+  };
+
+  /* Magic-link sign-in. Supabase Email OTP routes through the same
+   * `/auth/callback` handler that processes OAuth (`exchangeCodeForSession`
+   * accepts both code types). Existing users land directly on /dashboard;
+   * never-onboarded contractors get bounced to /onboarding/license by
+   * middleware (the role-gated routing already handles that). */
+  const sendMagicLink = async () => {
+    setAuthError(null);
+    const trimmed = magicEmail.trim();
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setAuthError("Enter a valid email address.");
+      return;
+    }
+    setMagicSending(true);
+    const supabase = createClient();
+    const callback = new URL("/auth/callback", window.location.origin);
+    callback.searchParams.set("next", "/dashboard");
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmed,
+      options: { emailRedirectTo: callback.toString() },
+    });
+    setMagicSending(false);
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    setMagicSent(true);
   };
 
   return (
@@ -54,7 +82,7 @@ export default function LoginPage() {
             Henri.
           </Link>
           <CardTitle className="text-xl">Welcome back</CardTitle>
-          <CardDescription>Sign in with your Google account</CardDescription>
+          <CardDescription>Passwordless sign-in — Google or email link</CardDescription>
         </CardHeader>
 
         <CardContent>
@@ -67,44 +95,111 @@ export default function LoginPage() {
             </div>
           )}
 
-          <Button
-            variant="outline"
-            type="button"
-            className="w-full"
-            onClick={signInWithGoogle}
-          >
-            <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
-              <path
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
-                fill="#4285F4"
-              />
-              <path
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                fill="#34A853"
-              />
-              <path
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                fill="#FBBC05"
-              />
-              <path
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                fill="#EA4335"
-              />
-            </svg>
-            Continue with Google
-          </Button>
+          {magicSent ? (
+            <div
+              className="rounded-lg border border-primary/30 bg-primary-08 px-4 py-3 text-sm text-foreground"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="font-medium">Check your email.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                We sent a sign-in link to{" "}
+                <span className="font-medium text-foreground">{magicEmail}</span>.
+                Click it to sign in. The link expires in 1 hour.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setMagicSent(false);
+                  setMagicEmail("");
+                }}
+                className="mt-2 text-xs text-primary underline hover:text-primary/80"
+              >
+                Use a different email
+              </button>
+            </div>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                type="button"
+                className="w-full"
+                onClick={signInWithGoogle}
+              >
+                <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
+                  <path
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+                    fill="#4285F4"
+                  />
+                  <path
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    fill="#34A853"
+                  />
+                  <path
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                    fill="#FBBC05"
+                  />
+                  <path
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                    fill="#EA4335"
+                  />
+                </svg>
+                Continue with Google
+              </Button>
 
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            By continuing, you agree to the{" "}
-            <Link href="/terms" className="underline hover:text-foreground">
-              Terms of Service
-            </Link>{" "}
-            and{" "}
-            <Link href="/privacy" className="underline hover:text-foreground">
-              Privacy Policy
-            </Link>
-            .
-          </p>
+              {/* Or divider + magic-link path */}
+              <div className="relative my-5">
+                <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                  <div className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-card px-2 text-xs text-muted-foreground">
+                    or use email
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <input
+                  type="email"
+                  value={magicEmail}
+                  onChange={(e) => setMagicEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") sendMagicLink();
+                  }}
+                  placeholder="you@yourcompany.com"
+                  className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  autoComplete="email"
+                  inputMode="email"
+                  disabled={magicSending}
+                />
+                <Button
+                  variant="outline"
+                  type="button"
+                  className="w-full"
+                  onClick={sendMagicLink}
+                  disabled={magicSending || !magicEmail}
+                >
+                  {magicSending ? "Sending link…" : "Email me a sign-in link"}
+                </Button>
+                <p className="text-center text-[11px] text-muted-foreground">
+                  No password needed. We&apos;ll send a one-time link.
+                </p>
+              </div>
+
+              <p className="mt-4 text-center text-xs text-muted-foreground">
+                By continuing, you agree to the{" "}
+                <Link href="/terms" className="underline hover:text-foreground">
+                  Terms of Service
+                </Link>{" "}
+                and{" "}
+                <Link href="/privacy" className="underline hover:text-foreground">
+                  Privacy Policy
+                </Link>
+                .
+              </p>
+            </>
+          )}
 
           {/* Dev-only one-click login.
            *

@@ -6,6 +6,7 @@ import {
   rateLimitResponse,
 } from "@/lib/utils/rate-limit";
 import { logApiError } from "@/lib/log";
+import { ReferralValidateBodySchema, parseBody } from "@/lib/schemas/api";
 
 /* ─── GET /api/referrals/validate?code=HENRI-XXXXXX ─── */
 /* Public endpoint: validates a referral code at signup time.
@@ -50,20 +51,10 @@ export async function GET(request: NextRequest) {
 /* ─── POST /api/referrals/validate — process signup with referral code ─── */
 /* Called during user registration when ref= query param is present */
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { code, userId, email, role } = body as {
-    code?: string;
-    userId?: string;
-    email?: string;
-    role?: string;
-  };
-
-  if (!code || !userId || !email) {
-    return NextResponse.json(
-      { error: "code, userId, and email are required" },
-      { status: 400 }
-    );
-  }
+  const raw = await request.json().catch(() => ({}));
+  const parsed = parseBody(ReferralValidateBodySchema, raw);
+  if (parsed.response) return parsed.response;
+  const { code, userId, email, role } = parsed.data;
 
   const supabase = createAdminClient();
 

@@ -82,7 +82,11 @@ const STATE_PRIORITY = [
       const row = sources[pos++];
       if (!row) break;
       try {
-        const r = await probeSource(row.source_type as string, row.endpoint as string);
+        const r = await probeSource(
+          row.source_type as string,
+          row.endpoint as string,
+          row.name as string | undefined,
+        );
         const patch: Record<string, unknown> = {
           last_scraped_at: new Date().toISOString(),
           last_count: r.row_count,
