@@ -65,13 +65,11 @@ async function main() {
   console.log("\n--- Permits Table ---");
 
   try {
-    // Total permits
-    const permitsResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/permits?select=id&limit=1`,
-      { headers, method: "HEAD" },
-    );
-
-    // Use count endpoint
+    // Total permits via the count endpoint (HEAD with Prefer: count=exact
+    // returns the total via the content-range header without rows). Note:
+    // an earlier version of this script also fetched a separate `?limit=1`
+    // probe — dropped because countResp serves the same diagnostic and
+    // the dead probe was a CI lint warning (no-unused-vars).
     const countResp = await fetch(
       `${SUPABASE_URL}/rest/v1/permits?select=id`,
       { headers: { ...headers, Prefer: "count=exact" }, method: "HEAD" },

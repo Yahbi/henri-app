@@ -31,7 +31,6 @@ export default function GlobalError({
     // Sentry's instrumentation hook auto-captures via its global error
     // listener; this console.error is for dev visibility when SENTRY_DSN
     // is unset.
-    // eslint-disable-next-line no-console
     console.error("GlobalError (root layout crashed):", error);
   }, [error]);
 
