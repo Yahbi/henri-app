@@ -12,6 +12,10 @@ import { PermitTimeline } from "./PermitTimeline";
 import { PermitHistorySection } from "./PermitHistorySection";
 import { PropertyContextSection } from "./PropertyContextSection";
 import { CrossTradeOpportunities } from "./CrossTradeOpportunities";
+import { CascadePredictionPanel } from "./CascadePrediction";
+import { StormImpactPanel } from "./StormImpact";
+import { PermitAnomalyPanel } from "./PermitAnomaly";
+import { usePredictions } from "@/hooks/usePredictions";
 import { ApplicantBadge } from "./ApplicantBadge";
 import { DrawerResizeHandle } from "./DrawerResizeHandle";
 import { LeadDrawerScoreColumn, type UrgencyBadge } from "./LeadDrawerScoreColumn";
@@ -109,6 +113,15 @@ export function LeadDetailDrawer({
    * The drawer compensates by lazy-loading the few fields it actually
    * needs the moment it opens. */
   const { permit: fetchedPermit } = usePermitDetail(lead?.permitNumber ?? null);
+
+  /* ── Tier A+ Sprint 1 predictions: cascade + storm + anomaly ──
+   * Read-only cached predictions refreshed weekly by
+   * /api/cron/predictive-refresh. Each panel hides itself when it has no
+   * data to show — never blank shells. */
+  const { data: predictions } = usePredictions(
+    lead?.id ?? null,
+    lead?.permitUuid ?? lead?.permitNumber ?? fetchedPermit?.id ?? null,
+  );
 
   if (!lead) return null;
 
@@ -322,6 +335,14 @@ export function LeadDetailDrawer({
               ))}
             </div>
           </div>
+
+          {/* ── Tier A+ Sprint 1: Predictive panels ──
+           * Each panel hides itself when there's nothing to show. They render
+           * in priority order: cascade → storm → anomaly. Refreshed weekly by
+           * /api/cron/predictive-refresh. NO PII, NO LLM, statistical only. */}
+          <PermitAnomalyPanel anomaly={predictions?.anomaly ?? null} />
+          <StormImpactPanel storm={predictions?.storm ?? null} />
+          <CascadePredictionPanel predictions={predictions?.cascade ?? []} />
 
           {/* ── Cross-trade opportunities — Phase 1.2 predictive rules ── */}
           <CrossTradeOpportunities

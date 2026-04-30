@@ -79,6 +79,10 @@
     {
       "path": "/api/cron/re-enrich",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/predictive-refresh",
+      "schedule": "0 5 * * 0"
     }
   ]
 }
