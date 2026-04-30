@@ -67,6 +67,46 @@ export interface Lead {
   cascade_count: number;
   permit_history?: string[];
 
+  /* Provenance (migration 00039) */
+  contact_source?: string | null;
+  contact_confidence?: number | null;
+
+  /* Apollo / business enrichment (migration 00044) */
+  employer?: string | null;
+  occupation?: string | null;
+  business_phone?: string | null;
+  business_status?: string | null;
+  business_website?: string | null;
+  license_number?: string | null;
+  license_status?: string | null;
+  naics_code?: string | null;
+
+  /* Predictive cross-trade engine (migration 00045). jsonb array;
+   * shape verified at the call site before render. */
+  cross_trade_suggestions?: unknown;
+
+  /* PostgREST embed via SELECT_NARROW / SELECT_WIDE — present whenever
+   * useLeads runs without `skip_permits_join`. Fields mirror the
+   * PERMITS_JOIN constant in src/hooks/useLeads.helpers.ts. */
+  permits?: {
+    id?: string;
+    address?: string | null;
+    city?: string | null;
+    state?: string | null;
+    zip?: string | null;
+    permit_type?: string | null;
+    description?: string | null;
+    status?: string | null;
+    estimated_value?: number | null;
+    applied_date?: string | null;
+    issued_date?: string | null;
+    completed_date?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    applicant_name?: string | null;
+    contractor_name?: string | null;
+  } | null;
+
   /* Meta */
   notes?: string | null;
   contacted_at?: string | null;

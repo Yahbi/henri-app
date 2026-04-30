@@ -193,13 +193,11 @@ export function LeadDetailDrawer({
               <ApplicantBadge
                 permit={{
                   applicant_name:
-                    ((lead as unknown as Record<string, unknown>)
-                      .permitApplicantName as string | undefined) ??
+                    lead.permitApplicantName ??
                     fetchedPermit?.applicant_name ??
                     undefined,
                   contractor_name:
-                    ((lead as unknown as Record<string, unknown>)
-                      .permitContractorName as string | undefined) ??
+                    lead.permitContractorName ??
                     fetchedPermit?.contractor_name ??
                     undefined,
                   owner_name: lead.owner ?? null,
@@ -353,11 +351,7 @@ export function LeadDetailDrawer({
 
           {/* ── Cross-trade opportunities — Phase 1.2 predictive rules ── */}
           <CrossTradeOpportunities
-            suggestions={
-              ((lead as unknown as Record<string, unknown>)
-                .crossTradeSuggestions as CrossTradeSuggestion[] | undefined) ??
-              null
-            }
+            suggestions={(lead.crossTradeSuggestions as CrossTradeSuggestion[] | undefined) ?? null}
             leadId={lead.id}
           />
 

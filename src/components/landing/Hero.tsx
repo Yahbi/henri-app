@@ -5,16 +5,22 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
 
-// Honest stats — sourced from live Supabase counts (audit 2026-04-22):
-//   permits.total          ≈ 925k  (rounded down to 900k+ for headroom)
-//   permit_sources.enabled ≈ 1,861 covering 46 US states / DC
-//   refresh cadence        = every 30 min (vercel.json /api/cron/scrape)
-// If these grow past the rounded numbers, bump them — don't inflate.
-// Previously shipped "< 15min Lead Delivery", which was not defensible
-// against the actual cron cadence. Replaced with the factual cadence.
+// Honest stats — sourced from live Supabase counts (audit 2026-04-30):
+//   permits.total                  = 1,412,498  (rounded to "900k+" for
+//                                                 headroom; bump when we
+//                                                 grow, never inflate)
+//   distinct US states with >=1 permit ingested = 35
+//                                                 (claim "30+" to stay
+//                                                 conservative against
+//                                                 sample variance)
+//   refresh cadence                = every 30 min (vercel.json
+//                                                  /api/cron/scrape)
+// Earlier "45+ States Covered" was off — only 35 states have actual
+// permit data ingested (50+ are configured in permit_sources but not
+// yet producing). Tightened to 30+.
 const stats = [
   { label: "900k+ Permits Tracked", top: "12%", left: "8%", delay: "0s" },
-  { label: "45+ States Covered", top: "38%", left: "2%", delay: "0.2s" },
+  { label: "30+ States Covered", top: "38%", left: "2%", delay: "0.2s" },
   { label: "Refreshed every 30 min", top: "64%", left: "6%", delay: "0.4s" },
 ] as const;
 

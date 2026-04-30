@@ -83,13 +83,11 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     capable: true,
   },
-  icons: {
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
-    icon: [
-      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
-    ],
-  },
+  // Only reference assets that actually live in /public. The 192/512
+  // PNGs and apple-touch-icon were declared but never committed —
+  // production was returning 404 on /icon-192.png. When we ship real
+  // raster icons, re-add them here AND in public/manifest.json. Until
+  // then Next.js falls back to src/app/favicon.ico for `icon`.
 };
 
 /* Viewport export (Next 14+).

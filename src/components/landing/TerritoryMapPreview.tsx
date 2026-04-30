@@ -85,12 +85,12 @@ const STATUS_STYLES: Record<TileStatus, {
 };
 
 /* Stats match the Hero's conservative framing so numbers never
-   disagree across the landing page. "45+" maps to the CLAUDE.md
-   example for the honest-framing rule; bump when we grow, never
-   round up pre-emptively. */
+   disagree across the landing page. "30+" reflects the live DB count
+   (audit 2026-04-30: 35 distinct US states with at least one ingested
+   permit); kept conservative to stay defensible. */
 const STATS = [
   { icon: MapPin,      value: "900k+",   label: "Permits tracked" },
-  { icon: ShieldCheck, value: "45+",     label: "States covered" },
+  { icon: ShieldCheck, value: "30+",     label: "States covered" },
   { icon: Clock,       value: "14-day",  label: "Exclusive window" },
 ] as const;
 

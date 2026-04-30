@@ -326,7 +326,7 @@ export default function PortalPage() {
               </p>
             </div>
             <div className="rounded-xl border border-border bg-background p-6 text-center">
-              <p className="text-3xl font-semibold text-primary">45+</p>
+              <p className="text-3xl font-semibold text-primary">30+</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 US states covered by our permit catalog
               </p>

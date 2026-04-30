@@ -122,8 +122,8 @@ function ChevronDown({ className = "" }: { className?: string }) {
 //   - 30-min cadence matches `/api/cron/scrape` in vercel.json
 //   - 24-hr trial is the Stripe `trial_period_days=1` config
 const STATS = [
-  { num: "1 / ZIP", label: "One contractor per ZIP code \u2014 enforced, no overlap" },
-  { num: "900k+", label: "Live permits in our catalog across 45+ US states" },
+  { num: "1 / permit", label: "One contractor per permit per trade for a 14-day exclusivity window" },
+  { num: "900k+", label: "Live permits across major metro areas in 30+ US states" },
   { num: "<30 min", label: "From permit filing to lead in your dashboard" },
   { num: "24 hrs", label: "Free trial to evaluate before any charge" },
 ];
@@ -207,7 +207,7 @@ const FEATURES = [
     badge: "New",
     icon: <StormIcon />,
     title: "Storm Center",
-    desc: "Real-time NOAA and HailTrace integration. When a storm hits your territory, Henri flags affected properties, re-scores leads with urgency boost, and auto-deploys a storm response campaign.",
+    desc: "Live NOAA radar plus a daily NOAA storm-events feed. When severe weather hits a ZIP you cover, Henri flags affected properties and surfaces a storm-impact urgency boost on the lead score.",
   },
 ];
 
@@ -221,7 +221,7 @@ const COMPARISON_ROWS = [
   },
   {
     feature: "Lead exclusivity",
-    henri: { text: "1 contractor / ZIP", check: true },
+    henri: { text: "1 contractor / permit \u00b7 14 days", check: true },
     angi: { text: "Shared with 3\u20138", cross: true },
     thumbtack: { text: "Shared with 3\u20135", cross: true },
     acculynx: { text: "No leads", cross: true },
@@ -313,7 +313,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How is exclusivity guaranteed?",
-    a: "Exclusivity is built into our system. When a permit is filed in your ZIP for your trade, the lead is only delivered to you \u2014 the one contractor who holds that territory. We do not share leads or cap visibility after delivery. One contractor per trade per ZIP, period.",
+    a: "When a permit is filed in your territory and matches your trade, the enriched packet \u2014 homeowner contact info, urgency score, outreach bundle \u2014 is locked to one contractor for a 14-day window, recorded in our database (lead_exclusivity_locks). To keep things fair, the lock auto-releases after 72 hours of no logged outreach (use-it-or-lose-it). The underlying permit is a public record either way; what we gate is the enriched packet you actually act on.",
   },
   {
     q: "What trades does Henri cover?",
@@ -341,7 +341,7 @@ const FAQ_ITEMS = [
 // cohort to derive them). Replaced with four claims we can stand
 // behind without a footnote war.
 const PROOF_STATS = [
-  { num: "1 / ZIP", label: "Exclusive territory \u2014 one contractor per ZIP, enforced at the DB level" },
+  { num: "14 days", label: "Per-permit exclusivity window, enforced at the DB level (lead_exclusivity_locks)" },
   { num: "Flat", label: "Monthly subscription \u2014 no per-lead fees, no 12-month contracts" },
   { num: "24 hrs", label: "Free trial to explore the full platform before any charge" },
   { num: "Any time", label: "Cancel from your dashboard \u2014 takes effect at end of billing cycle" },

@@ -76,18 +76,17 @@ function mapLead(lead: Lead): LeadData {
     value: lead.permit_value ? formatCurrency(lead.permit_value) : (lead.pipeline_value ? formatCurrency(lead.pipeline_value) : "---"),
     permitDescription: lead.permit_description ?? undefined,
     permitNumber: lead.permit_id ?? undefined,
-    // Supabase UUID on the permits row — used by PermitTimeline to
-    // look up permit_events. Lives on the joined `permits` child via
-    // useLeads → select("permits(id, ...)"). The Lead type doesn't
-    // declare `permits`; cast via unknown to read it safely.
-    permitUuid: ((lead as unknown as Record<string, unknown>).permits as Record<string, unknown> | undefined)?.id as string | undefined,
+    // Supabase UUID on the joined permits row — used by PermitTimeline
+    // to look up permit_events. Lives on the joined `permits` child via
+    // useLeads → select("permits(id, ...)"). Typed in src/types/lead.ts
+    // since 2026-04-30 type-safety pass.
+    permitUuid: lead.permits?.id ?? undefined,
     filedDate: lead.permit_filed_date ?? undefined,
     // Phase 0b lifecycle fields for the project-stage timeline.
-    appliedDate: (((lead as unknown as Record<string, unknown>).permits as Record<string, unknown> | undefined)?.applied_date as string | undefined)
-      ?? lead.permit_filed_date ?? undefined,
-    issuedDate: ((lead as unknown as Record<string, unknown>).permits as Record<string, unknown> | undefined)?.issued_date as string | undefined,
-    completedDate: ((lead as unknown as Record<string, unknown>).permits as Record<string, unknown> | undefined)?.completed_date as string | undefined,
-    permitStatus: ((lead as unknown as Record<string, unknown>).permits as Record<string, unknown> | undefined)?.status as string | undefined,
+    appliedDate: lead.permits?.applied_date ?? lead.permit_filed_date ?? undefined,
+    issuedDate: lead.permits?.issued_date ?? undefined,
+    completedDate: lead.permits?.completed_date ?? undefined,
+    permitStatus: lead.permits?.status ?? undefined,
     propertyValue: lead.property_value ? formatCurrency(lead.property_value) : undefined,
     assessedValue: lead.assessed_value ? formatCurrency(lead.assessed_value) : undefined,
     yearBuilt: lead.year_built ?? undefined,
@@ -113,31 +112,29 @@ function mapLead(lead: Lead): LeadData {
     lng: lead.longitude ?? null,
     cityState: cityState || undefined,
 
-    // Extended enrichment fields (migration 00044). Each may be NULL on
-    // the row — the cast through Record<string,unknown> avoids needing
-    // to extend the Lead type for fields that aren't yet universal in
-    // the DB schema across all envs. The drawer renders each only when
-    // present so older envs without the migration applied are unaffected.
-    employer: ((lead as unknown as Record<string, unknown>).employer as string | undefined),
-    occupation: ((lead as unknown as Record<string, unknown>).occupation as string | undefined),
-    businessPhone: ((lead as unknown as Record<string, unknown>).business_phone as string | undefined),
-    businessStatus: ((lead as unknown as Record<string, unknown>).business_status as string | undefined),
-    businessWebsite: ((lead as unknown as Record<string, unknown>).business_website as string | undefined),
-    licenseNumber: ((lead as unknown as Record<string, unknown>).license_number as string | undefined),
-    licenseStatus: ((lead as unknown as Record<string, unknown>).license_status as string | undefined),
-    naicsCode: ((lead as unknown as Record<string, unknown>).naics_code as string | undefined),
-    contactSource: ((lead as unknown as Record<string, unknown>).contact_source as string | undefined),
-    contactConfidence: ((lead as unknown as Record<string, unknown>).contact_confidence as number | undefined),
+    // Extended enrichment fields (migrations 00039/00044). Each may be
+    // NULL on the row — drawer renders only when present, so older envs
+    // without the migration applied are unaffected (graceful degrade).
+    employer: lead.employer ?? undefined,
+    occupation: lead.occupation ?? undefined,
+    businessPhone: lead.business_phone ?? undefined,
+    businessStatus: lead.business_status ?? undefined,
+    businessWebsite: lead.business_website ?? undefined,
+    licenseNumber: lead.license_number ?? undefined,
+    licenseStatus: lead.license_status ?? undefined,
+    naicsCode: lead.naics_code ?? undefined,
+    contactSource: lead.contact_source ?? undefined,
+    contactConfidence: lead.contact_confidence ?? undefined,
 
     // Phase 1.2: predictive cross-trade suggestions (migration 00045).
     // jsonb array per the rules engine output. Drawer's
     // CrossTradeOpportunities component renders these.
-    crossTradeSuggestions: (lead as unknown as Record<string, unknown>).cross_trade_suggestions,
+    crossTradeSuggestions: lead.cross_trade_suggestions,
 
     // Phase 1.3: DIY-vs-pro applicant fields (existing columns from
     // migration 00004 — surfaced via the joined permits row in useLeads).
-    permitApplicantName: (((lead as unknown as Record<string, unknown>).permits as Record<string, unknown> | undefined)?.applicant_name as string | undefined),
-    permitContractorName: (((lead as unknown as Record<string, unknown>).permits as Record<string, unknown> | undefined)?.contractor_name as string | undefined),
+    permitApplicantName: lead.permits?.applicant_name ?? undefined,
+    permitContractorName: lead.permits?.contractor_name ?? undefined,
 
     rawValue: lead.permit_value ?? lead.pipeline_value ?? undefined,
   };

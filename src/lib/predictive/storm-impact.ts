@@ -17,7 +17,7 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { deriveConfidenceLabel, type ConfidenceLabel } from "./cascade";
+import { clampProbability, deriveConfidenceLabel, type ConfidenceLabel } from "./cascade";
 
 /** Event types that historically drive repair-permit pulls. */
 export const REPAIR_DRIVING_EVENTS = [
@@ -150,19 +150,16 @@ export function buildStormPrediction(
     last_storm_date: mostRecent.begin_date,
     max_magnitude: maxMagnitude(events),
     primary_event_type: predominantEventType(events),
-    repair_likelihood_60d: clampLikelihood(historicalRate60d * recency),
-    repair_likelihood_90d: clampLikelihood(historicalRate90d * recency),
+    repair_likelihood_60d: clampProbability(historicalRate60d * recency),
+    repair_likelihood_90d: clampProbability(historicalRate90d * recency),
     sample_size: sampleSize,
     confidence_label: deriveConfidenceLabel(sampleSize),
   };
 }
 
-function clampLikelihood(p: number): number {
-  if (!Number.isFinite(p)) return 0;
-  if (p < 0) return 0;
-  if (p > 1) return 1;
-  return Math.round(p * 1000) / 1000;
-}
+/* clampLikelihood was an exact duplicate of clampProbability from
+ * ./cascade.ts. Consolidated 2026-04-30 — single source of truth for
+ * the [0, 1] clamp + 3-decimal rounding rule. */
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Historical-rate computation
