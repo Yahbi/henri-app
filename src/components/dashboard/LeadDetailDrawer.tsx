@@ -260,46 +260,73 @@ export function LeadDetailDrawer({
    * paths) and fill in the rest after the round-trip. */
   const { permit: fetchedPermit } = usePermitDetail(lead?.permitNumber ?? null);
 
+  /* ── Drag-to-resize: document-level listener pattern ────────────────
+   *
+   * On pointer-down: capture starting Y + height, attach `mousemove` /
+   * `mouseup` listeners to `document`. On move: update height. On up:
+   * commit + remove listeners.
+   *
+   * Why document instead of `setPointerCapture` on the handle: pointer
+   * capture lost track when the drag handle re-rendered (which it does
+   * on every height change because the aria-valuenow attribute updates).
+   * Browsers handle that re-render edge case inconsistently — Chrome
+   * usually keeps capture, Edge sometimes drops it, Safari trackpad
+   * fires phantom pointercancel. The document-listener pattern is the
+   * canonical fix and works the same way every browser; it's also how
+   * libraries like react-resizable-panels do it.
+   *
+   * Refs (mutable, not reactive) instead of state for `dragging` /
+   * `startY` / `startH` so we never trigger a re-render mid-drag, which
+   * would void the listeners. `setLocalHeight` IS state because the
+   * drawer must visually update on every move. */
   const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
+    (e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
       dragging.current = true;
       startY.current = e.clientY;
       startH.current = localHeight;
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+
+      const onMove = (ev: MouseEvent) => {
+        if (!dragging.current) return;
+        const parent = containerRef.current?.parentElement;
+        const parentHeight = parent?.clientHeight ?? 600;
+        const maxH = Math.round(parentHeight * MAX_HEIGHT_RATIO);
+        const delta = startY.current - ev.clientY;
+        const next = Math.min(
+          maxH,
+          Math.max(MIN_HEIGHT, startH.current + delta),
+        );
+        setLocalHeight(next);
+      };
+
+      const onUp = () => {
+        if (!dragging.current) return;
+        dragging.current = false;
+        // Use the most recent localHeight via the functional setter so we
+        // commit the truly latest value even if React batched the prior
+        // update. Same value as state, just guaranteed to be current.
+        setLocalHeight((latest) => {
+          const committed = Math.max(MIN_HEIGHT, latest);
+          onHeightChange(committed);
+          return committed;
+        });
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+      // Visual cue: row-resize cursor stays on for the entire drag, not
+      // just over the handle. Disable text-selection while dragging so a
+      // long drag across the page doesn't accidentally select half the
+      // dashboard contents.
+      document.body.style.cursor = "row-resize";
+      document.body.style.userSelect = "none";
     },
-    [localHeight],
+    [localHeight, onHeightChange],
   );
-
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current) return;
-    const parentHeight =
-      containerRef.current?.parentElement?.clientHeight ?? 600;
-    const maxH = Math.round(parentHeight * MAX_HEIGHT_RATIO);
-    const delta = startY.current - e.clientY;
-    const next = Math.min(maxH, Math.max(MIN_HEIGHT, startH.current + delta));
-    // Local-only update — parent doesn't re-render on every frame.
-    setLocalHeight(next);
-  }, []);
-
-  const onPointerUp = useCallback(() => {
-    if (!dragging.current) return;
-    dragging.current = false;
-    // Clamp on commit so no state path can land the drawer below the floor.
-    const committed = Math.max(MIN_HEIGHT, localHeight);
-    onHeightChange(committed);
-  }, [localHeight, onHeightChange]);
-
-  // If the pointer is cancelled (pointercancel or pointerlost — e.g. user
-  // scrolls, browser tab switches, pointer leaves capture scope) we need
-  // to unstick dragging.current otherwise the height-sync effect stays
-  // blocked and the drawer never rehydrates from the parent. React
-  // exposes onLostPointerCapture which fires in both of those cases.
-  const onLostPointerCapture = useCallback(() => {
-    if (!dragging.current) return;
-    dragging.current = false;
-    setLocalHeight((prev) => Math.max(MIN_HEIGHT, prev));
-  }, []);
 
   const onDoubleClick = useCallback(() => {
     const parentHeight =
@@ -405,10 +432,6 @@ export function LeadDetailDrawer({
         aria-valuemax={parentMaxHeight}
         tabIndex={0}
         onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onLostPointerCapture}
-        onLostPointerCapture={onLostPointerCapture}
         onDoubleClick={onDoubleClick}
         onKeyDown={onKeyDown}
         title="Drag to resize · double-click to toggle · arrow keys also work"
