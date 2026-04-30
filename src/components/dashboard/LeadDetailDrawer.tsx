@@ -260,31 +260,49 @@ export function LeadDetailDrawer({
    * paths) and fill in the rest after the round-trip. */
   const { permit: fetchedPermit } = usePermitDetail(lead?.permitNumber ?? null);
 
-  /* ── Drag-to-resize: document-level listener pattern ────────────────
+  /* ── Drag-to-resize: dead-simple mouse-event pattern ───────────────
    *
-   * On pointer-down: capture starting Y + height, attach `mousemove` /
-   * `mouseup` listeners to `document`. On move: update height. On up:
-   * commit + remove listeners.
+   * Click-and-drag: the canonical implementation that works the same way
+   * in every browser, no pointer-capture / pointer-event indirection.
    *
-   * Why document instead of `setPointerCapture` on the handle: pointer
-   * capture lost track when the drag handle re-rendered (which it does
-   * on every height change because the aria-valuenow attribute updates).
-   * Browsers handle that re-render edge case inconsistently — Chrome
-   * usually keeps capture, Edge sometimes drops it, Safari trackpad
-   * fires phantom pointercancel. The document-listener pattern is the
-   * canonical fix and works the same way every browser; it's also how
-   * libraries like react-resizable-panels do it.
+   *   1. mousedown on the handle  → record startY + startHeight, attach
+   *      document mousemove + mouseup, set the body cursor + user-select
+   *   2. mousemove (anywhere on the page) → compute delta, call
+   *      setLocalHeight to redraw the drawer
+   *   3. mouseup (anywhere on the page) → commit the final height to the
+   *      parent (so it persists to localStorage), remove document
+   *      listeners, restore body styles
    *
-   * Refs (mutable, not reactive) instead of state for `dragging` /
-   * `startY` / `startH` so we never trigger a re-render mid-drag, which
-   * would void the listeners. `setLocalHeight` IS state because the
-   * drawer must visually update on every move. */
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
+   * Why this layout vs the prior implementations:
+   *
+   *   - setPointerCapture on the handle (pre-b083b02): broke when the
+   *     handle re-rendered mid-drag because aria-valuenow updated;
+   *     browsers dropped capture inconsistently, fired phantom
+   *     pointercancel events that snapped the drawer to MIN_HEIGHT.
+   *
+   *   - Document listeners + onHeightChange inside a state-updater
+   *     (b083b02): React fired the "Cannot update a component while
+   *     rendering a different component" warning because setLocalHeight's
+   *     updater function called onHeightChange (which calls the parent's
+   *     setState). State updaters must be pure — no side effects.
+   *
+   *   - Current: a closure-local `currentHeight` variable tracks the
+   *     latest height during the drag. We read it in mouseup and call
+   *     onHeightChange OUTSIDE of any state-updater, so React's
+   *     during-render check is happy. mousedown / mousemove / mouseup
+   *     are direct browser events — no pointer-to-mouse mapping
+   *     uncertainty. */
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
       e.preventDefault();
       dragging.current = true;
       startY.current = e.clientY;
       startH.current = localHeight;
+      // Closure-local: the latest height during this specific drag.
+      // Read by onUp to commit to the parent without violating React's
+      // no-setState-in-updater rule. Initialised to startH so a click
+      // without movement still commits sensibly.
+      let currentHeight = localHeight;
 
       const onMove = (ev: MouseEvent) => {
         if (!dragging.current) return;
@@ -296,24 +314,20 @@ export function LeadDetailDrawer({
           maxH,
           Math.max(MIN_HEIGHT, startH.current + delta),
         );
+        currentHeight = next;
         setLocalHeight(next);
       };
 
       const onUp = () => {
         if (!dragging.current) return;
         dragging.current = false;
-        // Use the most recent localHeight via the functional setter so we
-        // commit the truly latest value even if React batched the prior
-        // update. Same value as state, just guaranteed to be current.
-        setLocalHeight((latest) => {
-          const committed = Math.max(MIN_HEIGHT, latest);
-          onHeightChange(committed);
-          return committed;
-        });
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
+        // Commit OUTSIDE of any state-updater — straight call to the
+        // parent's setBottomHeight (which writes to localStorage).
+        onHeightChange(Math.max(MIN_HEIGHT, currentHeight));
       };
 
       document.addEventListener("mousemove", onMove);
@@ -431,7 +445,7 @@ export function LeadDetailDrawer({
         aria-valuemin={MIN_HEIGHT}
         aria-valuemax={parentMaxHeight}
         tabIndex={0}
-        onPointerDown={onPointerDown}
+        onMouseDown={onMouseDown}
         onDoubleClick={onDoubleClick}
         onKeyDown={onKeyDown}
         title="Drag to resize · double-click to toggle · arrow keys also work"
