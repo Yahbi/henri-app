@@ -22,6 +22,7 @@ import {
   KeyRound,
   ExternalLink,
   LifeBuoy,
+  PlayCircle,
 } from "lucide-react";
 
 import { PLAN_INFO, PLAN_ZIP_LIMITS } from "@/lib/plans/constants";
@@ -493,6 +494,54 @@ export default function SettingsPage() {
             >
               Google security
             </a>
+          </div>
+
+          <div className="border-t border-border pt-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-bg-subtle flex items-center justify-center shrink-0">
+                  <PlayCircle className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Replay tutorial
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Walk through the dashboard tour again
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    // Reset the DB flag so the auto-fire condition is true on
+                    // the next dashboard mount.
+                    await fetch("/api/profile/tutorial", { method: "DELETE" });
+                    // Set the localStorage trigger so the tour fires immediately
+                    // when we land on /dashboard, without waiting for the
+                    // profile refresh round-trip.
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("henri:tutorial:requested-replay", "1");
+                    }
+                    addToast({
+                      type: "success",
+                      title: "Tutorial reset",
+                      description: "Heading to the dashboard…",
+                    });
+                    router.push("/dashboard");
+                  } catch (err) {
+                    addToast({
+                      type: "error",
+                      title: "Couldn't reset tutorial",
+                      description: err instanceof Error ? err.message : "Try again.",
+                    });
+                  }
+                }}
+                className="px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-accent transition-colors"
+              >
+                Replay
+              </button>
+            </div>
           </div>
 
           <div className="border-t border-border pt-3">

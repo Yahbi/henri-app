@@ -2,6 +2,7 @@ import { DashboardTopBar } from "@/components/layout/DashboardTopBar";
 import { CommandPalette } from "@/components/dashboard/CommandPalette";
 import { Toaster } from "@/components/toast/Toaster";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { ContractorTour } from "@/components/tutorial/ContractorTour";
 
 export default function DashboardLayout({
   children,
@@ -25,6 +26,11 @@ export default function DashboardLayout({
       <CommandPalette />
       {/* Toast notifications for send/save feedback — Phase 2.5 */}
       <Toaster />
+      {/* First-run guided tour for new contractors. Auto-fires once
+       * after onboarding completion; users can skip any time and
+       * replay from /dashboard/settings. Self-renders nothing until
+       * the conditions match — see ContractorTour.tsx. */}
+      <ContractorTour />
     </div>
   );
 }

@@ -517,6 +517,7 @@ function DashboardContent() {
       <div className="relative flex flex-1 overflow-hidden">
       {/* Leads panel — left side, resizable (or collapsed to rail) */}
       <div
+        data-tour="leads-panel"
         className="shrink-0 h-full transition-[width] duration-200 ease-out"
         style={{ width: leftCollapsed ? COLLAPSED_WIDTH : leftWidth }}
       >
@@ -557,7 +558,7 @@ function DashboardContent() {
       )}
 
       {/* Map area — fills remaining space */}
-      <div className="relative flex-1 min-h-0">
+      <div data-tour="lead-map" className="relative flex-1 min-h-0">
         <div className="absolute inset-0">
           <MapDashboard
             ref={mapRef}

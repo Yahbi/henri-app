@@ -301,6 +301,7 @@ export function DashboardTopBar() {
           {/* Settings */}
           <button
             onClick={() => router.push("/dashboard/settings")}
+            data-tour="topbar-settings"
             className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
             aria-label="Account settings"
           >
@@ -320,12 +321,21 @@ export function DashboardTopBar() {
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const active = isActive(tab.href);
+          // Derive a data-tour key from the href so the first-run guided
+          // tour can anchor steps to specific tabs (see
+          // src/lib/tutorial/steps.ts). Path "/dashboard" -> "leads",
+          // "/dashboard/pipeline" -> "pipeline", etc. Stable across
+          // STUB_TABS reorders.
+          const tourKey = tab.href === "/dashboard"
+            ? "leads"
+            : tab.href.split("/").pop();
           return (
             <Link
               key={tab.href}
               href={tab.href}
               role="tab"
               aria-selected={active}
+              data-tour={`dashboard-nav-${tourKey}`}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium whitespace-nowrap border-b-2 transition-colors shrink-0",
                 active

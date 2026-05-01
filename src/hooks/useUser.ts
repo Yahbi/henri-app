@@ -29,6 +29,12 @@ interface UserProfile {
   /** Stripe customer ID — present after first checkout. Used to route
    * plan upgrades through change-plan instead of creating a new subscription. */
   stripe_customer_id?: string | null;
+  /** First-run guided tour completion (or skip) timestamp. Migration
+   * 00068. NULL = the contractor hasn't seen / completed the tour yet
+   * — `<ContractorTour />` auto-fires when this is null AND
+   * onboarding_completed is true. The settings page exposes a Replay
+   * button that resets it to null. */
+  tutorial_completed_at?: string | null;
 }
 
 interface UseUserReturn {
@@ -47,12 +53,41 @@ export function useUser(): UseUserReturn {
   const supabase = createClient();
 
   const fetchProfile = useCallback(async (userId: string) => {
-    const { data } = await supabase
+    // 2026-04-30: dropped points_balance, tier, total_jobs_won from
+    // the SELECT — those columns were never migrated onto profiles
+    // (gamification was scoped out) and PostgREST returned "column
+    // does not exist", which silently set data:null and left the
+    // whole dashboard's profile-dependent state (including the
+    // first-run tutorial gate) stuck. The TS type marks all three
+    // as optional so the consumer code already tolerates absence.
+    const cols = "id, email, full_name, company_name, phone, trade, plan, onboarding_completed, avg_rating, trial_ends_at, licensed_until, license_state, tutorial_completed_at";
+    const result = await supabase
       .from("profiles")
-      .select("id, email, full_name, company_name, phone, trade, plan, onboarding_completed, points_balance, tier, total_jobs_won, avg_rating, trial_ends_at, licensed_until, license_state")
+      .select(cols)
       .eq("id", userId)
       .single();
-    if (data) setProfile(data as UserProfile);
+
+    if (result.data) {
+      setProfile(result.data as UserProfile);
+      return;
+    }
+    if (result.error) {
+      const msg = result.error.message || "";
+      // tutorial_completed_at is on a brand-new migration — if a stale
+      // PostgREST schema cache rejects it, fall back to a narrower
+      // select so the dashboard isn't blocked on the column.
+      if (/tutorial_completed_at|Could not find the column/i.test(msg)) {
+        const narrow = await supabase
+          .from("profiles")
+          .select("id, email, full_name, company_name, phone, trade, plan, onboarding_completed, avg_rating, trial_ends_at, licensed_until, license_state")
+          .eq("id", userId)
+          .single();
+        if (narrow.data) setProfile(narrow.data as UserProfile);
+        else if (narrow.error) logger.error("useUser narrow fetchProfile error", { error: narrow.error.message });
+        return;
+      }
+      logger.error("useUser fetchProfile error", { error: msg });
+    }
   }, [supabase]);
 
   const refreshProfile = useCallback(async () => {
