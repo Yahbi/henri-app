@@ -87,6 +87,26 @@
     {
       "path": "/api/cron/weekly-briefing",
       "schedule": "0 8 * * 1"
+    },
+    {
+      "path": "/api/cron/swdi-events",
+      "schedule": "0 16 * * *"
+    },
+    {
+      "path": "/api/cron/courtlistener-liens",
+      "schedule": "30 16 * * *"
+    },
+    {
+      "path": "/api/cron/usgs-quakes",
+      "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/cron/hud-reo",
+      "schedule": "0 18 * * 0"
+    },
+    {
+      "path": "/api/cron/census-geocode",
+      "schedule": "0 19 * * *"
     }
   ]
 }
