@@ -131,6 +131,22 @@
     {
       "path": "/api/cron/hmda-rotate",
       "schedule": "0 23 * * *"
+    },
+    {
+      "path": "/api/cron/openfema-nfip",
+      "schedule": "30 23 * * *"
+    },
+    {
+      "path": "/api/cron/openfema-ia",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/state-licenses-rotate",
+      "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/cron/hud-zipxw",
+      "schedule": "0 1 * * 0"
     }
   ]
 }

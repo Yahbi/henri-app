@@ -57,9 +57,14 @@ const TASKS: CronTask[] = [
   { key: "cdc-svi",         path: "/api/cron/cdc-svi",               wave: "2.A", description: "CDC SVI by tract (~73k rows)" },
   { key: "census-acs",      path: "/api/cron/census-acs",            wave: "2.A", description: "Census ACS 5-yr 7 vars × 33k ZCTAs" },
   // Wave 2.B Phase 1 — disasters + news + mortgages
-  { key: "openfema",        path: "/api/cron/openfema-declarations", wave: "2.B", description: "FEMA disaster declarations (~70k)" },
-  { key: "gdelt",           path: "/api/cron/gdelt-triggers",        wave: "2.B", description: "GDELT construction-trigger news (7-day)" },
-  { key: "hmda",            path: "/api/cron/hmda-rotate",           wave: "2.B", description: "HMDA Modified LAR (today's state, year=last-full)" },
+  { key: "openfema",        path: "/api/cron/openfema-declarations", wave: "2.B.1", description: "FEMA disaster declarations (~70k)" },
+  { key: "gdelt",           path: "/api/cron/gdelt-triggers",        wave: "2.B.1", description: "GDELT construction-trigger news (7-day)" },
+  { key: "hmda",            path: "/api/cron/hmda-rotate",           wave: "2.B.1", description: "HMDA Modified LAR (today's state, year=last-full)" },
+  // Wave 2.B Phase 2 — federal claims + crosswalks + license rosters
+  { key: "nfip",            path: "/api/cron/openfema-nfip",         wave: "2.B.2", description: "FEMA NFIP claims (today's year)" },
+  { key: "ia",              path: "/api/cron/openfema-ia",           wave: "2.B.2", description: "FEMA IA valid registrations (today's disaster)" },
+  { key: "hud-zipxw",       path: "/api/cron/hud-zipxw",             wave: "2.B.2", description: "HUD ZIP crosswalk Tract/Place/CBSA/County (~320k)" },
+  { key: "state-licenses",  path: "/api/cron/state-licenses-rotate", wave: "2.B.2", description: "State contractor licensing board (today's state)" },
 ];
 
 interface RunResult {
