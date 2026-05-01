@@ -16,6 +16,18 @@ interface MapStyleSwitcherProps {
   onStyleChange?: (value: string) => void;
 }
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// helper — applies a basemap option to a maplibregl.Map. Pulled out
+// of handleChange so we can also call it when a queued click resolves
+// after the map finishes its initial load.
+function applyStyle(map: maplibregl.Map, option: MapStyleOption) {
+  // Maplibre accepts either a URL string or an inline style spec.
+  // Inline specs (ESRI sat/hybrid/streets) preserve raster sources
+  // exactly as defined; URL specs hit the network for the JSON.
+  map.setStyle((option.styleSpec as any) ?? option.value);
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 /**
  * Basemap style switcher. Prior version rendered as a labeled dropdown
  * showing "Voyager" / "Satellite" text in the top-right. The user asked
@@ -36,6 +48,13 @@ export function MapStyleSwitcher({
   );
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Queue a basemap pick if the user clicks before the map instance has
+  // mounted. The previous version of handleChange hit `if (!map) return`
+  // and silently swallowed the click — the popover would close (or stay
+  // open?), the basemap row wouldn't show a checkmark, and the canvas
+  // wouldn't change. This flushes any pending pick the moment `map`
+  // becomes non-null. Audit 2026-04-30.
+  const pendingPickRef = useRef<MapStyleOption | null>(null);
 
   // Close when the user clicks anywhere outside the popover — including
   // on the map canvas. Matches the Overlay panel pattern.
@@ -56,13 +75,29 @@ export function MapStyleSwitcher({
     };
   }, [open]);
 
-  function handleChange(option: MapStyleOption) {
+  // Flush a queued pick the moment the map instance becomes available.
+  useEffect(() => {
     if (!map) return;
+    const queued = pendingPickRef.current;
+    if (!queued) return;
+    pendingPickRef.current = null;
+    applyStyle(map, queued);
+    onStyleChange?.(queued.value);
+  }, [map, onStyleChange]);
+
+  function handleChange(option: MapStyleOption) {
+    // Always update the visible "selected" state so the user gets
+    // feedback (checkmark moves to the new row) even if the map isn't
+    // ready yet — eliminates the prior "click does nothing" failure.
     setCurrent(option.value);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    map.setStyle((option.styleSpec as any) ?? option.value);
-    onStyleChange?.(option.value);
     setOpen(false);
+    if (!map) {
+      // Queue and apply the moment the map mounts.
+      pendingPickRef.current = option;
+      return;
+    }
+    applyStyle(map, option);
+    onStyleChange?.(option.value);
   }
 
   const groups = MAP_STYLES_DROPDOWN.reduce<Record<string, MapStyleOption[]>>(
