@@ -35,15 +35,34 @@ const SWDI_BASE = "https://www.ncei.noaa.gov/swdiws/json/";
 interface SwdiRecord {
   ZTIME?: string;
   Z_TIME?: string;
+  // SWDI returns location as a single WKT field: "POINT (<lng> <lat>)"
+  // Older docs also reference LAT/LON which we keep as fallbacks.
+  SHAPE?: string;
   LAT?: number | string;
   LON?: number | string;
   // hail-specific
   MAXSIZE?: number | string;
   PROB?: number | string;
+  SEVPROB?: number | string;
   // wind-specific
   MAX_WIND?: number | string;
+  MAXWIND?: number | string;
   // remaining fields are kept in raw_json
   [k: string]: unknown;
+}
+
+/**
+ * Parse SWDI SHAPE WKT ("POINT (<lng> <lat>)") into [lng, lat].
+ * SWDI ships X/Y in lng/lat order per the WKT spec.
+ */
+function parseShape(shape: string | undefined): { lat: number; lng: number } | null {
+  if (!shape) return null;
+  const m = shape.match(/POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
+  if (!m) return null;
+  const lng = Number(m[1]);
+  const lat = Number(m[2]);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  return { lat, lng };
 }
 
 interface PreparedRow {
@@ -108,41 +127,55 @@ async function fetchSwdiDataset(dataset: string, days: number): Promise<SwdiReco
   }
 }
 
-function prepareHail(r: SwdiRecord): PreparedRow | null {
-  const ts = ztimeToIso(String(r.ZTIME ?? r.Z_TIME ?? ""));
+/** Resolve coordinates from either SHAPE (preferred) or LAT/LON fallbacks. */
+function resolveCoords(r: SwdiRecord): { lat: number; lng: number } | null {
+  const fromShape = parseShape(r.SHAPE);
+  if (fromShape) return fromShape;
   const lat = asNumber(r.LAT);
   const lng = asNumber(r.LON);
-  if (!ts || lat == null || lng == null) return null;
+  if (lat == null || lng == null) return null;
+  return { lat, lng };
+}
+
+function prepareHail(r: SwdiRecord): PreparedRow | null {
+  const ts = ztimeToIso(String(r.ZTIME ?? r.Z_TIME ?? ""));
+  const coords = resolveCoords(r);
+  if (!ts || !coords) return null;
+  // MAXSIZE is reported in inches by SWDI — convert to mm to match the
+  // canonical schema column name `max_size_mm`. (1 inch = 25.4 mm.)
+  const maxSizeIn = asNumber(r.MAXSIZE);
+  const maxSizeMm = maxSizeIn != null ? maxSizeIn * 25.4 : null;
+  // SEVPROB is the severe-weather probability; PROB is a generic hit
+  // probability. Prefer SEVPROB when present; fall back to PROB.
+  const probability = asNumber(r.SEVPROB) ?? asNumber(r.PROB);
   return {
     event_time: ts,
-    lat,
-    lng,
-    max_size_mm: asNumber(r.MAXSIZE),
-    probability: asNumber(r.PROB),
+    lat: coords.lat,
+    lng: coords.lng,
+    max_size_mm: maxSizeMm,
+    probability,
     raw_json: r,
   };
 }
 
 function prepareWind(r: SwdiRecord): PreparedRow | null {
   const ts = ztimeToIso(String(r.ZTIME ?? r.Z_TIME ?? ""));
-  const lat = asNumber(r.LAT);
-  const lng = asNumber(r.LON);
-  if (!ts || lat == null || lng == null) return null;
+  const coords = resolveCoords(r);
+  if (!ts || !coords) return null;
   return {
     event_time: ts,
-    lat,
-    lng,
-    max_wind_mph: asNumber(r.MAX_WIND),
+    lat: coords.lat,
+    lng: coords.lng,
+    max_wind_mph: asNumber(r.MAX_WIND) ?? asNumber(r.MAXWIND),
     raw_json: r,
   };
 }
 
 function prepareTornado(r: SwdiRecord): PreparedRow | null {
   const ts = ztimeToIso(String(r.ZTIME ?? r.Z_TIME ?? ""));
-  const lat = asNumber(r.LAT);
-  const lng = asNumber(r.LON);
-  if (!ts || lat == null || lng == null) return null;
-  return { event_time: ts, lat, lng, raw_json: r };
+  const coords = resolveCoords(r);
+  if (!ts || !coords) return null;
+  return { event_time: ts, lat: coords.lat, lng: coords.lng, raw_json: r };
 }
 
 /** Insert in batches of 500 with on-conflict-do-nothing semantics. */

@@ -80,13 +80,20 @@ export async function GET(request: NextRequest) {
   let pulled = 0;
   let inserted = 0;
   let pages = 0;
+  let lastStatus = 0;
   const MAX_PAGES = 20; // soft cap — beyond this we're scanning history, not fresh
+  const hasToken = !!process.env.CL_TOKEN;
 
   try {
     while (url && pages < MAX_PAGES) {
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(60_000) });
+      lastStatus = res.status;
       if (!res.ok) {
-        logger.warn("courtlistener.fetch_failed", { status: res.status, page: pages });
+        logger.warn("courtlistener.fetch_failed", {
+          status: res.status,
+          page: pages,
+          has_token: hasToken,
+        });
         break;
       }
       const json = (await res.json()) as ClPage;
@@ -127,11 +134,21 @@ export async function GET(request: NextRequest) {
       if (url) await new Promise((r) => setTimeout(r, 300));
     }
 
+    // Surface the auth gap so a 403 (anonymous) doesn't silently look
+    // like a healthy zero-result run. CourtListener requires a free
+    // CL_TOKEN env var (sign up at courtlistener.com → Account → API).
+    const authNote =
+      !hasToken && (lastStatus === 403 || lastStatus === 401)
+        ? "CourtListener anonymous access denied — set CL_TOKEN in Vercel env"
+        : undefined;
+
     logger.info("courtlistener.done", {
       duration_ms: Date.now() - startedAt,
       pages,
       pulled,
       inserted,
+      last_status: lastStatus,
+      has_token: hasToken,
     });
     return NextResponse.json({
       ok: true,
@@ -139,6 +156,9 @@ export async function GET(request: NextRequest) {
       pages,
       pulled,
       inserted,
+      last_status: lastStatus,
+      has_token: hasToken,
+      ...(authNote ? { note: authNote } : {}),
     });
   } catch (err) {
     logger.error("courtlistener.error", { error: String(err) });
