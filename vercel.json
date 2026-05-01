@@ -107,6 +107,18 @@
     {
       "path": "/api/cron/census-geocode",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/cron/fema-nri",
+      "schedule": "0 20 * * 0"
+    },
+    {
+      "path": "/api/cron/cdc-svi",
+      "schedule": "30 20 * * 0"
+    },
+    {
+      "path": "/api/cron/census-acs",
+      "schedule": "0 21 * * 0"
     }
   ]
 }
