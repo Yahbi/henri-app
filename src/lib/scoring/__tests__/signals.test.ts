@@ -108,16 +108,18 @@ const emptyResult: ScoreResult = {
 /* ── Tests ────────────────────────────────────────────────────────────── */
 
 describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
-  it("contains exactly 6 signals", () => {
-    expect(SCORE_SIGNAL_ORDER).toHaveLength(6);
+  it("contains exactly 6 base + 2 optional Wave 1.5 boosters = 8", () => {
+    expect(SCORE_SIGNAL_ORDER).toHaveLength(8);
   });
 
-  it("weights sum to 100", () => {
-    const total = SCORE_SIGNAL_ORDER.reduce((acc, s) => acc + s.weight, 0);
-    expect(total).toBe(100);
+  it("base 6 weights sum to 100 (boosters are additive on top)", () => {
+    const baseTotal = SCORE_SIGNAL_ORDER
+      .filter((s) => !s.optional)
+      .reduce((acc, s) => acc + s.weight, 0);
+    expect(baseTotal).toBe(100);
   });
 
-  it("declares the 6 canonical signal keys", () => {
+  it("declares the 8 canonical signal keys (base 6 + 2 boosters)", () => {
     const keys = SCORE_SIGNAL_ORDER.map((s) => s.key);
     const expected: ScoreSignalKey[] = [
       "permit_freshness",
@@ -126,11 +128,13 @@ describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
       "zip_demand",
       "homeowner_engagement",
       "historical_conversion",
+      "storm_proximity_24h",
+      "recent_lien_90d",
     ];
     expect(keys).toEqual(expected);
   });
 
-  it("uses the documented per-signal weights (20/20/15/15/15/15)", () => {
+  it("uses the documented per-signal weights (20/20/15/15/15/15 + 5/3)", () => {
     const weightByKey = Object.fromEntries(
       SCORE_SIGNAL_ORDER.map((s) => [s.key, s.weight]),
     );
@@ -140,6 +144,19 @@ describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
     expect(weightByKey.zip_demand).toBe(15);
     expect(weightByKey.homeowner_engagement).toBe(15);
     expect(weightByKey.historical_conversion).toBe(15);
+    expect(weightByKey.storm_proximity_24h).toBe(5);
+    expect(weightByKey.recent_lien_90d).toBe(3);
+  });
+
+  it("flags Wave 1.5 boosters as optional (only render when active)", () => {
+    const booster1 = SCORE_SIGNAL_ORDER.find((s) => s.key === "storm_proximity_24h");
+    const booster2 = SCORE_SIGNAL_ORDER.find((s) => s.key === "recent_lien_90d");
+    expect(booster1?.optional).toBe(true);
+    expect(booster2?.optional).toBe(true);
+    // None of the base 6 are optional.
+    for (const s of SCORE_SIGNAL_ORDER.filter((s) => !s.optional)) {
+      expect(s.optional).not.toBe(true);
+    }
   });
 
   it("each signal has a non-empty human label", () => {
@@ -153,10 +170,10 @@ describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
 describe("buildScoreSignalBreakdown — populated case", () => {
   const breakdown = buildScoreSignalBreakdown(populatedResult, populatedSignals);
 
-  it("returns 6 rows in the canonical order", () => {
+  it("returns the 6 base rows (boosters are 0 → omitted) in canonical order", () => {
     expect(breakdown).toHaveLength(6);
     expect(breakdown.map((r) => r.signal)).toEqual(
-      SCORE_SIGNAL_ORDER.map((s) => s.key),
+      SCORE_SIGNAL_ORDER.filter((s) => !s.optional).map((s) => s.key),
     );
   });
 
@@ -192,7 +209,9 @@ describe("buildScoreSignalBreakdown — populated case", () => {
 describe("buildScoreSignalBreakdown — empty case", () => {
   const breakdown = buildScoreSignalBreakdown(emptyResult, emptySignals);
 
-  it("still returns 6 rows even when no factors fired", () => {
+  it("still returns the 6 base rows even when no factors fired", () => {
+    // Boosters at 0 are omitted via the `optional` flag, so we keep the
+    // historical "always render base 6" invariant.
     expect(breakdown).toHaveLength(6);
   });
 
@@ -249,6 +268,41 @@ describe("buildScoreSignalBreakdown — clamping invariants", () => {
     const breakdown = buildScoreSignalBreakdown(huge, populatedSignals);
     const row = breakdown.find((r) => r.signal === "permit_freshness");
     expect(row?.value).toBe(20); // permit_freshness weight
+  });
+});
+
+describe("buildScoreSignalBreakdown — Wave 1.5 booster path", () => {
+  it("renders the storm booster row when the lead scored >0 on it", () => {
+    const result: ScoreResult = { ...populatedResult, storm: 4 };
+    const signals: ScoringSignals = { ...populatedSignals, stormProximity24h: 78 };
+    const breakdown = buildScoreSignalBreakdown(result, signals);
+    expect(breakdown.find((r) => r.signal === "storm_proximity_24h")).toBeDefined();
+    expect(breakdown.find((r) => r.signal === "storm_proximity_24h")?.value).toBe(4);
+  });
+
+  it("renders the lien booster row when the lead scored >0 on it", () => {
+    const result: ScoreResult = { ...populatedResult, lien: 2 };
+    const signals: ScoringSignals = { ...populatedSignals, recentLienCount: 3 };
+    const breakdown = buildScoreSignalBreakdown(result, signals);
+    expect(breakdown.find((r) => r.signal === "recent_lien_90d")).toBeDefined();
+    expect(breakdown.find((r) => r.signal === "recent_lien_90d")?.value).toBe(2);
+  });
+
+  it("hides booster rows when the lead scored 0 (no nearby storm/lien)", () => {
+    const breakdown = buildScoreSignalBreakdown(populatedResult, populatedSignals);
+    expect(breakdown.find((r) => r.signal === "storm_proximity_24h")).toBeUndefined();
+    expect(breakdown.find((r) => r.signal === "recent_lien_90d")).toBeUndefined();
+  });
+
+  it("renders all 8 rows when both boosters are active", () => {
+    const result: ScoreResult = { ...populatedResult, storm: 5, lien: 3 };
+    const signals: ScoringSignals = {
+      ...populatedSignals,
+      stormProximity24h: 92,
+      recentLienCount: 7,
+    };
+    const breakdown = buildScoreSignalBreakdown(result, signals);
+    expect(breakdown).toHaveLength(8);
   });
 });
 

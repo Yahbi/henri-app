@@ -10,10 +10,33 @@ export interface LeadContextStorm {
   magnitude: number | null;
 }
 
+/** Wave 1.5 — single SWDI signature within 25mi/30d of the lead. */
+export interface SwdiNearby {
+  kind: "hail" | "wind" | "tornado";
+  event_time: string;
+  miles_away: number;
+  max_size_mm?: number | null;
+  max_wind_mph?: number | null;
+  probability?: number | null;
+}
+
+/** Wave 1.5 — recent CourtListener mechanic-lien docket. */
+export interface RecentLien {
+  case_name: string | null;
+  date_filed: string | null;
+  court: string | null;
+  docket_number: string | null;
+  absolute_url: string | null;
+  snippet: string | null;
+}
+
 export interface LeadContextData {
   derived: DerivedEnrichments;
   adjacent_count_90d: number;
   storm: LeadContextStorm | null;
+  /** Wave 1.5 — nullable because pre-update API responses don't ship it. */
+  swdi_nearby?: SwdiNearby[];
+  recent_liens?: RecentLien[];
 }
 
 /**

@@ -1,6 +1,19 @@
 "use client";
 
-import { Loader2, Home, Wrench, Zap, Droplets, Sun, Users, CloudRain } from "lucide-react";
+import {
+  Loader2,
+  Home,
+  Wrench,
+  Zap,
+  Droplets,
+  Sun,
+  Users,
+  CloudRain,
+  CloudHail,
+  Tornado,
+  Wind,
+  Scale,
+} from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import type { LeadContextData } from "@/hooks/useLeadContext";
 
@@ -97,6 +110,8 @@ export function PropertyContextSection({ data, isLoading }: Props) {
   if (!data) return null;
 
   const { derived, adjacent_count_90d, storm } = data;
+  const swdiNearby = data.swdi_nearby ?? [];
+  const recentLiens = data.recent_liens ?? [];
 
   // Decide whether to render anything at all. Hide the entire section if
   // we have zero useful signals (avoid empty-card noise on leads with no
@@ -108,9 +123,22 @@ export function PropertyContextSection({ data, isLoading }: Props) {
   const hasPanel = derived.panel_age.estimate !== "unknown";
   const hasNeighbors = adjacent_count_90d > 0;
   const hasStorm = storm != null;
+  const hasSwdi = swdiNearby.length > 0;
+  const hasLiens = recentLiens.length > 0;
   const anySignal =
-    hasRoof || hasHvac || hasPool || hasSolar || hasPanel || hasNeighbors || hasStorm;
+    hasRoof || hasHvac || hasPool || hasSolar || hasPanel ||
+    hasNeighbors || hasStorm || hasSwdi || hasLiens;
   if (!anySignal) return null;
+
+  /** Days-ago label for SWDI / lien event timestamps (UTC). */
+  const daysAgo = (iso: string): string => {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    const days = Math.round(ms / 86_400_000);
+    if (days <= 0) return "today";
+    if (days === 1) return "1d ago";
+    return `${days}d ago`;
+  };
 
   return (
     <section
@@ -243,6 +271,99 @@ export function PropertyContextSection({ data, isLoading }: Props) {
                 mag {storm.magnitude}
               </span>
             )}
+          </li>
+        )}
+
+        {/* Wave 1.5 — recent NOAA SWDI radar signatures within 25mi/30d.
+            Distinct from `storm` above which is the curated NOAA Storm
+            Events ground-truth match for the lead's permit. SWDI is the
+            radar firehose; multiple per lead is expected. */}
+        {hasSwdi && (
+          <li className="border-t border-border/40 pt-1.5 mt-0.5">
+            <div className="flex items-center gap-1.5 mb-1">
+              <CloudHail className="h-3 w-3 text-muted-foreground/70 shrink-0" />
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Recent storm signatures (25mi · 30d)
+              </span>
+            </div>
+            <ul className="space-y-1 ml-4">
+              {swdiNearby.map((s, i) => {
+                const Icon =
+                  s.kind === "tornado" ? Tornado : s.kind === "wind" ? Wind : CloudHail;
+                let detail = "";
+                if (s.kind === "hail" && s.max_size_mm != null) {
+                  detail = `${(s.max_size_mm / 25.4).toFixed(2)} in hail`;
+                } else if (s.kind === "wind" && s.max_wind_mph != null) {
+                  detail = `${Math.round(s.max_wind_mph)} mph`;
+                } else if (s.kind === "tornado") {
+                  detail = "Tornado vortex signature";
+                }
+                return (
+                  <li
+                    key={`${s.kind}-${s.event_time}-${i}`}
+                    className="flex items-center gap-2 text-[11px]"
+                  >
+                    <Icon className="h-3 w-3 text-amber-600/80 shrink-0" />
+                    <span className="text-foreground font-medium capitalize">
+                      {s.kind}
+                    </span>
+                    {detail && (
+                      <span className="text-fg-subtle/70 text-[10px]">
+                        {detail}
+                      </span>
+                    )}
+                    <span className="text-fg-subtle/60 text-[10px] ml-auto italic">
+                      {s.miles_away}mi · {daysAgo(s.event_time)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </li>
+        )}
+
+        {/* Wave 1.5 — recent CourtListener mechanic-lien dockets. Soft
+            payment-distress signal in the area. Renders as scrollable
+            dockets with link to courtlistener.com when available. */}
+        {hasLiens && (
+          <li className="border-t border-border/40 pt-1.5 mt-0.5">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Scale className="h-3 w-3 text-muted-foreground/70 shrink-0" />
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Payment-distress filings nearby (90d)
+              </span>
+            </div>
+            <ul className="space-y-1 ml-4">
+              {recentLiens.map((l, i) => {
+                const inner = (
+                  <>
+                    <Scale className="h-3 w-3 text-rose-600/80 shrink-0" />
+                    <span className="text-foreground font-medium truncate max-w-[55%]">
+                      {l.case_name ?? l.docket_number ?? "Mechanic lien"}
+                    </span>
+                    <span className="text-fg-subtle/60 text-[10px] ml-auto italic">
+                      {l.date_filed ? daysAgo(`${l.date_filed}T00:00:00Z`) : ""}
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={`${l.docket_number ?? "lien"}-${i}`} className="text-[11px]">
+                    {l.absolute_url ? (
+                      <a
+                        href={`https://www.courtlistener.com${l.absolute_url}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-2 hover:underline"
+                      >
+                        {inner}
+                      </a>
+                    ) : (
+                      <div className="flex items-center gap-2">{inner}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           </li>
         )}
       </ul>

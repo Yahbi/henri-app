@@ -39,6 +39,26 @@ export interface ScoringSignals {
   /* Historical signals */
   zipConversionRate: number | null;   // historical win rate for this ZIP (0-1)
   tradeConversionRate: number | null; // historical win rate for this trade (0-1)
+
+  /* Wave 1.5 sidecar signals — pulled from canonical-data-layer
+   * tables populated by /api/cron/swdi-events and
+   * /api/cron/courtlistener-liens. Both are OPTIONAL — when null,
+   * the corresponding component contributes 0 (no boost), so
+   * existing scoring stays stable until the score cron starts
+   * plumbing these values through. */
+
+  /** Highest-magnitude recent storm event (hail/wind/tornado)
+   * within 25 miles of the lead in the last 24 hours. Captures the
+   * "fresh storm just hit" signal that drives roofing/exterior
+   * surge. Set to `null` when no event nearby or signal not
+   * computed yet. Higher = stronger boost. */
+  stormProximity24h?: number | null;
+
+  /** Number of mechanic-lien dockets in the same zip filed in the
+   * last 90 days. A non-zero value means there's payment-distress
+   * activity nearby, which is a contractor-outreach trigger. Set
+   * to `null` when not computed yet. */
+  recentLienCount?: number | null;
 }
 
 /* ── Output shape ──────────────────────────────────────────────────────── */
@@ -53,6 +73,11 @@ export interface ScoreResult {
   demand: number;        // 0-15
   engagement: number;    // 0-15
   conversion: number;    // 0-15
+  /* Wave 1.5 additive boosters — both default 0 when the input
+   * signal is null. Capped sums are folded into `total` via
+   * Math.min(100, ...) so urgency thresholds stay at 75/50/25. */
+  storm?: number;        // 0-5 (storm_proximity_24h booster)
+  lien?: number;         // 0-3 (recent_lien_90d booster)
   urgency: Urgency;
   factors: string[];     // human-readable boost/penalty reasons
 }
@@ -262,6 +287,48 @@ function scoreConversion(signals: ScoringSignals, factors: string[]): number {
 }
 
 /**
+ * Compute Wave 1.5 storm-proximity booster (0-5).
+ * Input is the highest-magnitude SWDI signature within 25mi / 24h.
+ * Mapping (proximity score -> booster):
+ *   null     -> 0  (no signal)
+ *   0..25    -> 1
+ *   25..50   -> 2
+ *   50..75   -> 3
+ *   75..90   -> 4
+ *   90..100  -> 5
+ */
+function scoreStormBooster(signals: ScoringSignals, factors: string[]): number {
+  const v = signals.stormProximity24h;
+  if (v == null || v <= 0) return 0;
+  const clamped = Math.min(100, Math.max(0, v));
+  let boost = 1;
+  if (clamped >= 90) boost = 5;
+  else if (clamped >= 75) boost = 4;
+  else if (clamped >= 50) boost = 3;
+  else if (clamped >= 25) boost = 2;
+  factors.push(`Storm signature within 25mi / 24h (+${boost})`);
+  return boost;
+}
+
+/**
+ * Compute Wave 1.5 recent-lien booster (0-3).
+ * Input is the count of mechanic-lien dockets in the same zip in
+ * the last 90 days. A single nearby lien is a soft signal; clusters
+ * suggest payment-distress trends in the area.
+ */
+function scoreLienBooster(signals: ScoringSignals, factors: string[]): number {
+  const n = signals.recentLienCount;
+  if (n == null || n <= 0) return 0;
+  let boost = 1;
+  if (n >= 5) boost = 3;
+  else if (n >= 2) boost = 2;
+  factors.push(
+    `${n} payment-distress filing${n === 1 ? "" : "s"} nearby (+${boost})`,
+  );
+  return boost;
+}
+
+/**
  * Derive urgency tier from total score.
  */
 function deriveUrgency(total: number): Urgency {
@@ -292,7 +359,15 @@ export function calculateScore(signals: ScoringSignals): ScoreResult {
   const engagement = scoreEngagement(signals, factors);
   const conversion = scoreConversion(signals, factors);
 
-  const total = Math.min(100, freshness + value + contact + demand + engagement + conversion);
+  // Wave 1.5 additive boosters — capped so the total stays within
+  // [0, 100] and urgency thresholds (75/50/25) keep their meaning.
+  const storm = scoreStormBooster(signals, factors);
+  const lien  = scoreLienBooster(signals, factors);
+
+  const total = Math.min(
+    100,
+    freshness + value + contact + demand + engagement + conversion + storm + lien,
+  );
   const urgency = deriveUrgency(total);
 
   return {
@@ -303,6 +378,8 @@ export function calculateScore(signals: ScoringSignals): ScoreResult {
     demand,
     engagement,
     conversion,
+    storm,
+    lien,
     urgency,
     factors,
   };
@@ -352,6 +429,12 @@ export function buildSignals(params: {
   competitorCount?: number;
   zipConversionRate?: number | null;
   tradeConversionRate?: number | null;
+  /** Wave 1.5 — recent storm signature within 25mi / 24h, 0-100.
+   *  Pass-through; defaults to null (no boost). */
+  stormProximity24h?: number | null;
+  /** Wave 1.5 — recent mechanic-lien dockets in the same zip in the
+   *  last 90 days. Pass-through; defaults to null (no boost). */
+  recentLienCount?: number | null;
 }): ScoringSignals {
   const now = Date.now();
 
@@ -423,6 +506,8 @@ export function buildSignals(params: {
     cascadeCount: params.lead?.cascadeCount ?? 1,
     zipConversionRate: params.zipConversionRate ?? null,
     tradeConversionRate: params.tradeConversionRate ?? null,
+    stormProximity24h: params.stormProximity24h ?? null,
+    recentLienCount: params.recentLienCount ?? null,
   };
 }
 

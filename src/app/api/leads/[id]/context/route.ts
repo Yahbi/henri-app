@@ -54,10 +54,64 @@ interface StormProximity {
   magnitude: number | null;
 }
 
+/* Wave 1.5 sidecar surfaces — populated from migration 00069 tables
+ * (NOAA SWDI + CourtListener) loaded by the Wave 1 / 2.B crons. Each
+ * is independently nullable so the drawer renders whatever is
+ * available without waiting on the others. */
+
+export interface SwdiNearby {
+  /** "hail" | "wind" | "tornado" — which signature kind */
+  kind: "hail" | "wind" | "tornado";
+  event_time: string;
+  /** Distance to the lead in miles, rounded to 1 decimal. */
+  miles_away: number;
+  /** Hail-only — hail size in millimetres. */
+  max_size_mm?: number | null;
+  /** Wind-only — peak wind in mph. */
+  max_wind_mph?: number | null;
+  /** Hail/wind — probability (SEVPROB or PROB). */
+  probability?: number | null;
+}
+
+export interface RecentLien {
+  case_name: string | null;
+  date_filed: string | null;
+  court: string | null;
+  docket_number: string | null;
+  /** courtlistener.com path. Render as link in the UI. */
+  absolute_url: string | null;
+  snippet: string | null;
+}
+
 interface ContextResponse {
   derived: DerivedEnrichments;
   adjacent_count_90d: number;
   storm: StormProximity | null;
+  /** Up to 5 SWDI signatures within 25mi in the last 30 days, newest
+   *  first. Empty when SWDI tables are empty or no matches. */
+  swdi_nearby: SwdiNearby[];
+  /** Up to 5 mechanic-lien dockets in the same zip in the last 90
+   *  days, newest first. Empty when CourtListener table empty or no
+   *  matches. */
+  recent_liens: RecentLien[];
+}
+
+/** Approx miles between two lat/lng pairs via haversine. */
+function haversineMi(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  // 3958.8 = mean Earth radius in miles
+  return 3958.8 * c;
 }
 
 export async function GET(
@@ -78,7 +132,8 @@ export async function GET(
       .from("leads")
       .select(
         "id, permit_id, address, city, state, zip, year_built, owner_occupied, " +
-          "permit_type, permit_description, trade, permit_filed_date",
+          "permit_type, permit_description, trade, permit_filed_date, " +
+          "latitude, longitude",
       )
       .eq("id", id)
       .maybeSingle();
@@ -238,10 +293,143 @@ export async function GET(
       }
     }
 
+    /* 5. Wave 1.5 surfaces — SWDI signatures within 25mi/30d and
+     *    CourtListener mechanic-liens in the same zip within 90d.
+     *    Both tables (migration 00069) graceful-degrade — when empty
+     *    or not yet applied, the surfaces just render as empty arrays
+     *    and the drawer skips those panels.
+     *
+     *    Strategy:
+     *      - For SWDI we need lat/lng to compute distance. When the
+     *        lead has neither, skip the SWDI lookup entirely.
+     *      - We use a coarse bbox prefilter (lat ±0.5° / lng ±0.6°
+     *        ≈ 35 mi) to avoid haversine-ing the entire SWDI table,
+     *        then refine with the haversine in JS.
+     *      - For liens, ZIP-prefix matching on snippet/case_name is
+     *        too noisy — instead we trust the recent-90d window
+     *        across the lead's state. Refinement to ZIP-of-record
+     *        is a follow-up once we have geocoded liens. */
+    const swdiNearby: SwdiNearby[] = [];
+    const recentLiens: RecentLien[] = [];
+
+    // Same generic-string-error workaround as `lead` cast above —
+    // narrow read against the un-typed Supabase row.
+    const leadRowAny = leadRow as unknown as Record<string, unknown>;
+    const lat = typeof leadRowAny.latitude === "number" ? leadRowAny.latitude : null;
+    const lng = typeof leadRowAny.longitude === "number" ? leadRowAny.longitude : null;
+
+    if (lat != null && lng != null) {
+      const sinceIso = new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const bboxLat = 0.5;
+      const bboxLng = 0.6;
+      // Pull a small bbox slice from each SWDI table in parallel.
+      const [hailRes, windRes, tornadoRes] = await Promise.all([
+        supabase
+          .from("weather_swdi_hail")
+          .select("event_time, lat, lng, max_size_mm, probability")
+          .gte("event_time", sinceIso)
+          .gte("lat", lat - bboxLat).lte("lat", lat + bboxLat)
+          .gte("lng", lng - bboxLng).lte("lng", lng + bboxLng)
+          .order("event_time", { ascending: false })
+          .limit(50),
+        supabase
+          .from("weather_swdi_wind")
+          .select("event_time, lat, lng, max_wind_mph")
+          .gte("event_time", sinceIso)
+          .gte("lat", lat - bboxLat).lte("lat", lat + bboxLat)
+          .gte("lng", lng - bboxLng).lte("lng", lng + bboxLng)
+          .order("event_time", { ascending: false })
+          .limit(50),
+        supabase
+          .from("weather_swdi_tornado")
+          .select("event_time, lat, lng")
+          .gte("event_time", sinceIso)
+          .gte("lat", lat - bboxLat).lte("lat", lat + bboxLat)
+          .gte("lng", lng - bboxLng).lte("lng", lng + bboxLng)
+          .order("event_time", { ascending: false })
+          .limit(50),
+      ]);
+
+      const candidates: SwdiNearby[] = [];
+      for (const row of hailRes.data ?? []) {
+        if (typeof row.lat !== "number" || typeof row.lng !== "number") continue;
+        const mi = haversineMi(lat, lng, row.lat, row.lng);
+        if (mi > 25) continue;
+        candidates.push({
+          kind: "hail",
+          event_time: String(row.event_time),
+          miles_away: Math.round(mi * 10) / 10,
+          max_size_mm: typeof row.max_size_mm === "number" ? row.max_size_mm : null,
+          probability: typeof row.probability === "number" ? row.probability : null,
+        });
+      }
+      for (const row of windRes.data ?? []) {
+        if (typeof row.lat !== "number" || typeof row.lng !== "number") continue;
+        const mi = haversineMi(lat, lng, row.lat, row.lng);
+        if (mi > 25) continue;
+        candidates.push({
+          kind: "wind",
+          event_time: String(row.event_time),
+          miles_away: Math.round(mi * 10) / 10,
+          max_wind_mph: typeof row.max_wind_mph === "number" ? row.max_wind_mph : null,
+        });
+      }
+      for (const row of tornadoRes.data ?? []) {
+        if (typeof row.lat !== "number" || typeof row.lng !== "number") continue;
+        const mi = haversineMi(lat, lng, row.lat, row.lng);
+        if (mi > 25) continue;
+        candidates.push({
+          kind: "tornado",
+          event_time: String(row.event_time),
+          miles_away: Math.round(mi * 10) / 10,
+        });
+      }
+      // Newest first, cap at 5.
+      candidates.sort((a, b) => b.event_time.localeCompare(a.event_time));
+      swdiNearby.push(...candidates.slice(0, 5));
+    }
+
+    /* Lien lookup — anchored on the lead's state (CourtListener ships
+     * `court` slug e.g. "calsup", "txjp", which carries state info).
+     * Reasonable proxy until we add geocoded courts. Limit to 5
+     * newest within last 90 days. */
+    {
+      const sinceIso = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+      const stateAbbrev =
+        typeof leadRowAny.state === "string"
+          ? (leadRowAny.state as string).toLowerCase()
+          : null;
+      let q = supabase
+        .from("liens_courtlistener")
+        .select("case_name, date_filed, court, docket_number, absolute_url, snippet")
+        .gte("date_filed", sinceIso)
+        .order("date_filed", { ascending: false })
+        .limit(5);
+      if (stateAbbrev) {
+        // Court slugs starting with the state abbreviation are the
+        // dominant pattern (calsup, txctapp, ...). Prefix match is
+        // cheap and captures most.
+        q = q.ilike("court", `${stateAbbrev}%`);
+      }
+      const { data: lienRows } = await q;
+      for (const row of lienRows ?? []) {
+        recentLiens.push({
+          case_name: typeof row.case_name === "string" ? row.case_name : null,
+          date_filed: typeof row.date_filed === "string" ? row.date_filed : null,
+          court: typeof row.court === "string" ? row.court : null,
+          docket_number: typeof row.docket_number === "string" ? row.docket_number : null,
+          absolute_url: typeof row.absolute_url === "string" ? row.absolute_url : null,
+          snippet: typeof row.snippet === "string" ? row.snippet : null,
+        });
+      }
+    }
+
     const body: ContextResponse = {
       derived,
       adjacent_count_90d,
       storm,
+      swdi_nearby: swdiNearby,
+      recent_liens: recentLiens,
     };
 
     return NextResponse.json(body, {

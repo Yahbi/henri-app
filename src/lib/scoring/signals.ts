@@ -17,7 +17,10 @@ export type ScoreSignalKey =
   | "contact_completeness"
   | "zip_demand"
   | "homeowner_engagement"
-  | "historical_conversion";
+  | "historical_conversion"
+  /* Wave 1.5 additive boosters — only render when populated. */
+  | "storm_proximity_24h"
+  | "recent_lien_90d";
 
 export interface ScoreSignalContribution {
   /** Stable machine key. */
@@ -43,8 +46,19 @@ export const SCORE_SIGNAL_ORDER: Array<{
   /** Which `ScoreResult` field holds the numeric value. */
   resultKey: keyof Pick<
     ScoreResult,
-    "freshness" | "value" | "contact" | "demand" | "engagement" | "conversion"
+    | "freshness"
+    | "value"
+    | "contact"
+    | "demand"
+    | "engagement"
+    | "conversion"
+    | "storm"
+    | "lien"
   >;
+  /** When true, this row only renders when the lead actually scored
+   *  >0 on the signal — keeps the drawer clean for leads with no
+   *  storm / lien activity nearby. */
+  optional?: boolean;
 }> = [
   { key: "permit_freshness",     label: "Permit freshness",       weight: 20, resultKey: "freshness" },
   { key: "permit_value",         label: "Permit value",           weight: 20, resultKey: "value" },
@@ -52,6 +66,9 @@ export const SCORE_SIGNAL_ORDER: Array<{
   { key: "zip_demand",           label: "ZIP demand",             weight: 15, resultKey: "demand" },
   { key: "homeowner_engagement", label: "Homeowner engagement",   weight: 15, resultKey: "engagement" },
   { key: "historical_conversion",label: "Historical conversion",  weight: 15, resultKey: "conversion" },
+  /* Wave 1.5 additive boosters — render only when active. */
+  { key: "storm_proximity_24h",  label: "Storm proximity (24h)",  weight: 5,  resultKey: "storm", optional: true },
+  { key: "recent_lien_90d",      label: "Payment-distress nearby",weight: 3,  resultKey: "lien",  optional: true },
 ];
 
 /**
@@ -112,24 +129,46 @@ function detailFor(key: ScoreSignalKey, factors: string[], signals: ScoringSigna
       }
       return parts.length > 0 ? parts.join(" · ") : "Not enough history yet";
     }
+    case "storm_proximity_24h": {
+      if (signals.stormProximity24h == null || signals.stormProximity24h <= 0) {
+        return "No recent storm signature nearby";
+      }
+      const v = Math.round(signals.stormProximity24h);
+      return `Storm signature within 25mi · 24h (intensity ${v}/100)`;
+    }
+    case "recent_lien_90d": {
+      const n = signals.recentLienCount ?? 0;
+      if (n <= 0) return "No payment-distress filings nearby";
+      return `${n} mechanic-lien filing${n === 1 ? "" : "s"} nearby (90 d)`;
+    }
   }
 }
 
 /**
  * Build the UI-ready breakdown. Call once at score-write time and
  * persist into `leads.score_signals` (jsonb).
+ *
+ * Wave 1.5: rows flagged `optional` (storm_proximity_24h,
+ * recent_lien_90d) only render when the lead actually scored >0 on
+ * them — keeps the drawer clean for the leads that have no nearby
+ * storm or lien activity.
  */
 export function buildScoreSignalBreakdown(
   result: ScoreResult,
   signals: ScoringSignals,
 ): ScoreSignalContribution[] {
-  return SCORE_SIGNAL_ORDER.map(({ key, label, weight, resultKey }) => ({
-    signal: key,
-    label,
-    weight,
-    value: Math.round(Math.max(0, Math.min(weight, result[resultKey] ?? 0))),
-    detail: detailFor(key, result.factors, signals),
-  }));
+  return SCORE_SIGNAL_ORDER.flatMap(({ key, label, weight, resultKey, optional }) => {
+    const raw = result[resultKey] ?? 0;
+    const value = Math.round(Math.max(0, Math.min(weight, raw)));
+    if (optional && value <= 0) return [];
+    return [{
+      signal: key,
+      label,
+      weight,
+      value,
+      detail: detailFor(key, result.factors, signals),
+    }];
+  });
 }
 
 /**
