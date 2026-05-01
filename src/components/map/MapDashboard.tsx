@@ -73,9 +73,41 @@ const MapDashboard = forwardRef<MapDashboardHandle, MapDashboardProps>(
       map.on("load", () => {
         setIsLoaded(true);
         onMapReady?.(map);
+        // Defensive resize after load. If the parent flex container
+        // grew between map construction and the load event (common on
+        // dashboards where the leads panel + drawer settle async),
+        // maplibre's default 400x300 canvas can stick. Forcing a
+        // resize after load picks up the real container dimensions.
+        // Audit 2026-04-30 — founder reported "the map doesn't show"
+        // which on slow first paint was the canvas locked tiny.
+        try { map.resize(); } catch { /* style not ready */ }
       });
 
       mapRef.current = map;
+
+      // Belt-and-suspenders ResizeObserver: if maplibre's built-in
+      // observer misses the first parent-grow tick, this catches it.
+      // Throttled via requestAnimationFrame so a layout that reads back
+      // dimensions during the resize callback can't whip up an
+      // observer loop. Skips the call if the container is 0x0
+      // (typically during unmount), which would also crash maplibre's
+      // internal style.
+      if (typeof ResizeObserver !== "undefined" && containerRef.current) {
+        let rafId: number | null = null;
+        const ro = new ResizeObserver((entries) => {
+          if (rafId !== null) return;
+          // Bail if the container is zero — happens during unmount.
+          const box = entries[0]?.contentRect;
+          if (!box || box.width === 0 || box.height === 0) return;
+          rafId = requestAnimationFrame(() => {
+            rafId = null;
+            try { map.resize(); } catch { /* during teardown */ }
+          });
+        });
+        ro.observe(containerRef.current);
+        // Stash the observer so cleanup can disconnect it.
+        (map as unknown as { __henriRO?: ResizeObserver }).__henriRO = ro;
+      }
     }, [initialCenter, initialZoom, onMapReady, theme]);
 
     /* Initialize on mount */
@@ -83,7 +115,11 @@ const MapDashboard = forwardRef<MapDashboardHandle, MapDashboardProps>(
       initMap();
 
       return () => {
-        mapRef.current?.remove();
+        const m = mapRef.current as unknown as
+          | (maplibregl.Map & { __henriRO?: ResizeObserver })
+          | null;
+        m?.__henriRO?.disconnect();
+        m?.remove();
         mapRef.current = null;
       };
       // Only run once on mount
