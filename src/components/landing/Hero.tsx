@@ -58,8 +58,9 @@ export function Hero() {
             </h1>
 
             <p className="max-w-lg text-lg leading-relaxed text-muted-foreground sm:text-xl">
-              Track construction permits, score leads with AI, and lock down ZIP
-              territories before your competition.
+              Track public building permits, score every lead 0&ndash;100 with
+              AI, and reach homeowners with permit-specific outreach &mdash;
+              no per-lead fees, no shared marketplace queue.
             </p>
 
             <div className="flex flex-wrap gap-4">

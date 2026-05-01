@@ -23,7 +23,7 @@ import { Card, CardContent } from "@/components/ui/card";
  * "46 states"). Never invent metrics.
  */
 
-type TileStatus = "open" | "one-left" | "claimed";
+type TileStatus = "active" | "coming";
 
 interface Tile {
   zip: string;
@@ -34,28 +34,35 @@ interface Tile {
 }
 
 /* Hand-arranged grid that evokes a city gridmap without pretending to
-   be a real one. ZIPs are purely decorative — not tied to a live DB. */
+   be a real one. ZIPs are purely illustrative — not tied to live DB
+   state.
+   2026-04-30 truthfulness pass: switched the "claimed / 1 slot left /
+   open" availability framing to "active / coming" coverage framing.
+   The earlier framing implied a real per-ZIP exclusivity scoreboard
+   (which doesn't exist — there's no UI lock acquisition). The new
+   framing matches what's actually true: Henri's permit catalog covers
+   some ZIPs today and is rolling out to more. */
 const TILES: Tile[] = [
-  { zip: "90028", status: "claimed",   col: 0, row: 0 },
-  { zip: "90038", status: "one-left",  col: 1, row: 0 },
-  { zip: "90046", status: "open",      col: 2, row: 0 },
-  { zip: "90069", status: "claimed",   col: 3, row: 0 },
-  { zip: "90077", status: "open",      col: 4, row: 0 },
-  { zip: "90024", status: "one-left",  col: 0, row: 1 },
-  { zip: "90025", status: "open",      col: 1, row: 1 },
-  { zip: "90034", status: "claimed",   col: 2, row: 1 },
-  { zip: "90035", status: "open",      col: 3, row: 1 },
-  { zip: "90064", status: "claimed",   col: 4, row: 1 },
-  { zip: "90403", status: "open",      col: 0, row: 2 },
-  { zip: "90404", status: "one-left",  col: 1, row: 2 },
-  { zip: "90405", status: "claimed",   col: 2, row: 2 },
-  { zip: "90272", status: "open",      col: 3, row: 2 },
-  { zip: "90291", status: "open",      col: 4, row: 2 },
-  { zip: "90066", status: "claimed",   col: 0, row: 3 },
-  { zip: "90230", status: "open",      col: 1, row: 3 },
-  { zip: "90232", status: "one-left",  col: 2, row: 3 },
-  { zip: "90094", status: "open",      col: 3, row: 3 },
-  { zip: "90292", status: "claimed",   col: 4, row: 3 },
+  { zip: "90028", status: "active",   col: 0, row: 0 },
+  { zip: "90038", status: "active",   col: 1, row: 0 },
+  { zip: "90046", status: "coming",   col: 2, row: 0 },
+  { zip: "90069", status: "active",   col: 3, row: 0 },
+  { zip: "90077", status: "coming",   col: 4, row: 0 },
+  { zip: "90024", status: "active",   col: 0, row: 1 },
+  { zip: "90025", status: "coming",   col: 1, row: 1 },
+  { zip: "90034", status: "active",   col: 2, row: 1 },
+  { zip: "90035", status: "coming",   col: 3, row: 1 },
+  { zip: "90064", status: "active",   col: 4, row: 1 },
+  { zip: "90403", status: "coming",   col: 0, row: 2 },
+  { zip: "90404", status: "active",   col: 1, row: 2 },
+  { zip: "90405", status: "active",   col: 2, row: 2 },
+  { zip: "90272", status: "coming",   col: 3, row: 2 },
+  { zip: "90291", status: "coming",   col: 4, row: 2 },
+  { zip: "90066", status: "active",   col: 0, row: 3 },
+  { zip: "90230", status: "coming",   col: 1, row: 3 },
+  { zip: "90232", status: "active",   col: 2, row: 3 },
+  { zip: "90094", status: "coming",   col: 3, row: 3 },
+  { zip: "90292", status: "active",   col: 4, row: 3 },
 ];
 
 const STATUS_STYLES: Record<TileStatus, {
@@ -64,23 +71,17 @@ const STATUS_STYLES: Record<TileStatus, {
   label: string;
   dot: string;
 }> = {
-  open: {
-    fill: "bg-success/10",
-    border: "border-success/30",
-    label: "Open",
-    dot: "bg-success",
-  },
-  "one-left": {
-    fill: "bg-warning/10",
-    border: "border-warning/30",
-    label: "1 slot left",
-    dot: "bg-warning",
-  },
-  claimed: {
+  active: {
     fill: "bg-primary/10",
     border: "border-primary/30",
-    label: "Claimed",
+    label: "Active",
     dot: "bg-primary",
+  },
+  coming: {
+    fill: "bg-success/10",
+    border: "border-success/30",
+    label: "Coming",
+    dot: "bg-success",
   },
 };
 
@@ -129,11 +130,12 @@ export function TerritoryMapPreview() {
         {/* Section header */}
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="font-heading text-3xl font-normal tracking-tight text-foreground sm:text-4xl">
-            Lock down your territory
+            Coverage that grows where you need it
           </h2>
           <p className="mt-4 text-lg text-muted-foreground">
-            One contractor per trade per ZIP. When a permit files in your
-            territory, you&apos;re the only one Henri tells.
+            Henri&apos;s permit catalog is live in major US metro areas
+            today and onboarding new jurisdictions weekly. ZIP codes
+            shown below are illustrative.
           </p>
         </div>
 
@@ -149,7 +151,7 @@ export function TerritoryMapPreview() {
                   gridTemplateRows: "repeat(4, auto)",
                 }}
                 role="img"
-                aria-label="Illustrative grid of ZIP codes showing availability states: Open, one slot left, and Claimed."
+                aria-label="Illustrative grid of ZIP codes showing coverage states: Active and Coming. Real coverage varies by jurisdiction."
               >
                 {TILES.map((tile, idx) => {
                   const style = STATUS_STYLES[tile.status];
