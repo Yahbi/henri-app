@@ -1,8 +1,11 @@
 "use client";
 
 import { cn } from "@/lib/utils/cn";
-import { ExclusivityBadge } from "./ExclusivityBadge";
-import { WatchersBadge } from "./WatchersBadge";
+// 2026-04-30: ExclusivityBadge + WatchersBadge are no longer rendered.
+// The lock + watcher infrastructure exists in DB and API but no UI
+// path acquires a lock, so the badge surfaces were silent overclaims.
+// See ~/.claude/plans/whats-the-14-days-purring-papert.md.
+// The components themselves stay on disk (zero cost, easy to revive).
 import type { ExclusivityLeadSummary } from "@/lib/exclusivity/locks";
 
 export interface LeadData {
@@ -210,8 +213,6 @@ export function LeadCard({ lead, active, onClick, exclusivity, disambiguate }: L
             )}
           </p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <ExclusivityBadge summary={exclusivity} size="xs" />
-            <WatchersBadge bucket={exclusivity?.watchers_bucket} size="xs" />
             {lead.cascade && (
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary-08 px-1.5 py-0.5 rounded">
                 <span className="text-xs">&#9670;</span> Cascade

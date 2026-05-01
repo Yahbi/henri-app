@@ -117,13 +117,19 @@ function ChevronDown({ className = "" }: { className?: string }) {
 
 // Replaced fabricated performance stats (18.4x ROI / $41 per job /
 // 26% close rate) — we're still in Beta so no cohort exists to derive
-// them honestly. These four claims are all independently verifiable:
-//   - "1 contractor / ZIP" is the product model (enforced in DB)
-//   - permit count is live (audit 2026-04-22: 925k)
+// them honestly. These three claims are all independently verifiable:
+//   - permit count is live (DB audit 2026-04-30: 1.41M permits)
+//   - state count is live (DB audit 2026-04-30: 35 states; claim "30+"
+//                          to stay conservative against sample variance)
 //   - 30-min cadence matches `/api/cron/scrape` in vercel.json
 //   - 24-hr trial is the Stripe `trial_period_days=1` config
+//
+// 2026-04-30 strip: removed the "1 / permit · 14-day exclusivity" stat.
+// The lock infrastructure exists in the DB and API but no UI path
+// acquires a lock and no cron enforces the 72h forfeit, so the claim
+// was overclaiming. See ~/.claude/plans/whats-the-14-days-purring-papert.md
+// for the full audit. Dormant code stays; user-facing claim removed.
 const STATS = [
-  { num: "1 / permit", label: "One contractor per permit per trade for a 14-day exclusivity window" },
   { num: "900k+", label: "Live permits across major metro areas in 30+ US states" },
   { num: "<30 min", label: "From permit filing to lead in your dashboard" },
   { num: "24 hrs", label: "Free trial to evaluate before any charge" },
@@ -220,13 +226,10 @@ const COMPARISON_ROWS = [
     thumbtack: "$10\u2013$200/lead",
     acculynx: "$250\u2013$500+",
   },
-  {
-    feature: "Lead exclusivity",
-    henri: { text: "1 contractor / permit \u00b7 14 days", check: true },
-    angi: { text: "Shared with 3\u20138", cross: true },
-    thumbtack: { text: "Shared with 3\u20135", cross: true },
-    acculynx: { text: "No leads", cross: true },
-  },
+  // "Lead exclusivity" row removed 2026-04-30 \u2014 see plan file. The
+  // lock concept exists in code but no UI path acquires one, so the
+  // claim was overclaiming. Differentiation now hinges on the
+  // (truthful) "Lead source" + "AI lead scoring" rows below.
   {
     feature: "Lead source",
     henri: "Building permits (before homeowner calls)",
@@ -310,12 +313,12 @@ const COMPARISON_ROWS = [
 const FAQ_ITEMS = [
   {
     q: "What exactly is a building permit lead?",
-    a: "When a building permit is filed in your territory, Henri detects it and delivers the lead exclusively to you. You receive the homeowner name, phone, email, mailing address, property value, and project details \u2014 before any other contractor knows the permit exists.",
+    a: "When a building permit is filed in your territory, Henri detects it within minutes, scores it 0\u2013100 for urgency and value, and surfaces it in your dashboard with the homeowner name, phone, email, mailing address, property value, and project details enriched in. The underlying permit is a public record; what Henri delivers is the enriched, scored packet ready to act on.",
   },
-  {
-    q: "How is exclusivity guaranteed?",
-    a: "When a permit is filed in your territory and matches your trade, the enriched packet \u2014 homeowner contact info, urgency score, outreach bundle \u2014 is locked to one contractor for a 14-day window, recorded in our database (lead_exclusivity_locks). To keep things fair, the lock auto-releases after 72 hours of no logged outreach (use-it-or-lose-it). The underlying permit is a public record either way; what we gate is the enriched packet you actually act on.",
-  },
+  // FAQ "How is exclusivity guaranteed?" removed 2026-04-30. The lock
+  // schema exists in DB and a lock library + API are wired, but no UI
+  // path acquires a lock and no cron enforces the 72h forfeit, so the
+  // answer was overclaiming. See ~/.claude/plans/whats-the-14-days-purring-papert.md.
   {
     q: "What trades does Henri cover?",
     a: "Henri covers all residential and light commercial trades: Roofing, Solar, HVAC, Electrical, Plumbing, Addition, ADU, Windows, Painting, Landscaping, General Remodel, and Foundation. Each trade is sold as a separate territory \u2014 a roofer and an HVAC contractor can both own the same ZIP without conflict.",
@@ -339,10 +342,16 @@ const FAQ_ITEMS = [
 ];
 
 // "ROI 18.4x" and "LTV $8,300" were unsourced projections (Beta, no
-// cohort to derive them). Replaced with four claims we can stand
-// behind without a footnote war.
+// cohort to derive them). Each claim below maps to a verifiable
+// source: the pricing config (Stripe), the cron schedule (vercel.json),
+// and the cancellation logic (/api/billing/cancel).
+//
+// 2026-04-30: removed the "14 days \u00b7 per-permit exclusivity" stat.
+// See ~/.claude/plans/whats-the-14-days-purring-papert.md \u2014 lock
+// infrastructure exists but no UI acquires a lock and no cron enforces
+// the forfeit, so the claim was overclaiming.
 const PROOF_STATS = [
-  { num: "14 days", label: "Per-permit exclusivity window, enforced at the DB level (lead_exclusivity_locks)" },
+  { num: "30 min", label: "Permit-to-dashboard latency (matches the /api/cron/scrape schedule)" },
   { num: "Flat", label: "Monthly subscription \u2014 no per-lead fees, no 12-month contracts" },
   { num: "24 hrs", label: "Free trial to explore the full platform before any charge" },
   { num: "Any time", label: "Cancel from your dashboard \u2014 takes effect at end of billing cycle" },

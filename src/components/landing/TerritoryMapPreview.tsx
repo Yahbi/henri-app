@@ -87,11 +87,16 @@ const STATUS_STYLES: Record<TileStatus, {
 /* Stats match the Hero's conservative framing so numbers never
    disagree across the landing page. "30+" reflects the live DB count
    (audit 2026-04-30: 35 distinct US states with at least one ingested
-   permit); kept conservative to stay defensible. */
+   permit); kept conservative to stay defensible.
+
+   2026-04-30: dropped the "14-day · Exclusive window" stat. The lock
+   infrastructure exists in DB but no UI path acquires a lock, so the
+   claim was overclaiming. See plan file
+   ~/.claude/plans/whats-the-14-days-purring-papert.md. */
 const STATS = [
-  { icon: MapPin,      value: "900k+",   label: "Permits tracked" },
-  { icon: ShieldCheck, value: "30+",     label: "States covered" },
-  { icon: Clock,       value: "14-day",  label: "Exclusive window" },
+  { icon: MapPin,      value: "900k+", label: "Permits tracked" },
+  { icon: ShieldCheck, value: "30+",   label: "States covered" },
+  { icon: Clock,       value: "30 min", label: "Permit-to-dashboard" },
 ] as const;
 
 export function TerritoryMapPreview() {

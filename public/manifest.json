@@ -1,7 +1,7 @@
 {
   "name": "Henri.",
   "short_name": "Henri.",
-  "description": "Permit intelligence for contractors. Hot leads scored from public construction permits, exclusivity-locked per trade.",
+  "description": "Permit intelligence for contractors. Hot leads scored from public construction permits.",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
