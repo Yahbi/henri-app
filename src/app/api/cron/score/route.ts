@@ -144,11 +144,20 @@ export async function GET(request: NextRequest) {
   try {
     /* ── 1. Fetch unscored permits ──────────────────────────────────────── */
 
+    // Batch sized to "as many as fit in 280s" — the deadlineExceeded()
+    // guard inside the per-permit loops below is the actual hard stop.
+    // Audit 2026-04-30 found 820k unscored permits backed up against a
+    // 500-row daily batch; that's a 4.5-year clearance lag. Bumping the
+    // SELECT cap to 5000 lets a single run process whatever fits in the
+    // 280s budget. Vercel Hobby plan only permits daily cron so we lift
+    // throughput per-run rather than running more often. If the deadline
+    // is consistently hit, dial up further; if 5000 is rarely reached,
+    // current backlog is shrinking and the cap is harmless.
     const { data: unscoredPermits, error: fetchError } = await supabase
       .from("permits")
       .select("id, permit_type, status, description, address, city, state, zip, latitude, longitude, estimated_value, issued_date, applied_date, applicant_name, created_at, raw_json")
       .is("scored_at", null)
-      .limit(500);
+      .limit(5000);
 
     if (fetchError) {
       throw new Error(`Failed to fetch unscored permits: ${fetchError.message}`);

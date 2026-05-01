@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { FounderSeats } from "@/components/marketing/FounderSeats";
 
 /* ─── Inline SVG icon helpers ──────────────────────────────────────── */
 
@@ -818,9 +819,15 @@ export default function ContractorsPage() {
                 </p>
                 <p className="mt-1.5 text-sm leading-relaxed text-[#9E9C92]">
                   No per-lead fees, no contracts, 24-hour free trial on every
-                  plan. Founder tier price-locked forever for the first 100
-                  contractors.
+                  plan.
                 </p>
+                {/* Live Founder-tier seat counter — reads /api/founder-seats.
+                    Replaces the static "first 100 contractors" line; the
+                    component graceful-degrades to a static restatement when
+                    the count isn't available, so we never lose the cap copy. */}
+                <div className="mt-3 max-w-md">
+                  <FounderSeats />
+                </div>
               </div>
               <Link
                 href="/pricing"
