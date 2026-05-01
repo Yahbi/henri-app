@@ -13,15 +13,22 @@ import { cn } from "@/lib/utils/cn";
 //                                                 (claim "30+" to stay
 //                                                 conservative against
 //                                                 sample variance)
-//   refresh cadence                = every 30 min (vercel.json
-//                                                  /api/cron/scrape)
+//   refresh cadence                = daily (vercel.json /api/cron/scrape
+//                                            schedule "0 2 * * *" = 2 AM
+//                                            UTC daily). Earlier label
+//                                            "Refreshed every 30 min" was
+//                                            wrong — Vercel Hobby plan
+//                                            permits only daily cron.
+//                                            When the plan upgrades, bump
+//                                            cadence + cron schedule
+//                                            together.
 // Earlier "45+ States Covered" was off — only 35 states have actual
 // permit data ingested (50+ are configured in permit_sources but not
 // yet producing). Tightened to 30+.
 const stats = [
   { label: "900k+ Permits Tracked", top: "12%", left: "8%", delay: "0s" },
   { label: "30+ States Covered", top: "38%", left: "2%", delay: "0.2s" },
-  { label: "Refreshed every 30 min", top: "64%", left: "6%", delay: "0.4s" },
+  { label: "Refreshed daily", top: "64%", left: "6%", delay: "0.4s" },
 ] as const;
 
 export function Hero() {

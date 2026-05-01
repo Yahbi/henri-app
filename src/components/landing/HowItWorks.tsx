@@ -4,26 +4,32 @@ import { Search, Brain, Trophy } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 
+// 2026-04-30 truthfulness pass: replaced "continuously refreshes" with
+// the truthful daily cadence and "Get notified instantly. You're first
+// to the door." with a description that doesn't claim real-time push
+// notifications or "first" status (permits are public records — anyone
+// can read them, the value is the scoring + enrichment + outreach
+// templates we layer on top).
 const steps = [
   {
     number: 1,
     title: "We Surface Permits",
     description:
-      "Henri continuously refreshes verified permit activity across major metro markets.",
+      "Henri's permit catalog refreshes daily (1.4M+ permits, 30+ states).",
     icon: Search,
   },
   {
     number: 2,
     title: "AI Scores Leads",
     description:
-      "Each permit is scored 0-100 based on value, timing, and your trade match.",
+      "Each permit is scored 0–100 across six signals: freshness, project value, contact quality, ZIP demand, homeowner engagement, and historical conversion. The breakdown renders on every lead.",
     icon: Brain,
   },
   {
     number: 3,
-    title: "You Close Deals",
+    title: "You Work the List",
     description:
-      "Get notified instantly. You're first to the door.",
+      "Hot leads sort to the top. Outreach via the 50-template per-trade library (or your own saved templates).",
     icon: Trophy,
   },
 ] as const;

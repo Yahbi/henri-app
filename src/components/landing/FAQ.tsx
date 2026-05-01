@@ -13,12 +13,12 @@ const faqs: FAQItem[] = [
   {
     question: "What cities do you cover?",
     answer:
-      "Henri monitors building permits across major metropolitan areas nationwide, with new cities added regularly.",
+      "Henri's permit catalog spans major metropolitan areas in 30+ US states (35 states with at least one ingested permit as of the last DB audit). New jurisdictions are added as we onboard their data sources.",
   },
   {
     question: "How fast do I get leads?",
     answer:
-      "Most leads are delivered within minutes of the permit being filed.",
+      "The permit catalog refreshes daily (vercel.json /api/cron/scrape, 2 AM UTC). New permits filed during a given day appear in the dashboard the next refresh — typically within 24 hours of the source jurisdiction publishing them.",
   },
   {
     question: "Can I change my territories?",

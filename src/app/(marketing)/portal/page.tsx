@@ -492,10 +492,10 @@ export default function PortalPage() {
             Are you a contractor?
           </p>
           <h2 className="font-heading mt-3 text-2xl font-normal tracking-tight text-foreground sm:text-3xl">
-            Get exclusive leads in your territory
+            AI-scored permit leads in your territory
           </h2>
           <p className="mt-3 text-base text-muted-foreground">
-            Henri delivers AI-scored building permit leads directly to you. One contractor per trade per ZIP.
+            Henri turns public building-permit filings into scored, contact-enriched leads. Plans from $149/mo, 24-hour free trial.
           </p>
           <Link
             href="/contractors"

@@ -1,4 +1,4 @@
-import { Lock, ShieldCheck, Zap, FileCheck, RefreshCw, Ban } from "lucide-react";
+import { ShieldCheck, FileCheck, Ban, Lock, Database } from "lucide-react";
 
 /**
  * Honest trust section for the landing page.
@@ -6,8 +6,17 @@ import { Lock, ShieldCheck, Zap, FileCheck, RefreshCw, Ban } from "lucide-react"
  * IMPORTANT: Per CLAUDE.md, we do not fabricate testimonials, ROI figures,
  * "X contractors won Y" claims, or fake ratings. Everything here describes
  * real product promises + operational facts that can be traced back to
- * code or policy (territory locks, daily license checks, data encryption,
- * 24h trial, no contracts, graceful cancellation).
+ * code, the live DB, or operational config.
+ *
+ * 2026-04-30 truthfulness pass — removed three pillars that overclaimed:
+ *   - "Exclusive leads, not shared" (14-day window) — no UI path acquires
+ *     the lock + no forfeit cron, so the claim was unbacked. See plan
+ *     ~/.claude/plans/whats-the-14-days-purring-papert.md.
+ *   - "Use-it-or-lose-it" (72h auto-release) — no cron flips locks to
+ *     'forfeit'; the column exists but nothing reads it.
+ *   - "Minutes, not days" (instant scoring) — cron is daily on Hobby
+ *     plan ('0 2 * * *'), not minute-level. Replaced with a daily-cadence
+ *     pillar that maps directly to vercel.json.
  *
  * When we have real customer testimonials cleared by legal, we can add a
  * separate <Testimonials> section. Until then, we lead with proof points
@@ -16,19 +25,9 @@ import { Lock, ShieldCheck, Zap, FileCheck, RefreshCw, Ban } from "lucide-react"
 
 const PILLARS = [
   {
-    icon: Lock,
-    title: "Exclusive leads, not shared",
-    body: "One contractor per permit per trade for a 14-day window. No bidding wars, no racing against five other shops.",
-  },
-  {
     icon: ShieldCheck,
     title: "License verified daily",
     body: "We re-verify your license every 24 hours against the state board. If it lapses, we pause your leads until it's current.",
-  },
-  {
-    icon: Zap,
-    title: "Minutes, not days",
-    body: "The moment a permit clears, we score it, enrich it, and route it to you. Speed-to-lead built in by design.",
   },
   {
     icon: FileCheck,
@@ -36,9 +35,9 @@ const PILLARS = [
     body: "Every lead shows the six signals behind its score — freshness, value, contact quality, demand, engagement, conversion. No black box.",
   },
   {
-    icon: RefreshCw,
-    title: "Use-it-or-lose-it",
-    body: "Sit on a lead for 72 hours with no outreach logged and we auto-release it. Fair to every contractor in the network.",
+    icon: Database,
+    title: "Sourced from public permits",
+    body: "Every lead starts from a real building permit filed with a city or county — not a homeowner form fill resold to multiple contractors. We refresh the catalog daily.",
   },
   {
     icon: Ban,

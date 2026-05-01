@@ -96,7 +96,7 @@ const STATUS_STYLES: Record<TileStatus, {
 const STATS = [
   { icon: MapPin,      value: "900k+", label: "Permits tracked" },
   { icon: ShieldCheck, value: "30+",   label: "States covered" },
-  { icon: Clock,       value: "30 min", label: "Permit-to-dashboard" },
+  { icon: Clock,       value: "Daily",  label: "Catalog refresh" },
 ] as const;
 
 export function TerritoryMapPreview() {

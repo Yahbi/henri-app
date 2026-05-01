@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Check, Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +42,12 @@ const plans: Plan[] = [
      * banner below it; primary emphasis is the banner. Keep the copy
      * in sync if the count updates. */
     badge: "Beta",
-    scarcity: { remaining: 87, total: 100 },
+    // scarcity is hydrated from /api/founder-seats at mount — see the
+    // useEffect inside PricingSection. The placeholder { remaining: 100,
+    // total: 100 } is the conservative truth before the fetch resolves
+    // (it's never a "lower" number than reality, so we never overclaim
+    // urgency during the first paint).
+    scarcity: { remaining: 100, total: 100 },
     features: [
       "3 ZIP territories",
       "AI-scored permit leads",
@@ -109,6 +115,42 @@ const plans: Plan[] = [
 ];
 
 export function PricingSection() {
+  // Live Founder-seat count. Fetches /api/founder-seats once on mount
+  // (route is edge-cached 60s SWR 30s, so this is cheap). Replaces the
+  // previous hardcoded "87 of 100 spots" line that drifted out of date
+  // the moment any contractor signed up. See ~/.claude/plans for the
+  // 2026-04-30 truthfulness audit.
+  const [founderSeats, setFounderSeats] = useState<{ remaining: number; total: number } | null>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/founder-seats", { signal: ctrl.signal });
+        if (!res.ok) return;
+        const j = (await res.json()) as { total: number; taken: number | null; remaining: number | null };
+        if (cancelled) return;
+        if (typeof j.total === "number" && typeof j.remaining === "number") {
+          setFounderSeats({ total: j.total, remaining: j.remaining });
+        }
+      } catch {
+        // network blip — leave the conservative 100/100 placeholder
+      }
+    })();
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, []);
+
+  // Inject the live count into the Founder plan's scarcity field.
+  const plansWithLiveScarcity = plans.map((p) =>
+    p.scarcity && founderSeats
+      ? { ...p, scarcity: founderSeats }
+      : p,
+  );
+
   return (
     <section id="pricing" className="bg-background py-24 lg:py-32">
       <div className="mx-auto max-w-7xl px-6">
@@ -124,7 +166,7 @@ export function PricingSection() {
 
         {/* Pricing cards */}
         <div className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {plans.map((plan) => (
+          {plansWithLiveScarcity.map((plan) => (
             <Card
               key={plan.name}
               variant="default"

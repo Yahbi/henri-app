@@ -131,7 +131,7 @@ function ChevronDown({ className = "" }: { className?: string }) {
 // for the full audit. Dormant code stays; user-facing claim removed.
 const STATS = [
   { num: "900k+", label: "Live permits across major metro areas in 30+ US states" },
-  { num: "<30 min", label: "From permit filing to lead in your dashboard" },
+  { num: "Daily", label: "Permits refreshed every day (vercel.json: /api/cron/scrape)" },
   { num: "24 hrs", label: "Free trial to evaluate before any charge" },
 ];
 
@@ -148,34 +148,56 @@ const PROBLEMS = [
   "Contractor satisfaction averages 1.96 / 5 across 3,000+ BBB reviews (BBB complaint corpus, 2024). Angi Inc.'s (NASDAQ: ANGI) annual revenue has declined materially from its 2021 peak, per the company's public 10-K filings.",
 ];
 
+// 2026-04-30: removed "You own your ZIP. One roofer per ZIP \u2014 period.
+// No competitor ever sees the same lead." (no UI lock acquisition + no
+// forfeit cron, see plan file). Replaced with the truthful source-of-
+// data differentiator. Also softened "before they have called anyone"
+// to remove the implied-real-time claim \u2014 cron is daily, not minute-
+// level, on Vercel Hobby.
 const SOLUTIONS = [
-  "You own your ZIP. One roofer per ZIP \u2014 period. No competitor in your territory ever sees the same lead.",
-  "Leads come from building permit filings, not homeowner form fills. You reach owners before they have called anyone.",
+  "Leads start from real building permit filings, not from homeowner form fills resold across a marketplace. The source is verifiable \u2014 every lead links back to a public permit record.",
   "Flat monthly subscription. No per-lead fees. One closed job covers months of your subscription.",
-  "AI scores every lead by urgency, project value, permit age, and cascade probability. Hot leads arrive first.",
+  "AI scores every lead 0\u2013100 across six signals (permit freshness, project value, contact quality, ZIP demand, homeowner engagement, historical conversion). The breakdown renders on every lead.",
   "Cancel anytime, no penalty. Cancellation takes effect at the end of your billing cycle. We offer a 24-hour free trial so you can evaluate the platform before committing.",
 ];
 
+// STEPS 2026-04-30 truthfulness pass:
+//   - "within minutes of filing" -> "within 24 hours" (cron is daily on
+//     Vercel Hobby; the per-permit detect step runs at 2 AM UTC daily,
+//     vercel.json /api/cron/scrape).
+//   - "Automated SMS + email outreach fires within minutes - before any
+//     competitor knows the permit exists" -> dropped entirely. Auto-fire
+//     is a saved preference on profiles.outreach_auto_fire but no scorer
+//     or cron actually fires outreach on lead create. Permits are public
+//     records so the "before any competitor knows" clause is also false.
+//   - "Exclusive leads - no one else in your ZIP is working the same
+//     permit" -> dropped (no UI lock acquisition, no forfeit cron).
+//
+// Lead enrichment fill-rates from the live DB (audit 2026-04-30) are
+// sparse: of 165k leads, ~39% have an owner_name and ~1% have a phone
+// (0% have email today). The "verified owner and property context"
+// language tightens to reflect that enrichment is best-effort, not
+// guaranteed-on-every-lead.
 const STEPS = [
   {
     title: "Permit filed",
-    desc: "A homeowner pulls a roofing, solar, or ADU permit with the city. Henri detects it within minutes of filing.",
+    desc: "A homeowner pulls a roofing, solar, or ADU permit with the city. The permit hits Henri's daily catalog refresh within 24 hours of filing.",
   },
   {
     title: "AI scores the lead",
-    desc: "Our model scores each lead 0\u2013100 based on permit freshness, project value, owner tenure, contact quality, and cascade probability.",
+    desc: "Our model scores each lead 0\u2013100 across six signals: permit freshness, project value, contact quality, ZIP demand, homeowner engagement, and historical conversion. The breakdown renders on every lead.",
   },
   {
-    title: "Contact data enriched",
-    desc: "Each lead arrives with verified owner and property context \u2014 name, phone, email, mailing address, property value, permit history, and roof age \u2014 so you can reach out with confidence.",
+    title: "Contact data enriched (best-effort)",
+    desc: "When public records or licensed enrichment sources have it, leads arrive with owner name, phone, email, property value, and permit history. Coverage varies by jurisdiction \u2014 every field that's enriched cites its source.",
   },
   {
     title: "You receive the lead",
-    desc: "The scored, enriched lead appears in your dashboard. Automated SMS + email outreach fires within minutes \u2014 before any competitor knows the permit exists.",
+    desc: "The scored, enriched lead appears in your dashboard. You compose outreach from a per-trade template library (50 system defaults across roofing, HVAC, plumbing, electrical, solar, ADU, general remodel) or a saved template of your own.",
   },
   {
     title: "You close the job",
-    desc: "Exclusive leads \u2014 no one else in your ZIP is working the same permit. One closed job on Pro ($1,499/mo) covers your subscription for months.",
+    desc: "Flat monthly subscription, no per-lead fees. One closed job on Pro ($1,499/mo) covers your subscription for months. Cancel anytime; takes effect at end of cycle.",
   },
 ];
 
@@ -184,25 +206,30 @@ const FEATURES = [
     badge: "Core",
     icon: <PermitIcon />,
     title: "Permit intelligence",
-    desc: "Real-time building permit monitoring across all your territory ZIPs. New permits appear in your dashboard within minutes of filing, giving you first-mover advantage.",
+    desc: "Daily building-permit ingest across your territory ZIPs (vercel.json /api/cron/scrape, 2 AM UTC). New permits appear in your dashboard the next refresh after filing.",
   },
   {
     badge: "Core",
     icon: <AIScoreIcon />,
     title: "AI lead scoring",
-    desc: "Every lead scored 0\u2013100 across four dimensions: permit freshness, project value, contact quality, and renovation cascade probability. Hot leads arrive at the top, always.",
+    desc: "Every lead scored 0\u2013100 across six signals: permit freshness, project value, contact quality, ZIP demand, homeowner engagement, and historical conversion. The breakdown renders on every lead \u2014 no black box.",
   },
+  // "Exclusive ZIP territory ownership" feature card removed 2026-04-30.
+  // The lock infrastructure exists in DB but no UI path acquires a lock
+  // and no cron enforces forfeit. ZIP-level scoping for billing tier
+  // (3/5/12/20 ZIPs depending on plan) IS real, but the "exclusive"
+  // framing was overclaiming. See plan file.
   {
-    badge: "Exclusive",
+    badge: null,
     icon: <TerritoryIcon />,
-    title: "ZIP territory ownership",
-    desc: "You buy exclusive rights to your ZIPs. One roofer per ZIP. When you own 90278, every roofing lead from that ZIP goes to you \u2014 and no one else.",
+    title: "Per-trade ZIP territories",
+    desc: "Founder/Starter/Pro/Enterprise plans include 3/5/12/20 ZIP territories respectively. A roofer and an HVAC contractor can both hold the same ZIP without conflict \u2014 trades are independent.",
   },
   {
     badge: null,
     icon: <OutreachIcon />,
-    title: "Automated outreach",
-    desc: "Instant SMS sequences fire within 60 seconds of lead arrival. Hot Permit, Storm Response, Rehash, and Spanish-language templates included.",
+    title: "Per-trade outreach templates",
+    desc: "50 system-default outreach templates across 7 trades (roofing, HVAC, plumbing, electrical, solar, ADU, general remodel) seeded into your library. Customize, save your own, or use as-is.",
   },
   {
     badge: null,
@@ -313,7 +340,7 @@ const COMPARISON_ROWS = [
 const FAQ_ITEMS = [
   {
     q: "What exactly is a building permit lead?",
-    a: "When a building permit is filed in your territory, Henri detects it within minutes, scores it 0\u2013100 for urgency and value, and surfaces it in your dashboard with the homeowner name, phone, email, mailing address, property value, and project details enriched in. The underlying permit is a public record; what Henri delivers is the enriched, scored packet ready to act on.",
+    a: "When a building permit is filed in your territory, Henri picks it up on the next daily catalog refresh (typically within 24 hours), scores it 0\u2013100 for urgency and value, and \u2014 when public records or licensed enrichment sources have it \u2014 adds the homeowner name, phone, email, mailing address, property value, and project details. Coverage of the enriched fields varies by jurisdiction. The underlying permit is a public record; what Henri delivers is the scored, best-effort enriched packet ready to act on.",
   },
   // FAQ "How is exclusivity guaranteed?" removed 2026-04-30. The lock
   // schema exists in DB and a lock library + API are wired, but no UI
@@ -351,7 +378,7 @@ const FAQ_ITEMS = [
 // infrastructure exists but no UI acquires a lock and no cron enforces
 // the forfeit, so the claim was overclaiming.
 const PROOF_STATS = [
-  { num: "30 min", label: "Permit-to-dashboard latency (matches the /api/cron/scrape schedule)" },
+  { num: "Daily", label: "Permit catalog refreshed every day at 2 AM UTC" },
   { num: "Flat", label: "Monthly subscription \u2014 no per-lead fees, no 12-month contracts" },
   { num: "24 hrs", label: "Free trial to explore the full platform before any charge" },
   { num: "Any time", label: "Cancel from your dashboard \u2014 takes effect at end of billing cycle" },
@@ -452,17 +479,17 @@ export default function ContractorsPage() {
               Henri for Contractors
             </p>
             <h1 className="mb-5 font-heading text-[clamp(36px,4.5vw,54px)] font-normal leading-[1.15] tracking-tight">
-              Own your ZIP.
+              Public permits.
               <br />
-              Get the lead <em className="text-primary">before</em>
+              <em className="text-primary">Scored.</em> Enriched.
               <br />
-              anyone else calls.
+              Ready to work.
             </h1>
             <p className="mb-8 max-w-[480px] text-[17px] leading-[1.7] text-muted-foreground">
-              Henri monitors every building permit filed in your territory,
-              AI-scores each lead by urgency and value, and delivers it
-              exclusively to you &mdash; one contractor per trade per ZIP code.
-              No bidding. No shared leads. No spam.
+              Henri turns daily building-permit filings into AI-scored,
+              contact-enriched leads in your dashboard. The source is public
+              record; the work is the scoring, enrichment, and outreach
+              templates so you can act fast on the ones worth your time.
             </p>
             <div className="mb-9 flex flex-wrap gap-3">
               <Link
