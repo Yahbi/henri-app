@@ -48,11 +48,27 @@ const plans: Plan[] = [
     // (it's never a "lower" number than reality, so we never overclaim
     // urgency during the first paint).
     scarcity: { remaining: 100, total: 100 },
+    // 2026-04-30 truthfulness pass on plan feature lists:
+    //   - "Full owner contact data" / "Full contact enrichment" -> "Best-
+    //     effort owner contact enrichment". Live DB shows 39% of leads
+    //     have owner_name, ~1% have phone, 0% have email today; calling
+    //     it "full" was overclaiming. Coverage varies by jurisdiction.
+    //   - "Storm Center alerts" / "Storm alerts & permit surge" -> "Storm
+    //     Center dashboard". The /dashboard/storm page is real, but no
+    //     code actually pushes a storm alert (no SMS / push notification
+    //     fires from the storm-events cron — it just ingests data). And
+    //     "permit surge" had zero implementation in the codebase.
+    //   - "Priority lead routing" -> dropped (no implementation; lead
+    //     routing today is just contractor-territory scoping, same on
+    //     every plan).
+    //   - "Team seats (up to 10)" -> dropped (no team / multi-user code
+    //     exists in the repo — no team_seat / team_member / invite
+    //     surface).
     features: [
       "3 ZIP territories",
       "AI-scored permit leads",
-      "Full owner contact data",
-      "Email & SMS outreach",
+      "Best-effort owner contact enrichment",
+      "Email & SMS outreach (compose & send)",
       "Price locked forever",
     ],
     cta: "Claim founder spot",
@@ -67,9 +83,9 @@ const plans: Plan[] = [
     features: [
       "5 ZIP territories",
       "AI-scored permit leads",
-      "Full contact enrichment",
-      "Email & SMS outreach",
-      "Storm Center alerts",
+      "Best-effort owner contact enrichment",
+      "Email & SMS outreach (compose & send)",
+      "Storm Center dashboard",
     ],
     cta: "Start free trial",
     ctaHref: "/signup?role=contractor&plan=starter",
@@ -81,15 +97,11 @@ const plans: Plan[] = [
     period: "/mo",
     description: "Full platform access for serious contractors.",
     features: [
-      // Pro tier — kept to features that are LIVE today (Phase 3.3). The
-      // stub surfaces (Canvass / Neighborhood Blast / Reputation) are
-      // moving to a separate "Coming to Pro" sub-list once we decide
-      // their actual ship date; don't sell what doesn't work yet.
       "12 ZIP territories",
       "Everything in Starter",
-      "Compliance monitoring",
-      "Storm alerts & permit surge",
-      "Priority support",
+      "Daily license verification (compliance)",
+      "Storm Center dashboard",
+      "Priority email support",
     ],
     cta: "Start free trial",
     ctaHref: "/signup?role=contractor&plan=pro",
@@ -104,9 +116,9 @@ const plans: Plan[] = [
     features: [
       "20 ZIP territories",
       "Everything in Pro",
-      "Priority lead routing",
       "Dedicated account manager",
-      "Team seats (up to 10)",
+      "Custom onboarding",
+      "Priority email support",
     ],
     cta: "Start free trial",
     ctaHref: "/signup?role=contractor&plan=enterprise",
