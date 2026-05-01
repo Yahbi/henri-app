@@ -1,5 +1,15 @@
 "use client";
 
+// CRITICAL: maplibre-gl.css MUST be a static top-level import so
+// Next.js's CSS extractor processes it at build time and ships it
+// in the dashboard route's CSS bundle. The previous dynamic-await
+// `import("maplibre-gl/dist/maplibre-gl.css")` worked in dev (where
+// CSS handling is permissive) but produced a promise the production
+// build silently dropped — leaving the maplibre canvas mounted but
+// with zero style rules, which renders as "no map" on prod even
+// though the JS is fully loaded. Audit 2026-04-30; founder report.
+import "maplibre-gl/dist/maplibre-gl.css";
+
 import {
   useEffect,
   useRef,
@@ -52,7 +62,8 @@ const MapDashboard = forwardRef<MapDashboardHandle, MapDashboardProps>(
       if (mapRef.current) return;
 
       const maplibregl = (await import("maplibre-gl")).default;
-      await import("maplibre-gl/dist/maplibre-gl.css");
+      // CSS is now imported statically at the top of this file — see
+      // the comment there. No dynamic CSS import here.
 
       const style = MAP_STYLE_BY_THEME[theme] ?? MAP_STYLE_BY_THEME.light;
 
