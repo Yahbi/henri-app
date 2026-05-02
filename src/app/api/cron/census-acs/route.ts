@@ -28,6 +28,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -156,16 +157,25 @@ export async function GET(request: NextRequest) {
       inserted: totalInserted,
       perVar,
     });
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       survey_year: SURVEY_YEAR,
       pulled: totalPulled,
       inserted: totalInserted,
       perVar,
+    };
+    await logCronRun("census-acs", startedAt, {
+      pulled: totalPulled, inserted: totalInserted,
+      summary: result, trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("census-acs.error", { error: String(err) });
+    await logCronRun("census-acs", startedAt, {
+      pulled: totalPulled, inserted: totalInserted,
+      error: String(err), trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "census-acs failed", detail: String(err) },
       { status: 500 },

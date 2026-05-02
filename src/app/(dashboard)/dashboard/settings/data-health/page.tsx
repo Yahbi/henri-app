@@ -92,6 +92,22 @@ export default function DataHealthPage() {
   /** cron_path → "running" | "ok: <summary>" | "fail: <msg>". Toast-style. */
   const [triggerState, setTriggerState] = useState<Record<string, string>>({});
 
+  /** Sequentially fire every cron whose latest table state is empty
+   *  / stale / error. UX shortcut for the "after a deploy, wake them
+   *  all up at once" workflow without touching .env.local. */
+  const triggerAllNeedy = async () => {
+    if (!data) return;
+    const needy = data.tables
+      .filter((t) => t.status !== "ok")
+      .map((t) => t.cron_path);
+    if (needy.length === 0) return;
+    if (!confirm(`Trigger ${needy.length} cron${needy.length === 1 ? "" : "s"} sequentially? This may take ~10 min.`)) return;
+    for (const path of needy) {
+      // eslint-disable-next-line no-await-in-loop -- intentional sequential firing to avoid hammering upstream APIs.
+      await triggerCron(path);
+    }
+  };
+
   const triggerCron = async (cronPath: string) => {
     setTriggerState((s) => ({ ...s, [cronPath]: "running" }));
     try {
@@ -192,15 +208,27 @@ export default function DataHealthPage() {
             Sidecar canonical-data-layer freshness across Wave 1 / 2.A / 2.B.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={isLoading}
-          className="inline-flex items-center gap-1 px-3 py-1.5 text-[12px] font-medium rounded-md border border-border bg-card hover:bg-card/80 disabled:opacity-50"
-        >
-          <RefreshCw className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void triggerAllNeedy()}
+            disabled={isLoading || !data || data.tables.every((t) => t.status === "ok")}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-[12px] font-medium rounded-md border border-amber-500/40 bg-amber-500/5 text-amber-700 hover:bg-amber-500/10 disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Sequentially fire every cron whose table is empty / stale / error."
+          >
+            <Play className="h-3 w-3" />
+            Trigger all needy
+          </button>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={isLoading}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-[12px] font-medium rounded-md border border-border bg-card hover:bg-card/80 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </header>
 
       {error && (

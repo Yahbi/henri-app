@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -176,16 +177,23 @@ export async function GET(request: NextRequest) {
       inserted,
       perQuery,
     });
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       days,
       pulled,
       inserted,
       perQuery,
+    };
+    await logCronRun("gdelt-triggers", startedAt, {
+      pulled, inserted, summary: result, trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("gdelt.error", { error: String(err) });
+    await logCronRun("gdelt-triggers", startedAt, {
+      pulled, inserted, error: String(err), trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "gdelt-triggers failed", detail: String(err) },
       { status: 500 },

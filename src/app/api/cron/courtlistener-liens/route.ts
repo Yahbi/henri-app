@@ -21,6 +21,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -150,7 +151,7 @@ export async function GET(request: NextRequest) {
       last_status: lastStatus,
       has_token: hasToken,
     });
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       pages,
@@ -159,9 +160,16 @@ export async function GET(request: NextRequest) {
       last_status: lastStatus,
       has_token: hasToken,
       ...(authNote ? { note: authNote } : {}),
+    };
+    await logCronRun("courtlistener-liens", startedAt, {
+      pulled, inserted, summary: result, trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("courtlistener.error", { error: String(err) });
+    await logCronRun("courtlistener-liens", startedAt, {
+      pulled, inserted, error: String(err), trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "courtlistener-liens failed", detail: String(err) },
       { status: 500 },

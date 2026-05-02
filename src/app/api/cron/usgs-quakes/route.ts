@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -122,14 +123,21 @@ export async function GET(request: NextRequest) {
       pulled: feats.length,
       inserted,
     });
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       pulled: feats.length,
       inserted,
+    };
+    await logCronRun("usgs-quakes", startedAt, {
+      pulled: feats.length, inserted, summary: result, trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("usgs.error", { error: String(err) });
+    await logCronRun("usgs-quakes", startedAt, {
+      error: String(err), trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "usgs-quakes failed", detail: String(err) },
       { status: 500 },

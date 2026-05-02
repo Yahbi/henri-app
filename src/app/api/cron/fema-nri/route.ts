@@ -26,6 +26,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -208,14 +209,23 @@ export async function GET(request: NextRequest) {
       tract,
     });
 
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       county,
       tract,
+    };
+    await logCronRun("fema-nri", startedAt, {
+      pulled: county.pulled + tract.pulled,
+      inserted: county.inserted + tract.inserted,
+      summary: result, trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("fema-nri.error", { error: String(err) });
+    await logCronRun("fema-nri", startedAt, {
+      error: String(err), trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "fema-nri failed", detail: String(err) },
       { status: 500 },

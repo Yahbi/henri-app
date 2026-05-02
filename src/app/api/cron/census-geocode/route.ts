@@ -26,6 +26,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -229,15 +230,24 @@ export async function GET(request: NextRequest) {
       fetched: totalFetched,
       geocoded: totalGeocoded,
     });
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       batches,
       fetched: totalFetched,
       geocoded: totalGeocoded,
+    };
+    await logCronRun("census-geocode", startedAt, {
+      pulled: totalFetched, inserted: totalGeocoded,
+      summary: result, trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("census-geocode.error", { error: String(err) });
+    await logCronRun("census-geocode", startedAt, {
+      pulled: totalFetched, inserted: totalGeocoded,
+      error: String(err), trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "census-geocode failed", detail: String(err) },
       { status: 500 },
