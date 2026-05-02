@@ -92,15 +92,38 @@ async function handler(request: NextRequest): Promise<NextResponse> {
      * Fall back to `issued_date` when applied_date is null via COALESCE
      * at the row mapper level below.
      */
+    /*
+     * 2026-05-02: switched primary date filter from applied_date to
+     * issued_date because >98% of permits in production have
+     * applied_date=NULL (only 19,911 of 1.4M rows are populated). The
+     * issued_date column is filled on 1.0M permits, so the 60-day
+     * window catches ~36k rows vs ~4k. Combined with the zip filter
+     * downstream, that means ~14k permits across ~948 ZIPs.
+     */
     const { data: recentPermits, error: permitError } = await supabase
       .from("permits")
       .select("zip, estimated_value, permit_type, applied_date, issued_date")
-      .gte("applied_date", sixtyDaysAgo);
+      .or(`issued_date.gte.${sixtyDaysAgo},applied_date.gte.${sixtyDaysAgo}`)
+      .not("zip", "is", null)
+      .limit(50_000); // safety cap; 50k rows = ~6MB JSON
 
     if (permitError) {
-      logger.error("Failed to fetch permits", { error: String(permitError) });
+      logger.error("zip-demand.permit-fetch-failed", {
+        error: String(permitError),
+        message: permitError.message,
+        details: permitError.details,
+        hint: permitError.hint,
+        code: permitError.code,
+      });
       return NextResponse.json(
-        { error: "Failed to fetch permits" },
+        {
+          error: "Failed to fetch permits",
+          // Surface the supabase error to the response body so the
+          // admin trigger / cron_runs audit log shows the real cause
+          // instead of a generic 500.
+          detail: permitError.message,
+          code: permitError.code,
+        },
         { status: 500 }
       );
     }
