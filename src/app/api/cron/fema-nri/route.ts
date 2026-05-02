@@ -128,9 +128,10 @@ async function fetchAndIngest(
   table: "risk_nri_county" | "risk_nri_tract",
   buildRow: (a: NriAttrs) => ReturnType<typeof buildCountyRow> | ReturnType<typeof buildTractRow>,
   conflictKey: string,
+  startOffset = 0,
 ): Promise<{ pulled: number; inserted: number; pages: number }> {
   const supabase = createAdminClient();
-  let offset = 0;
+  let offset = startOffset;
   let pulled = 0;
   let inserted = 0;
   let pages = 0;
@@ -205,23 +206,71 @@ export async function GET(request: NextRequest) {
   }
 
   const startedAt = Date.now();
+  const params = new URL(request.url).searchParams;
+  const onlyDataset = params.get("dataset"); // 'county' | 'tract' | null
+  const explicitOffset = Number(params.get("offset"));
 
   try {
-    // Counties first — small (~3k rows, finishes in ~5s) so we always
-    // ship that even if the tract pull times out.
-    const county = await fetchAndIngest(
-      DATASETS.county,
-      "risk_nri_county",
-      buildCountyRow,
-      "county_fips",
-    );
+    const supabase = createAdminClient();
 
-    const tract = await fetchAndIngest(
-      DATASETS.tract,
-      "risk_nri_tract",
-      buildTractRow,
-      "tract_fips",
-    );
+    // Smart resume: if a dataset already has rows, skip pages we've
+    // already filled by starting from `count` as the offset. ArcGIS
+    // resultOffset is monotonic across the same query, so this works
+    // as long as the upstream dataset hasn't been re-ordered. Saves
+    // 30-60s of re-fetching dupes per run on large tract pulls.
+    //
+    // Override paths:
+    //   ?dataset=tract     skip the county leg entirely
+    //   ?dataset=county    skip the tract leg
+    //   ?offset=N          force-start dataset's first leg from N
+    let countyStartOffset = 0;
+    let tractStartOffset = 0;
+    if (Number.isFinite(explicitOffset) && explicitOffset > 0) {
+      countyStartOffset = explicitOffset;
+      tractStartOffset = explicitOffset;
+    } else {
+      // Auto-resume from existing row counts. The unique PK absorbs
+      // any spillover at the boundary.
+      const [countyRes, tractRes] = await Promise.all([
+        supabase.from("risk_nri_county").select("*", { count: "estimated", head: true }),
+        supabase.from("risk_nri_tract").select("*", { count: "estimated", head: true }),
+      ]);
+      const countyCount = countyRes.count ?? 0;
+      const tractCount = tractRes.count ?? 0;
+      // Round down to PAGE_SIZE so we restart at a page boundary.
+      // Subtract one page-worth as a safety margin so any boundary
+      // dupes get re-checked rather than skipped.
+      countyStartOffset = Math.max(0, Math.floor(countyCount / PAGE_SIZE) * PAGE_SIZE - PAGE_SIZE);
+      tractStartOffset = Math.max(0, Math.floor(tractCount / PAGE_SIZE) * PAGE_SIZE - PAGE_SIZE);
+      // If county is essentially full (3000+ rows), skip its leg
+      // entirely so tract gets the full 280s budget.
+      if (!onlyDataset && countyCount >= 3000) {
+        // Mark the county leg as done by setting offset past the dataset.
+        countyStartOffset = 999_999;
+      }
+    }
+
+    // Counties first (small, ~3k rows). Skipped when ?dataset=tract
+    // or when we've auto-detected the table is already full.
+    const county = onlyDataset === "tract"
+      ? { pulled: 0, inserted: 0, pages: 0 }
+      : await fetchAndIngest(
+          DATASETS.county,
+          "risk_nri_county",
+          buildCountyRow,
+          "county_fips",
+          countyStartOffset,
+        );
+
+    const tract = onlyDataset === "county"
+      ? { pulled: 0, inserted: 0, pages: 0 }
+      : await fetchAndIngest(
+          DATASETS.tract,
+          "risk_nri_tract",
+          buildTractRow,
+          "tract_fips",
+          tractStartOffset,
+        );
 
     logger.info("fema-nri.done", {
       duration_ms: Date.now() - startedAt,
