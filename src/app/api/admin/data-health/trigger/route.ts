@@ -48,6 +48,8 @@ const ALLOWED: ReadonlySet<string> = new Set([
   "state-licenses-rotate",
   "hud-zipxw",
   "activate-arcgis-sources",
+  "code-violations",
+  "nifc-wildfires",
 ]);
 
 interface TriggerBody {

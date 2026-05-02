@@ -65,6 +65,11 @@ const TASKS: CronTask[] = [
   { key: "ia",              path: "/api/cron/openfema-ia",           wave: "2.B.2", description: "FEMA IA valid registrations (today's disaster)" },
   { key: "hud-zipxw",       path: "/api/cron/hud-zipxw",             wave: "2.B.2", description: "HUD ZIP crosswalk Tract/Place/CBSA/County (~320k)" },
   { key: "state-licenses",  path: "/api/cron/state-licenses-rotate", wave: "2.B.2", description: "State contractor licensing board (today's state)" },
+  // Wave 2.C
+  { key: "code-violations", path: "/api/cron/code-violations",        wave: "2.C",   description: "NYC DOB / Chicago / SF code violations (90d)" },
+  { key: "wildfires",       path: "/api/cron/nifc-wildfires",         wave: "2.C",   description: "NIFC current-year US wildfire incidents" },
+  // Ops
+  { key: "activate-arcgis", path: "/api/cron/activate-arcgis-sources",wave: "ops",   description: "Flip 50 of the imported ArcGIS endpoints to enabled" },
 ];
 
 interface RunResult {

@@ -64,6 +64,9 @@ const TABLES: TableSpec[] = [
   { table: "claims_ia",             cron_path: "openfema-ia",          schedule: "0 0 * * *",   wave: "2.B.2", description: "FEMA IA valid registrations (disaster rot.)",    exact_count: false },
   { table: "state_license_rosters", cron_path: "state-licenses-rotate",schedule: "30 0 * * *",  wave: "2.B.2", description: "Public state contractor license rosters (rot.)",exact_count: true  },
   { table: "zip_crosswalk_hud",     cron_path: "hud-zipxw",            schedule: "0 1 * * 0",   wave: "2.B.2", description: "HUD ZIP↔Tract/Place/CBSA/County (~320k)",        exact_count: false },
+  // Wave 2.C
+  { table: "code_violations",       cron_path: "code-violations",      schedule: "0 8 * * *",   wave: "2.C",   description: "Code violations — NYC DOB, Chicago, SF (90d)",   exact_count: true  },
+  { table: "wildfires_nifc",        cron_path: "nifc-wildfires",       schedule: "30 8 * * *",  wave: "2.C",   description: "NIFC current-year US wildfire incidents",        exact_count: true  },
 ];
 
 interface CronRunInfo {
