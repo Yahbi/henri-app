@@ -78,10 +78,24 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     /*  Fetch all permits from the last 60 days, grouped by ZIP             */
     /* -------------------------------------------------------------------- */
 
+    /*
+     * Audit fix 2026-05-02: this cron has been silently 500-erroring since
+     * at least 2026-04-26 because the SELECT referenced a non-existent
+     * column `filed_date`. The permits table uses `applied_date` /
+     * `issued_date` / `approved_date` / `completed_date`. The 500 error
+     * left zip_demand_scores empty, which forced every lead's
+     * "ZIP demand" signal to default to 8/15 — capping every lead's
+     * total score in the 30-69 band and producing 0 hot leads (≥75)
+     * across 177k production rows.
+     *
+     * Switching to `applied_date` (the closest equivalent to "filed").
+     * Fall back to `issued_date` when applied_date is null via COALESCE
+     * at the row mapper level below.
+     */
     const { data: recentPermits, error: permitError } = await supabase
       .from("permits")
-      .select("zip, estimated_value, permit_type, filed_date")
-      .gte("filed_date", sixtyDaysAgo);
+      .select("zip, estimated_value, permit_type, applied_date, issued_date")
+      .gte("applied_date", sixtyDaysAgo);
 
     if (permitError) {
       logger.error("Failed to fetch permits", { error: String(permitError) });
@@ -113,8 +127,17 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
     for (const permit of recentPermits) {
       if (!permit.zip) continue;
+      // Coalesce applied_date → issued_date so permits without applied_date
+      // (some scraped jurisdictions only populate issued_date) still
+      // contribute to the demand calc.
+      const filedDate = permit.applied_date ?? permit.issued_date;
+      if (!filedDate) continue;
       const list = zipPermits.get(permit.zip) ?? [];
-      list.push(permit);
+      list.push({
+        estimated_value: permit.estimated_value,
+        permit_type: permit.permit_type,
+        filed_date: filedDate,
+      });
       zipPermits.set(permit.zip, list);
     }
 
@@ -214,7 +237,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         demand_score: demandScore,
         competition_level: competitionLevel,
         top_trade: topTrade,
-        updated_at: new Date().toISOString(),
+        // Schema uses `computed_at`, not `updated_at`. Audit 2026-05-02
+        // — earlier code path tried to write a column that doesn't
+        // exist and would have errored on every batch even after the
+        // SELECT was fixed.
+        computed_at: new Date().toISOString(),
       });
 
       zipsScored++;
