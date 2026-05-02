@@ -157,14 +157,27 @@ async function fetchAndIngest(
       .filter((r): r is NonNullable<typeof r> => r !== null);
 
     if (rows.length > 0) {
-      // ArcGIS FeatureServer sometimes returns a row twice across page
-      // boundaries — guard with onConflict so the unique PK absorbs it.
-      const { error, count } = await supabase
-        .from(table)
-        .upsert(rows, { onConflict: conflictKey, count: "exact" });
-      if (error) {
-        logger.warn("fema-nri.insert_error", { table, page: pages, error: error.message });
-      } else {
+      // Chunk into 100-row batches. NRI features carry ~467
+      // attributes each (~25KB), so 2000 rows × 25KB = 50MB which
+      // blows past Supabase REST's 8MB body limit (PGRST413). 100
+      // rows × 25KB = 2.5MB stays well under the ceiling. ArcGIS
+      // FeatureServer also occasionally duplicates rows across page
+      // boundaries — onConflict absorbs the dupes via the unique PK.
+      const BATCH = 100;
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const slice = rows.slice(i, i + BATCH);
+        const { error, count } = await supabase
+          .from(table)
+          .upsert(slice, { onConflict: conflictKey, count: "exact" });
+        if (error) {
+          logger.warn("fema-nri.insert_error", {
+            table,
+            page: pages,
+            batch_start: i,
+            error: error.message,
+          });
+          continue;
+        }
         inserted += count ?? 0;
       }
     }
