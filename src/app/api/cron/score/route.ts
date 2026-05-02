@@ -677,11 +677,22 @@ export async function GET(request: NextRequest) {
 
     const leadZips = [...new Set(scoredLeads.map((sl) => sl.permit.zip).filter(Boolean))] as string[];
 
-    const { data: territoryRows } = await supabase
+    const { data: territoryRows, error: territoryErr } = await supabase
       .from("territories")
       .select("zip, contractor_id, profiles!inner(id, phone, email, full_name)")
       .in("zip", leadZips)
       .eq("status", "active");
+    if (territoryErr) {
+      logger.error("score.territory_query_failed", {
+        error: territoryErr.message,
+        leadZipsCount: leadZips.length,
+      });
+    } else {
+      logger.info("score.territory_query_done", {
+        leadZipsCount: leadZips.length,
+        territoryRowsCount: territoryRows?.length ?? 0,
+      });
+    }
 
     /* Build ZIP -> contractors map */
     const zipToContractors = new Map<
@@ -1047,6 +1058,12 @@ export async function GET(request: NextRequest) {
         leadsCreated: assignedCount,
         assigned: assignedCount,
         notified: notifiedCount,
+        // Diagnostic fields for the audit pass — surfaces where the
+        // assignment pipeline drops permits.
+        unique_lead_zips: leadZips.length,
+        territory_rows: territoryRows?.length ?? 0,
+        zip_to_contractors_map_size: zipToContractors.size,
+        leads_to_insert_count: leadsToInsert.length,
         scoreDistribution: {
           hot: scoredLeads.filter((sl) => sl.urgency === "hot").length,
           warm: scoredLeads.filter((sl) => sl.urgency === "warm").length,
