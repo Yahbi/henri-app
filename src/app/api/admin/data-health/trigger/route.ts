@@ -50,6 +50,10 @@ const ALLOWED: ReadonlySet<string> = new Set([
   "activate-arcgis-sources",
   "code-violations",
   "nifc-wildfires",
+  // The legacy main scoring cron — wrapped with logCronRun in commit
+  // (post-audit 2026-05-02) and added here so the data-health Run-now
+  // button can fire it manually when Vercel's auto-cron drops it.
+  "score",
 ]);
 
 interface TriggerBody {

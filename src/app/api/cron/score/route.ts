@@ -4,6 +4,7 @@ import { calculateScore, buildSignals } from "@/lib/scoring";
 import type { Urgency } from "@/lib/scoring";
 import { buildScoreSignalBreakdown } from "@/lib/scoring/signals";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 import { evaluateRules, type AddressPermitHistory } from "@/lib/predictive/rules";
 import { mineDescription, mergeSuggestions } from "@/lib/predictive/llm-mining";
 import { getMiningLlmClient } from "@/lib/predictive/openai-client";
@@ -1039,7 +1040,7 @@ export async function GET(request: NextRequest) {
       .update({ scored_at: new Date().toISOString() })
       .in("id", permitIds);
 
-    return NextResponse.json({
+    const responseBody = {
       success: true,
       summary: {
         scored: scoredLeads.length,
@@ -1060,11 +1061,22 @@ export async function GET(request: NextRequest) {
               )
             : 0,
       },
+    };
+    await logCronRun("score", t0, {
+      pulled: scoredLeads.length,
+      inserted: assignedCount,
+      summary: responseBody,
+      trigger: detectTrigger(request),
     });
+    return NextResponse.json(responseBody);
   } catch (err) {
     logger.error("Lead scoring cron error", { error: String(err) });
+    await logCronRun("score", t0, {
+      error: String(err),
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json(
-      { error: "Lead scoring failed" },
+      { error: "Lead scoring failed", detail: String(err) },
       { status: 500 }
     );
   }
