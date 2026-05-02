@@ -482,3 +482,75 @@ The 14-day data-acquisition plan from `~/.claude/plans/whats-the-14-days-purring
 **User actions still required**:
 - `CL_TOKEN` env var in Vercel (free token at courtlistener.com → Profile → API). Without it, `liens_courtlistener` stays empty.
 - Per-state research budget if we want to grow beyond the 5 enabled state license sources (most state license boards don't ship public APIs).
+
+## Wave 2.C + post-data wiring (2026-05-02)
+
+After ingesting ~308k canonical sidecar rows we did a full gap audit and shipped everything Henri-app-side that USES the data. Most of the data was sitting in tables unused. Closing that gap was the work today.
+
+**Migrations 00077–00078**:
+- 00077: `code_violations` (long-format multi-jurisdiction Socrata: NYC DOB / Chicago / SF) + `wildfires_nifc` (current-year NIFC ArcGIS)
+- 00078: 4 starter outreach templates with disaster-context tokens
+
+**3 new cron routes** (`/api/cron/`):
+- `code-violations` (daily 08:00 UTC) — 90-day rolling window from 3 verified-live Socrata feeds
+- `nifc-wildfires` (daily 08:30 UTC) — current-year fire incidents, IRWIN ID dedup
+- `activate-arcgis-sources` (daily 07:00 UTC) — flips 50 of the 2,364 newly-imported ArcGIS endpoints from `enabled=false` → `enabled=true` per day, NC/SC/TN/VA wedge states first. ~47 days to fully ramp.
+
+**6 stopgap permit endpoints** added directly to `permit_sources` (probed live 2026-05-02): Little Rock AR, Portland ME, Jackson MS, Albuquerque + Santa Fe NM, Tulsa OK, Cheyenne + Casper WY. Closes the AR/ME/MS/NM/OK/WY coverage gap from the v5 audit. All 8 have `discovered_via='six_state_stopgap_2026-05-02'`.
+
+**Scoring engine extensions** (commit `028ab20`):
+- 5 additive boosters total: storm 5 + lien 3 + nri 3 + nfip 2 + quake 2 = 15 pts max
+- All cap into the 100-pt total via Math.min so urgency thresholds (75/50/25) hold
+- Score cron pre-fetches risk_nri_county / claims_nfip / quakes_usgs once per run, in-memory bbox+haversine per permit
+- All graceful-degrade — null signals = 0 boost, no behavior change when sidecars empty
+
+**Lead drawer surfaces** (commit `028ab20`):
+- 6 panels in `PropertyContextSection`: derived equipment + neighborhood + storm + SWDI + liens + NRI + NFIP + recent FEMA disasters
+- All graceful-hide when the data is empty
+
+**Admin sub-pages under `/dashboard/settings`** (commit `a9791cf`):
+- `/data-health` — 19-table freshness panel + recent-run mini-chips + manual triggers + "trigger all needy"
+- `/news-triggers` — GDELT pre-permit news signals (459 articles, filterable by query + window)
+- `/foreclosures-reo` — FHA REO listings (622 pre-listing-prep leads, filterable by state/ZIP)
+- All godmode-only via `isGodModeEmail()`
+
+**Onboarding license cross-check** (commit `d7d4f24`):
+- `POST /api/onboarding/verify-license` cross-checks (state, license_number) against `state_license_rosters`
+- 5 supported states (TX/NY/WA/OR/AZ); 45 fall through to manual review
+- Inline status pill in `/onboarding/license` form (debounced 700ms)
+- On submit: stamps `verified=true` + `verification_status='verified_state_roster'` when match found
+
+**Outreach disaster-context tokens** (commit `278868e`):
+- 7 new tokens: `{{nfip_claim_count}}` / `{{nri_risk_score}}` / `{{nri_risk_tier}}` / `{{recent_disaster_id}}` / `{{recent_disaster_title}}` / `{{storm_count_30d}}` / `{{lien_count_90d}}`
+- Token regex extended `[a-z0-9_]+` so digit-suffixed names match
+- 24 new tests in `src/lib/outreach/__tests__/tokens.test.ts` (first test file for the package)
+
+**Test coverage additions today**:
+- `src/lib/outreach/__tests__/tokens.test.ts` — 24 cases (resolver invariants + KNOWN_TOKENS surface + zero-count guards)
+- `src/lib/admin/__tests__/cron-log.test.ts` — 5 cases (`detectTrigger` HTTP standard semantics)
+- `src/lib/auth/__tests__/god-mode.test.ts` — 13 cases (allowlist + env-var override + lockdown)
+
+**Total inventory after 2026-05-02**:
+- 21 sidecar tables (was 18) + cron_runs audit log
+- 19 cron routes (was 16)
+- ~308k rows ingested + ongoing autonomous fill
+- 712 unit tests passing (was 640 at session start, +72)
+- 5 score boosters / 6 lead-drawer panels / 3 admin sub-pages / 1 onboarding cross-check / 7 outreach tokens / 4 starter templates
+
+**Henri-app utilization of sidecar data after this session**:
+| Sidecar | Surfaces using it |
+|---|---|
+| weather_swdi_* | Score booster + drawer panel + outreach token |
+| liens_courtlistener | Score booster + drawer panel + outreach token |
+| risk_nri_county/tract | Score booster + drawer panel + outreach token |
+| claims_nfip | Score booster + drawer panel + outreach token |
+| claims_disasters_fema | Drawer panel + outreach token |
+| quakes_usgs | Score booster |
+| state_license_rosters | Onboarding cross-check (TX/NY/WA/OR/AZ) |
+| triggers_news_gdelt | `/dashboard/settings/news-triggers` admin page |
+| foreclosures_fha | `/dashboard/settings/foreclosures-reo` admin page |
+| code_violations *(new)* | Pending wiring — daily 08:00 UTC fill starts tomorrow |
+| wildfires_nifc *(new)* | Pending wiring — daily 08:30 UTC fill starts tomorrow |
+| claims_ia | Drawer panel (via disaster declarations) |
+| mortgages_hmda | None yet (sparse) |
+| demo_acs_zcta | None yet (Sunday cron) |
