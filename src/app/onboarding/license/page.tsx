@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useToast } from "@/components/ui/toast";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ShieldCheck, CheckCircle2 } from "lucide-react";
+import { ShieldCheck, CheckCircle2, AlertCircle, Loader2, Info } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +33,22 @@ const licenseSchema = z.object({
 
 type LicenseFormData = z.infer<typeof licenseSchema>;
 
+/** Wave 2.B Phase 2 — live cross-check against state_license_rosters. */
+interface VerifyMatch {
+  business_name: string | null;
+  license_type: string | null;
+  license_status: string | null;
+  expire_date: string | null;
+  city: string | null;
+}
+
+interface VerifyResult {
+  status: "found" | "missing" | "skipped" | "error" | "idle" | "checking";
+  message?: string;
+  match?: VerifyMatch;
+  available_states?: string[];
+}
+
 function LicenseVerificationContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -47,14 +63,55 @@ function LicenseVerificationContent() {
   }, [searchParams, addToast]);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verify, setVerify] = useState<VerifyResult>({ status: "idle" });
+  const verifyTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<LicenseFormData>({
     resolver: zodResolver(licenseSchema),
   });
+
+  /* Watch (state, license_number) and fire a verification probe
+   * 700ms after the user stops typing. Stale-response guard via a
+   * mounted-ref so a slow probe doesn't overwrite a newer one. */
+  const licenseNumber = watch("license_number");
+  const state = watch("state");
+
+  const runVerify = useCallback(
+    async (st: string, ln: string) => {
+      setVerify({ status: "checking" });
+      try {
+        const res = await fetch("/api/onboarding/verify-license", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state: st, license_number: ln }),
+        });
+        const body = (await res.json()) as VerifyResult;
+        setVerify(body);
+      } catch {
+        setVerify({ status: "error", message: "Verification probe failed; we'll review manually." });
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (verifyTimerRef.current) clearTimeout(verifyTimerRef.current);
+    if (!state || !licenseNumber || licenseNumber.length < 3) {
+      setVerify({ status: "idle" });
+      return;
+    }
+    verifyTimerRef.current = setTimeout(() => {
+      void runVerify(state, licenseNumber);
+    }, 700);
+    return () => {
+      if (verifyTimerRef.current) clearTimeout(verifyTimerRef.current);
+    };
+  }, [state, licenseNumber, runVerify]);
 
   async function onSubmit(data: LicenseFormData) {
     setSubmitting(true);
@@ -70,13 +127,37 @@ function LicenseVerificationContent() {
         return;
       }
 
+      // Wave 2.B Phase 2 — record auto-verification status. When the
+      // cross-check found the license in our state_license_rosters,
+      // mark verified immediately. Otherwise stay pending — admin
+      // (or a future scraper) will resolve manually.
+      // Schema (migration 00010): license_state, holder_name,
+      // verified (bool), verification_status (text), last_checked_at.
+      const verifiedFlag = verify.status === "found";
+      const verificationStatus =
+        verify.status === "found"
+          ? "verified_state_roster"
+          : verify.status === "skipped"
+            ? "manual_review"
+            : verify.status === "missing"
+              ? "missing_in_roster"
+              : "pending_verification";
+
       const { error: licenseErr } = await supabase.from("contractor_licenses").insert({
         contractor_id: user.id,
         license_number: data.license_number,
-        state: data.state,
-        license_type: data.license_type || null,
-        name_on_license: data.name_on_license || null,
-        status: "pending_verification",
+        license_state: data.state,
+        license_type:
+          (verify.match?.license_type as string | undefined) || data.license_type || null,
+        holder_name:
+          (verify.match?.business_name as string | undefined) ||
+          data.name_on_license ||
+          null,
+        verified: verifiedFlag,
+        verification_status: verificationStatus,
+        last_checked_at: new Date().toISOString(),
+        expiry_date: (verify.match?.expire_date as string | undefined) || null,
+        raw_response: verify as unknown as Record<string, unknown>,
       });
       if (licenseErr) throw licenseErr;
 
@@ -193,6 +274,81 @@ function LicenseVerificationContent() {
                   placeholder="Full name as shown on license"
                 />
               </div>
+
+              {/* Wave 2.B Phase 2 — live cross-check status pill.
+                  Renders below the form once the user has typed
+                  enough for a probe (state + 3+ char license). */}
+              {verify.status !== "idle" && (
+                <div
+                  className={`rounded-lg px-3 py-2.5 text-sm flex items-start gap-2.5 ${
+                    verify.status === "found"
+                      ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-700"
+                      : verify.status === "skipped"
+                        ? "bg-amber-500/10 border border-amber-500/20 text-amber-700"
+                        : verify.status === "missing"
+                          ? "bg-rose-500/10 border border-rose-500/20 text-rose-700"
+                          : verify.status === "checking"
+                            ? "bg-muted/40 border border-border text-muted-foreground"
+                            : "bg-muted/40 border border-border text-muted-foreground"
+                  }`}
+                  role="status"
+                >
+                  {verify.status === "checking" ? (
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0 mt-0.5" />
+                  ) : verify.status === "found" ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+                  ) : verify.status === "skipped" ? (
+                    <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {verify.status === "checking" && (
+                      <span>Checking the {state} licensing roster…</span>
+                    )}
+                    {verify.status === "found" && verify.match && (
+                      <>
+                        <div className="font-medium">
+                          ✓ Verified against the {state} licensing roster
+                        </div>
+                        <div className="text-[12px] mt-0.5 opacity-90">
+                          {verify.match.business_name}
+                          {verify.match.license_status &&
+                            ` · ${verify.match.license_status}`}
+                          {verify.match.expire_date &&
+                            ` · expires ${verify.match.expire_date}`}
+                        </div>
+                      </>
+                    )}
+                    {verify.status === "missing" && (
+                      <>
+                        <div className="font-medium">License not found in {state} roster</div>
+                        <div className="text-[12px] mt-0.5 opacity-90">
+                          Double-check the number. We&rsquo;ll review manually if you continue.
+                        </div>
+                      </>
+                    )}
+                    {verify.status === "skipped" && (
+                      <>
+                        <div className="font-medium">Manual review for {state}</div>
+                        <div className="text-[12px] mt-0.5 opacity-90">
+                          {state} isn&rsquo;t in our auto-verify roster yet. You can still
+                          submit — we&rsquo;ll review your license manually.
+                          {verify.available_states && verify.available_states.length > 0 && (
+                            <span className="block mt-0.5">
+                              Currently auto-verifying:{" "}
+                              {verify.available_states.join(", ")}.
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    )}
+                    {verify.status === "error" && (
+                      <span>{verify.message ?? "Verification probe failed."}</span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div
