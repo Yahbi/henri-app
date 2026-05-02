@@ -117,11 +117,15 @@ export async function POST(request: NextRequest) {
       signal: AbortSignal.timeout(290_000),
     });
     const status = res.status;
+    // Read the body once as text — calling res.json() consumes the
+    // stream, and on parse failure res.text() then throws "Body is
+    // unusable". Always go via .text() and then try-parse.
+    const text = await res.text();
     let upstreamBody: unknown;
     try {
-      upstreamBody = await res.json();
+      upstreamBody = JSON.parse(text);
     } catch {
-      upstreamBody = await res.text();
+      upstreamBody = text.slice(0, 2000);
     }
     logger.info("admin-trigger.done", {
       user_email: user?.email,
