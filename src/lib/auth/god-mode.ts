@@ -14,7 +14,11 @@
  * defaults to the founder's email.
  */
 
-const DEFAULT_ALLOWLIST = "y.abismuth@gmail.com";
+// Founder accounts. y.abismuth = dev/build identity; waspinc20 = the
+// production Henri-account email used to actually sign in to the app.
+// Both belong to the same person; we keep both so god-mode works
+// regardless of which one is signed in.
+const DEFAULT_ALLOWLIST = "y.abismuth@gmail.com,waspinc20@gmail.com";
 
 export function isGodModeEmail(email: string | null | undefined): boolean {
   if (!email) return false;
