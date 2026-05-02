@@ -38,6 +38,31 @@ export interface OutreachTokenContext {
    *  capacity prefs — surfaced as "between $X and $Y" in templates. */
   value_min: number | null;
   value_max: number | null;
+
+  /* Wave 1.5 / 2.A / 2.B disaster-context tokens. All optional — use in
+   * "I noticed your area was hit by..." style outreach. Resolved from
+   * the lead-context API at template render time; null falls through
+   * to the empty-fallback so the sentence reads cleanly when the data
+   * isn't available. */
+
+  /** Count of NFIP flood claims in the lead's ZIP. */
+  nfip_claim_count: number | null;
+  /** FEMA NRI risk score 0-100 for the lead's county. */
+  nri_risk_score: number | null;
+  /** FEMA NRI qualitative tier: "Very Low" / "Relatively Low" / "Relatively
+   *  Moderate" / "Relatively High" / "Very High". */
+  nri_risk_tier: string | null;
+  /** Title of the most recent FEMA disaster declaration in the lead's
+   *  state (e.g. "Severe Storms and Flooding"). */
+  recent_disaster_title: string | null;
+  /** DR/EM number of that recent disaster (e.g. "DR-4806"). */
+  recent_disaster_id: string | null;
+  /** Count of SWDI hail/wind/tornado signatures within 25mi in the
+   *  last 30 days. */
+  storm_count_30d: number | null;
+  /** Count of CourtListener mechanic-lien dockets in the lead's
+   *  state in the last 90 days. */
+  lien_count_90d: number | null;
 }
 
 const FALLBACKS: Record<keyof OutreachTokenContext, string> = {
@@ -57,6 +82,18 @@ const FALLBACKS: Record<keyof OutreachTokenContext, string> = {
   contractor_phone: "",
   value_min: "",
   value_max: "",
+  // Disaster-context fallbacks — empty-string fallbacks make the
+  // sentence read cleanly: "your area saw   in the last 90 days"
+  // gracefully degrades to "your area saw in the last 90 days" if
+  // we omit the token, or contractors can guard the line with an
+  // {{#if}} variant in a future template upgrade.
+  nfip_claim_count: "",
+  nri_risk_score: "",
+  nri_risk_tier: "",
+  recent_disaster_title: "",
+  recent_disaster_id: "",
+  storm_count_30d: "",
+  lien_count_90d: "",
 };
 
 function formatValue(v: number | null): string {
@@ -80,6 +117,18 @@ function formatContextValue(key: keyof OutreachTokenContext, raw: unknown): stri
     if (n === 1) return "yesterday";
     return String(Math.round(n));
   }
+  // Disaster-context numeric tokens — render the integer count (or
+  // skip when zero so "0 claims" doesn't surface as a false signal).
+  if (
+    key === "nfip_claim_count" ||
+    key === "storm_count_30d" ||
+    key === "lien_count_90d" ||
+    key === "nri_risk_score"
+  ) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return FALLBACKS[key];
+    return String(Math.round(n));
+  }
   return String(raw);
 }
 
@@ -93,7 +142,10 @@ export function resolveTokens(
   ctx: Partial<OutreachTokenContext>,
 ): string {
   if (!input) return "";
-  return input.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (match, rawKey: string) => {
+  // Token names are alphanumeric + underscore. We accept digits to
+  // support tokens like `storm_count_30d` and `lien_count_90d` that
+  // bake the lookup window into the name.
+  return input.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (match, rawKey: string) => {
     const key = rawKey.toLowerCase().trim() as keyof OutreachTokenContext;
     if (!(key in FALLBACKS)) return match; // unknown token → leave as-is
     return formatContextValue(key, (ctx as Record<string, unknown>)[key]);
