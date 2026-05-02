@@ -301,6 +301,166 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    /* Wave 1.5 — pre-fetch sidecar data so the scorer can populate the
+     * two additive boosters (storm_proximity_24h, recent_lien_90d).
+     *
+     * Strategy: pull the small recent windows once, then bbox + state-
+     * prefix them per permit in memory. That avoids 5,000 round-trips
+     * to the SWDI tables in a single cron run.
+     *
+     * Graceful-degrade: when the sidecar tables are empty (Wave 1 cron
+     * hasn't yet populated them) or migrations haven't applied, the
+     * lookups silently return [] and the boosters stay at 0. Existing
+     * scoring stays stable — no behavior change. */
+    interface SwdiPoint {
+      kind: "hail" | "wind" | "tornado";
+      lat: number;
+      lng: number;
+      max_size_mm: number | null;
+      max_wind_mph: number | null;
+      probability: number | null;
+    }
+    const swdiPoints: SwdiPoint[] = [];
+    try {
+      const since24h = new Date(Date.now() - 86_400_000).toISOString();
+      const [hailRes, windRes, tornadoRes] = await Promise.all([
+        supabase
+          .from("weather_swdi_hail")
+          .select("lat, lng, max_size_mm, probability")
+          .gte("event_time", since24h)
+          .limit(50_000),
+        supabase
+          .from("weather_swdi_wind")
+          .select("lat, lng, max_wind_mph")
+          .gte("event_time", since24h)
+          .limit(50_000),
+        supabase
+          .from("weather_swdi_tornado")
+          .select("lat, lng")
+          .gte("event_time", since24h)
+          .limit(5_000),
+      ]);
+      for (const r of hailRes.data ?? []) {
+        if (typeof r.lat === "number" && typeof r.lng === "number") {
+          swdiPoints.push({
+            kind: "hail",
+            lat: r.lat, lng: r.lng,
+            max_size_mm: typeof r.max_size_mm === "number" ? r.max_size_mm : null,
+            max_wind_mph: null,
+            probability: typeof r.probability === "number" ? r.probability : null,
+          });
+        }
+      }
+      for (const r of windRes.data ?? []) {
+        if (typeof r.lat === "number" && typeof r.lng === "number") {
+          swdiPoints.push({
+            kind: "wind",
+            lat: r.lat, lng: r.lng,
+            max_size_mm: null,
+            max_wind_mph: typeof r.max_wind_mph === "number" ? r.max_wind_mph : null,
+            probability: null,
+          });
+        }
+      }
+      for (const r of tornadoRes.data ?? []) {
+        if (typeof r.lat === "number" && typeof r.lng === "number") {
+          swdiPoints.push({
+            kind: "tornado",
+            lat: r.lat, lng: r.lng,
+            max_size_mm: null,
+            max_wind_mph: null,
+            probability: null,
+          });
+        }
+      }
+      logger.info("score.swdi_loaded", { count: swdiPoints.length });
+    } catch (e) {
+      logger.warn("score.swdi_load_failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
+    // Lien lookup — bucket by lowercased state prefix of the
+    // CourtListener `court` slug (e.g. "calsup" → "ca", "txctapp" → "tx").
+    const lienCountByState = new Map<string, number>();
+    try {
+      const since90dDate = new Date(Date.now() - 90 * 86_400_000)
+        .toISOString().slice(0, 10);
+      const { data: lienRows } = await supabase
+        .from("liens_courtlistener")
+        .select("court")
+        .gte("date_filed", since90dDate)
+        .limit(50_000);
+      for (const r of lienRows ?? []) {
+        if (typeof r.court !== "string" || r.court.length < 2) continue;
+        const st = r.court.slice(0, 2).toLowerCase();
+        lienCountByState.set(st, (lienCountByState.get(st) ?? 0) + 1);
+      }
+      logger.info("score.liens_loaded", {
+        states: lienCountByState.size,
+        total: [...lienCountByState.values()].reduce((a, b) => a + b, 0),
+      });
+    } catch (e) {
+      logger.warn("score.liens_load_failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
+    /** Approximate miles between two lat/lng pairs via haversine. */
+    function haversineMi(
+      lat1: number,
+      lng1: number,
+      lat2: number,
+      lng2: number,
+    ): number {
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+      return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    /** Highest-magnitude SWDI signature within 25mi of (lat,lng), 0-100. */
+    function stormProximityFor(lat: number | null, lng: number | null): number | null {
+      if (lat == null || lng == null) return null;
+      if (swdiPoints.length === 0) return null;
+      let best = 0;
+      // Coarse bbox prefilter to keep the haversine loop fast — skip
+      // anything > ~0.5° away in either dim (≈ 35mi at 40°N).
+      for (const p of swdiPoints) {
+        if (Math.abs(p.lat - lat) > 0.5 || Math.abs(p.lng - lng) > 0.6) continue;
+        const mi = haversineMi(lat, lng, p.lat, p.lng);
+        if (mi > 25) continue;
+        // Map kind/magnitude → 0-100 intensity score.
+        let intensity = 30; // baseline for "near a signature"
+        if (p.kind === "tornado") intensity = 95;
+        else if (p.kind === "wind" && p.max_wind_mph != null) {
+          if (p.max_wind_mph >= 75) intensity = 90;
+          else if (p.max_wind_mph >= 50) intensity = 70;
+          else if (p.max_wind_mph >= 30) intensity = 50;
+        } else if (p.kind === "hail" && p.max_size_mm != null) {
+          // 25mm = 1 inch (severe threshold), 50mm = 2 inch (significant)
+          if (p.max_size_mm >= 50) intensity = 90;
+          else if (p.max_size_mm >= 25) intensity = 70;
+          else intensity = 45;
+        }
+        // Distance attenuation: subtract 1pt per mile beyond 5
+        const attenuated = Math.max(0, intensity - Math.max(0, mi - 5));
+        if (attenuated > best) best = attenuated;
+      }
+      return best > 0 ? best : null;
+    }
+
+    /** Lien count for the lead's state-abbrev (proxy via court slug). */
+    function recentLienCountFor(state: string | null): number | null {
+      if (!state) return null;
+      const st = state.toLowerCase();
+      const v = lienCountByState.get(st);
+      return v != null ? v : null;
+    }
+
     /* ── 3. Score every permit with the new engine ─────────────────────── */
 
     const scoredLeads: ScoredLead[] = permits.map((permit) => {
@@ -360,6 +520,11 @@ export async function GET(request: NextRequest) {
         competitorCount: permit.zip ? competitorMap.get(permit.zip) ?? 0 : 0,
         zipConversionRate: permit.zip ? zipRates.get(permit.zip) ?? null : null,
         tradeConversionRate: trade ? tradeRates.get(trade) ?? null : null,
+        // Wave 1.5 — sidecar boosters (SWDI proximity + recent liens).
+        // Both default to null when the sidecar tables are empty so the
+        // boost path is a no-op until the data lands.
+        stormProximity24h: stormProximityFor(permit.latitude, permit.longitude),
+        recentLienCount: recentLienCountFor(permit.state),
       });
 
       const result = calculateScore(signals);
