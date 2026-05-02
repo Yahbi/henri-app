@@ -172,13 +172,19 @@ export async function GET(
       .from("leads")
       .select(
         "id, permit_id, address, city, state, zip, year_built, owner_occupied, " +
-          "permit_type, permit_description, trade, permit_filed_date, " +
+          "permit_type, permit_description, trade, " +
           "latitude, longitude",
       )
       .eq("id", id)
       .maybeSingle();
     if (leadErr || !leadRow) {
-      return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+      // Surface the actual error message in dev so column-mismatch bugs
+      // aren't masked as "Lead not found". Production sees just the
+      // 404; logs capture the diff.
+      return NextResponse.json(
+        { error: "Lead not found", detail: leadErr?.message ?? null },
+        { status: 404 },
+      );
     }
 
     /* 2. Fetch permit history at this address (newest first, capped at
