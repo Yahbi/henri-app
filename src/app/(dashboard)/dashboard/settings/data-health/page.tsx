@@ -207,6 +207,20 @@ export default function DataHealthPage() {
           <p className="text-[12px] text-fg-subtle mt-0.5">
             Sidecar canonical-data-layer freshness across Wave 1 / 2.A / 2.B.
           </p>
+          <div className="flex items-center gap-3 mt-2 text-[11px]">
+            <Link
+              href="/dashboard/settings/news-triggers"
+              className="text-primary hover:underline"
+            >
+              → News triggers (GDELT)
+            </Link>
+            <Link
+              href="/dashboard/settings/foreclosures-reo"
+              className="text-primary hover:underline"
+            >
+              → FHA REO foreclosures
+            </Link>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
