@@ -13,6 +13,9 @@ import {
   Tornado,
   Wind,
   Scale,
+  ShieldAlert,
+  Waves,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import type { LeadContextData } from "@/hooks/useLeadContext";
@@ -112,6 +115,9 @@ export function PropertyContextSection({ data, isLoading }: Props) {
   const { derived, adjacent_count_90d, storm } = data;
   const swdiNearby = data.swdi_nearby ?? [];
   const recentLiens = data.recent_liens ?? [];
+  const nriRisk = data.nri_risk ?? null;
+  const nfipHistory = data.nfip_history ?? null;
+  const recentDisasters = data.recent_disasters ?? [];
 
   // Decide whether to render anything at all. Hide the entire section if
   // we have zero useful signals (avoid empty-card noise on leads with no
@@ -125,9 +131,13 @@ export function PropertyContextSection({ data, isLoading }: Props) {
   const hasStorm = storm != null;
   const hasSwdi = swdiNearby.length > 0;
   const hasLiens = recentLiens.length > 0;
+  const hasNri = nriRisk != null && nriRisk.risk_score >= 50; // skip "Very Low" — visual noise
+  const hasNfip = nfipHistory != null && nfipHistory.claim_count > 0;
+  const hasDisasters = recentDisasters.length > 0;
   const anySignal =
     hasRoof || hasHvac || hasPool || hasSolar || hasPanel ||
-    hasNeighbors || hasStorm || hasSwdi || hasLiens;
+    hasNeighbors || hasStorm || hasSwdi || hasLiens ||
+    hasNri || hasNfip || hasDisasters;
   if (!anySignal) return null;
 
   /** Days-ago label for SWDI / lien event timestamps (UTC). */
@@ -360,6 +370,107 @@ export function PropertyContextSection({ data, isLoading }: Props) {
                     ) : (
                       <div className="flex items-center gap-2">{inner}</div>
                     )}
+                  </li>
+                );
+              })}
+            </ul>
+          </li>
+        )}
+
+        {/* Wave 2.A — FEMA NRI risk tier for the lead's county.
+            Renders only when the matched county is at moderate risk
+            or higher (>=50/100). High-risk areas drive recurring
+            storm-claim work — useful contractor signal. */}
+        {hasNri && nriRisk && (
+          <li className="border-t border-border/40 pt-1.5 mt-0.5">
+            <div className="flex items-center gap-1.5 mb-1">
+              <ShieldAlert className="h-3 w-3 text-muted-foreground/70 shrink-0" />
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                FEMA disaster risk
+              </span>
+            </div>
+            <div className="ml-4 flex items-center gap-2 text-[11px]">
+              <span className="text-foreground font-medium">
+                {nriRisk.risk_rating || "Score"}
+              </span>
+              <span
+                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide ${
+                  nriRisk.risk_score >= 90
+                    ? "bg-red-500/10 text-red-600 border border-red-500/20"
+                    : nriRisk.risk_score >= 75
+                      ? "bg-orange-500/10 text-orange-700 border border-orange-500/20"
+                      : "bg-amber-500/10 text-amber-700 border border-amber-500/20"
+                }`}
+              >
+                NRI {Math.round(nriRisk.risk_score)}/100
+              </span>
+              <span className="text-fg-subtle/60 text-[10px] ml-auto italic">
+                {nriRisk.matched_on}
+              </span>
+            </div>
+          </li>
+        )}
+
+        {/* Wave 2.B — NFIP flood-claim history for the lead's ZIP.
+            Restoration-trade signal. High counts mean recurring
+            flood damage — homeowner already knows to call someone. */}
+        {hasNfip && nfipHistory && (
+          <li className="border-t border-border/40 pt-1.5 mt-0.5">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Waves className="h-3 w-3 text-muted-foreground/70 shrink-0" />
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                NFIP flood-claim history
+              </span>
+            </div>
+            <div className="ml-4 flex items-center gap-2 text-[11px]">
+              <span className="text-foreground font-medium">
+                {nfipHistory.claim_count.toLocaleString()} claim
+                {nfipHistory.claim_count === 1 ? "" : "s"} in ZIP
+              </span>
+              {nfipHistory.latest_year != null && (
+                <span className="text-fg-subtle/70 text-[10px]">
+                  most recent {nfipHistory.latest_year}
+                </span>
+              )}
+              {nfipHistory.claim_count >= 20 && (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide bg-cyan-500/10 text-cyan-700 border border-cyan-500/20 ml-auto">
+                  HIGH
+                </span>
+              )}
+            </div>
+          </li>
+        )}
+
+        {/* Wave 2.B — recent FEMA disaster declarations affecting
+            the lead's state. Last 3 years, top 5 by date desc.
+            Useful "homeowner just got disaster $$" signal. */}
+        {hasDisasters && (
+          <li className="border-t border-border/40 pt-1.5 mt-0.5">
+            <div className="flex items-center gap-1.5 mb-1">
+              <AlertTriangle className="h-3 w-3 text-muted-foreground/70 shrink-0" />
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Recent FEMA declarations
+              </span>
+            </div>
+            <ul className="space-y-1 ml-4">
+              {recentDisasters.slice(0, 5).map((d, i) => {
+                const days = d.declaration_date
+                  ? daysAgo(`${d.declaration_date.slice(0, 10)}T00:00:00Z`)
+                  : "";
+                return (
+                  <li key={`${d.fema_id}-${i}`} className="flex items-center gap-2 text-[11px]">
+                    <AlertTriangle className="h-3 w-3 text-amber-600/80 shrink-0" />
+                    <span className="text-foreground font-medium truncate max-w-[55%]">
+                      {d.incident_type ?? d.declaration_title ?? `Disaster #${d.disaster_number ?? "?"}`}
+                    </span>
+                    {d.declaration_type && (
+                      <span className="text-fg-subtle/70 text-[10px]">
+                        {d.declaration_type}-{d.disaster_number ?? "?"}
+                      </span>
+                    )}
+                    <span className="text-fg-subtle/60 text-[10px] ml-auto italic">
+                      {days}
+                    </span>
                   </li>
                 );
               })}

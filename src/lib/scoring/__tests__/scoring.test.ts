@@ -43,7 +43,7 @@ describe("calculateScore", () => {
     expect(result).toHaveProperty("factors");
   });
 
-  it("total equals sum of sub-scores + boosters (capped at 100)", () => {
+  it("total equals sum of sub-scores + all 5 boosters (capped at 100)", () => {
     const result = calculateScore(makeSignals());
     const sum =
       result.freshness +
@@ -53,7 +53,10 @@ describe("calculateScore", () => {
       result.engagement +
       result.conversion +
       (result.storm ?? 0) +
-      (result.lien ?? 0);
+      (result.lien ?? 0) +
+      (result.nri ?? 0) +
+      (result.nfip ?? 0) +
+      (result.quake ?? 0);
     expect(result.total).toBe(Math.min(100, sum));
   });
 });
@@ -158,6 +161,79 @@ describe("Wave 1.5 storm/lien boosters", () => {
     const factors = result.factors.join(" ");
     expect(factors).toMatch(/storm signature within 25mi/i);
     expect(factors).toMatch(/payment-distress/i);
+  });
+});
+
+describe("Wave 2.A FEMA NRI risk-tier booster", () => {
+  it("returns 0 when nriRiskScore is null", () => {
+    expect(calculateScore(makeSignals({ nriRiskScore: null })).nri).toBe(0);
+  });
+  it("returns 0 below the 50-point moderate threshold", () => {
+    expect(calculateScore(makeSignals({ nriRiskScore: 30 })).nri).toBe(0);
+  });
+  it("returns +1 for moderate risk (50-75)", () => {
+    expect(calculateScore(makeSignals({ nriRiskScore: 60 })).nri).toBe(1);
+  });
+  it("returns +2 for high risk (75-90)", () => {
+    expect(calculateScore(makeSignals({ nriRiskScore: 80 })).nri).toBe(2);
+  });
+  it("returns +3 (max) for very-high risk (90+)", () => {
+    expect(calculateScore(makeSignals({ nriRiskScore: 95 })).nri).toBe(3);
+  });
+});
+
+describe("Wave 2.B NFIP flood-claim booster", () => {
+  it("returns 0 when nfipClaimCount is null or below 5", () => {
+    expect(calculateScore(makeSignals({ nfipClaimCount: null })).nfip).toBe(0);
+    expect(calculateScore(makeSignals({ nfipClaimCount: 3 })).nfip).toBe(0);
+  });
+  it("returns +1 for 5-19 nearby claims", () => {
+    expect(calculateScore(makeSignals({ nfipClaimCount: 12 })).nfip).toBe(1);
+  });
+  it("returns +2 (max) for 20+ claims", () => {
+    expect(calculateScore(makeSignals({ nfipClaimCount: 50 })).nfip).toBe(2);
+  });
+});
+
+describe("Wave 1 USGS quake booster", () => {
+  it("returns 0 when recentQuakeCount is null or zero", () => {
+    expect(calculateScore(makeSignals({ recentQuakeCount: null })).quake).toBe(0);
+    expect(calculateScore(makeSignals({ recentQuakeCount: 0 })).quake).toBe(0);
+  });
+  it("returns +1 for a single quake", () => {
+    expect(calculateScore(makeSignals({ recentQuakeCount: 1 })).quake).toBe(1);
+  });
+  it("returns +2 (max) for 2+ quakes", () => {
+    expect(calculateScore(makeSignals({ recentQuakeCount: 4 })).quake).toBe(2);
+  });
+});
+
+describe("All boosters combine + cap correctly", () => {
+  it("everything-on lead caps at 100", () => {
+    const r = calculateScore(makeSignals({
+      permitAge: 0, daysSinceCreated: 0,
+      permitValue: 250_000, propertyValue: 1_500_000,
+      hasPhone: true, hasEmail: true, hasOwnerName: true, ownerOccupied: true,
+      zipDemandScore: 95, competitorCount: 0, seasonalFactor: 1.5,
+      isHomeownerIntake: true, hasDescription: true, cascadeCount: 5,
+      zipConversionRate: 0.5, tradeConversionRate: 0.5,
+      stormProximity24h: 95, recentLienCount: 10,
+      nriRiskScore: 95, nfipClaimCount: 50, recentQuakeCount: 5,
+    }));
+    expect(r.total).toBe(100);
+  });
+
+  it("base-only lead is unaffected by booster fields being absent", () => {
+    const noBoosters = calculateScore(makeSignals({ permitAge: 2 }));
+    const explicitNullBoosters = calculateScore(makeSignals({
+      permitAge: 2,
+      stormProximity24h: null,
+      recentLienCount: null,
+      nriRiskScore: null,
+      nfipClaimCount: null,
+      recentQuakeCount: null,
+    }));
+    expect(noBoosters.total).toBe(explicitNullBoosters.total);
   });
 });
 

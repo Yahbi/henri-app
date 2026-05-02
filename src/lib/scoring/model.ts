@@ -59,6 +59,26 @@ export interface ScoringSignals {
    * activity nearby, which is a contractor-outreach trigger. Set
    * to `null` when not computed yet. */
   recentLienCount?: number | null;
+
+  /** FEMA National Risk Index composite score 0-100 for the lead's
+   * census tract (preferred) or county (fallback). Rationale: high-
+   * disaster-likelihood ZIPs see more frequent storm-driven claims
+   * and rebuild work, so contractors targeting those areas need to
+   * see them surface higher. Pure-numeric pass-through; null when
+   * the score cron hasn't joined NRI yet or the lead's geography
+   * isn't in our risk_nri_* tables. */
+  nriRiskScore?: number | null;
+
+  /** Count of NFIP flood claims in the lead's ZIP since 1978.
+   * Restoration-trade signal — a high count means flood damage is
+   * a recurring shape in the area. Pass-through, null when the
+   * sidecar isn't joined yet. */
+  nfipClaimCount?: number | null;
+
+  /** Number of M3.5+ USGS earthquakes within 50mi of the lead in
+   * the last 365 days. Boosts chimney / foundation / structural
+   * trades. Pass-through, null when the sidecar isn't joined yet. */
+  recentQuakeCount?: number | null;
 }
 
 /* ── Output shape ──────────────────────────────────────────────────────── */
@@ -73,11 +93,14 @@ export interface ScoreResult {
   demand: number;        // 0-15
   engagement: number;    // 0-15
   conversion: number;    // 0-15
-  /* Wave 1.5 additive boosters — both default 0 when the input
+  /* Wave 1.5 + 2.A additive boosters — all default 0 when the input
    * signal is null. Capped sums are folded into `total` via
    * Math.min(100, ...) so urgency thresholds stay at 75/50/25. */
   storm?: number;        // 0-5 (storm_proximity_24h booster)
   lien?: number;         // 0-3 (recent_lien_90d booster)
+  nri?: number;          // 0-3 (FEMA NRI risk-tier booster)
+  nfip?: number;         // 0-2 (NFIP flood-claim density booster)
+  quake?: number;        // 0-2 (USGS recent-quake booster)
   urgency: Urgency;
   factors: string[];     // human-readable boost/penalty reasons
 }
@@ -329,6 +352,62 @@ function scoreLienBooster(signals: ScoringSignals, factors: string[]): number {
 }
 
 /**
+ * Wave 2.A booster — FEMA National Risk Index tier (0-3).
+ * High-disaster-likelihood tracts see more frequent storm-driven
+ * claims and rebuild work, which is what most Henri contractors
+ * actually want to find.
+ *   null            → 0
+ *   0-50  (low)     → 0
+ *   50-75 (moderate)→ 1
+ *   75-90 (high)    → 2
+ *   90-100 (very high) → 3
+ */
+function scoreNriBooster(signals: ScoringSignals, factors: string[]): number {
+  const v = signals.nriRiskScore;
+  if (v == null || v <= 50) return 0;
+  let boost = 1;
+  if (v >= 90) boost = 3;
+  else if (v >= 75) boost = 2;
+  factors.push(`High-disaster-risk area (NRI ${Math.round(v)}/100, +${boost})`);
+  return boost;
+}
+
+/**
+ * Wave 2.B booster — NFIP flood-claim density (0-2).
+ * Restoration-trade signal: ZIPs with many flood claims see
+ * recurring damage patterns and homeowners who already know to
+ * call a contractor when water comes in.
+ *   null      → 0
+ *   <5        → 0
+ *   5-20      → 1
+ *   20+       → 2
+ */
+function scoreNfipBooster(signals: ScoringSignals, factors: string[]): number {
+  const n = signals.nfipClaimCount;
+  if (n == null || n < 5) return 0;
+  const boost = n >= 20 ? 2 : 1;
+  factors.push(`${n} NFIP flood claims in ZIP (+${boost})`);
+  return boost;
+}
+
+/**
+ * Wave 1 booster — recent USGS earthquakes nearby (0-2).
+ * Drives chimney / foundation / structural lead surges. Capped
+ * lower than storms because earthquake events are sparser and
+ * cause smaller-radius damage clusters.
+ *   null  → 0
+ *   1     → 1
+ *   2+    → 2
+ */
+function scoreQuakeBooster(signals: ScoringSignals, factors: string[]): number {
+  const n = signals.recentQuakeCount;
+  if (n == null || n <= 0) return 0;
+  const boost = n >= 2 ? 2 : 1;
+  factors.push(`${n} M3.5+ earthquake${n === 1 ? "" : "s"} within 50mi (+${boost})`);
+  return boost;
+}
+
+/**
  * Derive urgency tier from total score.
  */
 function deriveUrgency(total: number): Urgency {
@@ -359,14 +438,21 @@ export function calculateScore(signals: ScoringSignals): ScoreResult {
   const engagement = scoreEngagement(signals, factors);
   const conversion = scoreConversion(signals, factors);
 
-  // Wave 1.5 additive boosters — capped so the total stays within
-  // [0, 100] and urgency thresholds (75/50/25) keep their meaning.
+  // Wave 1.5 + 2.A additive boosters — all capped so the total stays
+  // within [0, 100] and urgency thresholds (75/50/25) keep their
+  // meaning. Theoretical max booster sum: 5+3+3+2+2 = 15 pts on top
+  // of the 100-pt base, but Math.min absorbs anything that would
+  // otherwise push past 100.
   const storm = scoreStormBooster(signals, factors);
   const lien  = scoreLienBooster(signals, factors);
+  const nri   = scoreNriBooster(signals, factors);
+  const nfip  = scoreNfipBooster(signals, factors);
+  const quake = scoreQuakeBooster(signals, factors);
 
   const total = Math.min(
     100,
-    freshness + value + contact + demand + engagement + conversion + storm + lien,
+    freshness + value + contact + demand + engagement + conversion +
+      storm + lien + nri + nfip + quake,
   );
   const urgency = deriveUrgency(total);
 
@@ -380,6 +466,9 @@ export function calculateScore(signals: ScoringSignals): ScoreResult {
     conversion,
     storm,
     lien,
+    nri,
+    nfip,
+    quake,
     urgency,
     factors,
   };
@@ -435,6 +524,12 @@ export function buildSignals(params: {
   /** Wave 1.5 — recent mechanic-lien dockets in the same zip in the
    *  last 90 days. Pass-through; defaults to null (no boost). */
   recentLienCount?: number | null;
+  /** Wave 2.A — FEMA NRI risk score 0-100 for the lead's tract. */
+  nriRiskScore?: number | null;
+  /** Wave 2.B — count of NFIP flood claims in the lead's ZIP. */
+  nfipClaimCount?: number | null;
+  /** Wave 1 — count of M3.5+ USGS earthquakes within 50mi / 365d. */
+  recentQuakeCount?: number | null;
 }): ScoringSignals {
   const now = Date.now();
 
@@ -508,6 +603,9 @@ export function buildSignals(params: {
     tradeConversionRate: params.tradeConversionRate ?? null,
     stormProximity24h: params.stormProximity24h ?? null,
     recentLienCount: params.recentLienCount ?? null,
+    nriRiskScore: params.nriRiskScore ?? null,
+    nfipClaimCount: params.nfipClaimCount ?? null,
+    recentQuakeCount: params.recentQuakeCount ?? null,
   };
 }
 

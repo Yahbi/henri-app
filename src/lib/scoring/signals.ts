@@ -18,9 +18,12 @@ export type ScoreSignalKey =
   | "zip_demand"
   | "homeowner_engagement"
   | "historical_conversion"
-  /* Wave 1.5 additive boosters — only render when populated. */
+  /* Wave 1.5 / 2.A / 2.B additive boosters — only render when populated. */
   | "storm_proximity_24h"
-  | "recent_lien_90d";
+  | "recent_lien_90d"
+  | "nri_risk_tier"
+  | "nfip_flood_history"
+  | "recent_quake_50mi";
 
 export interface ScoreSignalContribution {
   /** Stable machine key. */
@@ -54,6 +57,9 @@ export const SCORE_SIGNAL_ORDER: Array<{
     | "conversion"
     | "storm"
     | "lien"
+    | "nri"
+    | "nfip"
+    | "quake"
   >;
   /** When true, this row only renders when the lead actually scored
    *  >0 on the signal — keeps the drawer clean for leads with no
@@ -66,9 +72,12 @@ export const SCORE_SIGNAL_ORDER: Array<{
   { key: "zip_demand",           label: "ZIP demand",             weight: 15, resultKey: "demand" },
   { key: "homeowner_engagement", label: "Homeowner engagement",   weight: 15, resultKey: "engagement" },
   { key: "historical_conversion",label: "Historical conversion",  weight: 15, resultKey: "conversion" },
-  /* Wave 1.5 additive boosters — render only when active. */
+  /* Wave 1.5 / 2.A / 2.B additive boosters — render only when active. */
   { key: "storm_proximity_24h",  label: "Storm proximity (24h)",  weight: 5,  resultKey: "storm", optional: true },
   { key: "recent_lien_90d",      label: "Payment-distress nearby",weight: 3,  resultKey: "lien",  optional: true },
+  { key: "nri_risk_tier",        label: "FEMA risk tier",         weight: 3,  resultKey: "nri",   optional: true },
+  { key: "nfip_flood_history",   label: "NFIP flood-claim history",weight: 2, resultKey: "nfip",  optional: true },
+  { key: "recent_quake_50mi",    label: "Recent earthquakes",     weight: 2,  resultKey: "quake", optional: true },
 ];
 
 /**
@@ -140,6 +149,24 @@ function detailFor(key: ScoreSignalKey, factors: string[], signals: ScoringSigna
       const n = signals.recentLienCount ?? 0;
       if (n <= 0) return "No payment-distress filings nearby";
       return `${n} mechanic-lien filing${n === 1 ? "" : "s"} nearby (90 d)`;
+    }
+    case "nri_risk_tier": {
+      const v = signals.nriRiskScore;
+      if (v == null) return "FEMA NRI not joined yet";
+      if (v >= 90) return `Very High disaster risk (NRI ${Math.round(v)}/100)`;
+      if (v >= 75) return `High disaster risk (NRI ${Math.round(v)}/100)`;
+      if (v >= 50) return `Moderate disaster risk (NRI ${Math.round(v)}/100)`;
+      return `Low disaster risk (NRI ${Math.round(v)}/100)`;
+    }
+    case "nfip_flood_history": {
+      const n = signals.nfipClaimCount ?? 0;
+      if (n <= 0) return "No NFIP flood claims in ZIP";
+      return `${n} NFIP flood claim${n === 1 ? "" : "s"} in ZIP`;
+    }
+    case "recent_quake_50mi": {
+      const n = signals.recentQuakeCount ?? 0;
+      if (n <= 0) return "No M3.5+ earthquakes within 50mi";
+      return `${n} M3.5+ earthquake${n === 1 ? "" : "s"} within 50mi (1 yr)`;
     }
   }
 }

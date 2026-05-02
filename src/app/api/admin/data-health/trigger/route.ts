@@ -47,6 +47,7 @@ const ALLOWED: ReadonlySet<string> = new Set([
   "openfema-ia",
   "state-licenses-rotate",
   "hud-zipxw",
+  "activate-arcgis-sources",
 ]);
 
 interface TriggerBody {

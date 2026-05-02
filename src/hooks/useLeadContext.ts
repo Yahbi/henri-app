@@ -30,6 +30,30 @@ export interface RecentLien {
   snippet: string | null;
 }
 
+/** Wave 2.A — FEMA NRI risk for the lead's county. */
+export interface NriRisk {
+  risk_score: number;
+  risk_rating: string | null;
+  matched_on: string;
+}
+
+/** Wave 2.B — NFIP flood-claim history in the lead's ZIP. */
+export interface NfipHistory {
+  claim_count: number;
+  latest_year: number | null;
+  top_causes: string[];
+}
+
+/** Wave 2.B — recent FEMA disaster declaration affecting the lead's state. */
+export interface RecentDisaster {
+  fema_id: string;
+  disaster_number: number | null;
+  declaration_type: string | null;
+  declaration_date: string | null;
+  incident_type: string | null;
+  declaration_title: string | null;
+}
+
 export interface LeadContextData {
   derived: DerivedEnrichments;
   adjacent_count_90d: number;
@@ -37,6 +61,10 @@ export interface LeadContextData {
   /** Wave 1.5 — nullable because pre-update API responses don't ship it. */
   swdi_nearby?: SwdiNearby[];
   recent_liens?: RecentLien[];
+  /** Wave 2.A/2.B — also nullable for backward compat. */
+  nri_risk?: NriRisk | null;
+  nfip_history?: NfipHistory | null;
+  recent_disasters?: RecentDisaster[];
 }
 
 /**

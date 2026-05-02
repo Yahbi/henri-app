@@ -108,8 +108,8 @@ const emptyResult: ScoreResult = {
 /* ── Tests ────────────────────────────────────────────────────────────── */
 
 describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
-  it("contains exactly 6 base + 2 optional Wave 1.5 boosters = 8", () => {
-    expect(SCORE_SIGNAL_ORDER).toHaveLength(8);
+  it("contains exactly 6 base + 5 optional Wave 1.5/2.A/2.B boosters = 11", () => {
+    expect(SCORE_SIGNAL_ORDER).toHaveLength(11);
   });
 
   it("base 6 weights sum to 100 (boosters are additive on top)", () => {
@@ -119,7 +119,7 @@ describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
     expect(baseTotal).toBe(100);
   });
 
-  it("declares the 8 canonical signal keys (base 6 + 2 boosters)", () => {
+  it("declares the 11 canonical signal keys (base 6 + 5 boosters)", () => {
     const keys = SCORE_SIGNAL_ORDER.map((s) => s.key);
     const expected: ScoreSignalKey[] = [
       "permit_freshness",
@@ -130,11 +130,14 @@ describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
       "historical_conversion",
       "storm_proximity_24h",
       "recent_lien_90d",
+      "nri_risk_tier",
+      "nfip_flood_history",
+      "recent_quake_50mi",
     ];
     expect(keys).toEqual(expected);
   });
 
-  it("uses the documented per-signal weights (20/20/15/15/15/15 + 5/3)", () => {
+  it("uses the documented per-signal weights (20/20/15/15/15/15 + 5/3/3/2/2)", () => {
     const weightByKey = Object.fromEntries(
       SCORE_SIGNAL_ORDER.map((s) => [s.key, s.weight]),
     );
@@ -146,13 +149,23 @@ describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
     expect(weightByKey.historical_conversion).toBe(15);
     expect(weightByKey.storm_proximity_24h).toBe(5);
     expect(weightByKey.recent_lien_90d).toBe(3);
+    expect(weightByKey.nri_risk_tier).toBe(3);
+    expect(weightByKey.nfip_flood_history).toBe(2);
+    expect(weightByKey.recent_quake_50mi).toBe(2);
   });
 
-  it("flags Wave 1.5 boosters as optional (only render when active)", () => {
-    const booster1 = SCORE_SIGNAL_ORDER.find((s) => s.key === "storm_proximity_24h");
-    const booster2 = SCORE_SIGNAL_ORDER.find((s) => s.key === "recent_lien_90d");
-    expect(booster1?.optional).toBe(true);
-    expect(booster2?.optional).toBe(true);
+  it("flags all 5 boosters as optional (only render when active)", () => {
+    const optionalKeys = [
+      "storm_proximity_24h",
+      "recent_lien_90d",
+      "nri_risk_tier",
+      "nfip_flood_history",
+      "recent_quake_50mi",
+    ];
+    for (const key of optionalKeys) {
+      const row = SCORE_SIGNAL_ORDER.find((s) => s.key === key);
+      expect(row?.optional).toBe(true);
+    }
     // None of the base 6 are optional.
     for (const s of SCORE_SIGNAL_ORDER.filter((s) => !s.optional)) {
       expect(s.optional).not.toBe(true);
@@ -294,7 +307,7 @@ describe("buildScoreSignalBreakdown — Wave 1.5 booster path", () => {
     expect(breakdown.find((r) => r.signal === "recent_lien_90d")).toBeUndefined();
   });
 
-  it("renders all 8 rows when both boosters are active", () => {
+  it("renders 8 rows when only Wave 1.5 boosters are active", () => {
     const result: ScoreResult = { ...populatedResult, storm: 5, lien: 3 };
     const signals: ScoringSignals = {
       ...populatedSignals,
@@ -303,6 +316,50 @@ describe("buildScoreSignalBreakdown — Wave 1.5 booster path", () => {
     };
     const breakdown = buildScoreSignalBreakdown(result, signals);
     expect(breakdown).toHaveLength(8);
+  });
+
+  it("renders all 11 rows when every booster is active", () => {
+    const result: ScoreResult = {
+      ...populatedResult,
+      storm: 5, lien: 3, nri: 3, nfip: 2, quake: 2,
+    };
+    const signals: ScoringSignals = {
+      ...populatedSignals,
+      stormProximity24h: 92,
+      recentLienCount: 7,
+      nriRiskScore: 92,
+      nfipClaimCount: 25,
+      recentQuakeCount: 3,
+    };
+    const breakdown = buildScoreSignalBreakdown(result, signals);
+    expect(breakdown).toHaveLength(11);
+  });
+
+  it("renders nri_risk_tier with intensity-aware detail", () => {
+    const result: ScoreResult = { ...populatedResult, nri: 3 };
+    const signals: ScoringSignals = { ...populatedSignals, nriRiskScore: 92 };
+    const breakdown = buildScoreSignalBreakdown(result, signals);
+    const row = breakdown.find((r) => r.signal === "nri_risk_tier");
+    expect(row?.value).toBe(3);
+    expect(row?.detail).toMatch(/very high disaster risk/i);
+  });
+
+  it("renders nfip_flood_history with claim count", () => {
+    const result: ScoreResult = { ...populatedResult, nfip: 2 };
+    const signals: ScoringSignals = { ...populatedSignals, nfipClaimCount: 35 };
+    const breakdown = buildScoreSignalBreakdown(result, signals);
+    const row = breakdown.find((r) => r.signal === "nfip_flood_history");
+    expect(row?.value).toBe(2);
+    expect(row?.detail).toMatch(/35 NFIP flood claims/i);
+  });
+
+  it("renders recent_quake_50mi with quake count", () => {
+    const result: ScoreResult = { ...populatedResult, quake: 2 };
+    const signals: ScoringSignals = { ...populatedSignals, recentQuakeCount: 4 };
+    const breakdown = buildScoreSignalBreakdown(result, signals);
+    const row = breakdown.find((r) => r.signal === "recent_quake_50mi");
+    expect(row?.value).toBe(2);
+    expect(row?.detail).toMatch(/4 M3\.5\+ earthquakes/i);
   });
 });
 

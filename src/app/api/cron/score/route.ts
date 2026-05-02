@@ -380,6 +380,90 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // ── Wave 2.A NRI lookup — county-level only (tract-level needs
+    //    a tract_fips on every lead; we don't have that yet, so we
+    //    join via state+county slug from the lead row). The ~3k NRI
+    //    counties fit comfortably in memory.
+    const nriByCounty = new Map<string, number>(); // key: "AL/Autauga" lowercased → risk_score
+    try {
+      const { data } = await supabase
+        .from("risk_nri_county")
+        .select("state_abbrv, county_name, risk_score")
+        .not("risk_score", "is", null)
+        .limit(5000);
+      for (const r of data ?? []) {
+        if (
+          typeof r.state_abbrv === "string" &&
+          typeof r.county_name === "string" &&
+          typeof r.risk_score === "number"
+        ) {
+          nriByCounty.set(
+            `${r.state_abbrv.toLowerCase()}/${r.county_name.toLowerCase()}`,
+            r.risk_score,
+          );
+        }
+      }
+      logger.info("score.nri_loaded", { counties: nriByCounty.size });
+    } catch (e) {
+      logger.warn("score.nri_load_failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
+    // ── Wave 2.B NFIP flood-claim density — bucket by 5-digit ZIP.
+    const nfipCountByZip = new Map<string, number>();
+    try {
+      const { data } = await supabase
+        .from("claims_nfip")
+        .select("reported_zip_code")
+        .not("reported_zip_code", "is", null)
+        .limit(50_000);
+      for (const r of data ?? []) {
+        const z = typeof r.reported_zip_code === "string"
+          ? r.reported_zip_code.slice(0, 5)
+          : null;
+        if (!z) continue;
+        nfipCountByZip.set(z, (nfipCountByZip.get(z) ?? 0) + 1);
+      }
+      logger.info("score.nfip_loaded", {
+        zips: nfipCountByZip.size,
+        total: [...nfipCountByZip.values()].reduce((a, b) => a + b, 0),
+      });
+    } catch (e) {
+      logger.warn("score.nfip_load_failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
+    // ── Wave 1 USGS recent quakes — last 365 days, M3.5+. Same
+    //    bbox/haversine pattern as SWDI but lower density (~5k events
+    //    nationwide per year, all of CONUS+AK fits easily).
+    interface QuakePoint { lat: number; lng: number; magnitude: number; }
+    const quakePoints: QuakePoint[] = [];
+    try {
+      const since = new Date(Date.now() - 365 * 86_400_000).toISOString();
+      const { data } = await supabase
+        .from("quakes_usgs")
+        .select("lat, lng, magnitude")
+        .gte("event_time", since)
+        .gte("magnitude", 3.5)
+        .limit(20_000);
+      for (const r of data ?? []) {
+        if (
+          typeof r.lat === "number" &&
+          typeof r.lng === "number" &&
+          typeof r.magnitude === "number"
+        ) {
+          quakePoints.push({ lat: r.lat, lng: r.lng, magnitude: r.magnitude });
+        }
+      }
+      logger.info("score.quakes_loaded", { count: quakePoints.length });
+    } catch (e) {
+      logger.warn("score.quakes_load_failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
     // Lien lookup — bucket by lowercased state prefix of the
     // CourtListener `court` slug (e.g. "calsup" → "ca", "txctapp" → "tx").
     const lienCountByState = new Map<string, number>();
@@ -461,6 +545,38 @@ export async function GET(request: NextRequest) {
       return v != null ? v : null;
     }
 
+    /** NRI risk score for a permit's (state, city). NRI is keyed on
+     *  county_name, not city, so this is a heuristic — many cities
+     *  share their county name (e.g., "Sacramento" maps to Sacramento
+     *  County). When no match, returns null and the booster stays 0. */
+    function nriRiskScoreFor(state: string | null, city: string | null): number | null {
+      if (!state || !city) return null;
+      const k = `${state.toLowerCase()}/${city.toLowerCase()}`;
+      const v = nriByCounty.get(k);
+      return v != null ? v : null;
+    }
+
+    /** NFIP claim count for a 5-digit ZIP. */
+    function nfipCountFor(zip: string | null): number | null {
+      if (!zip) return null;
+      const z = zip.slice(0, 5);
+      const v = nfipCountByZip.get(z);
+      return v != null ? v : null;
+    }
+
+    /** Recent M3.5+ quakes within 50mi (last 365d). */
+    function recentQuakeCountFor(lat: number | null, lng: number | null): number | null {
+      if (lat == null || lng == null) return null;
+      if (quakePoints.length === 0) return null;
+      let n = 0;
+      for (const q of quakePoints) {
+        // Coarse bbox prefilter — 50mi ≈ 0.72° lat / ~0.9° lng at 40°N.
+        if (Math.abs(q.lat - lat) > 0.75 || Math.abs(q.lng - lng) > 0.95) continue;
+        if (haversineMi(lat, lng, q.lat, q.lng) <= 50) n += 1;
+      }
+      return n;
+    }
+
     /* ── 3. Score every permit with the new engine ─────────────────────── */
 
     const scoredLeads: ScoredLead[] = permits.map((permit) => {
@@ -525,6 +641,12 @@ export async function GET(request: NextRequest) {
         // boost path is a no-op until the data lands.
         stormProximity24h: stormProximityFor(permit.latitude, permit.longitude),
         recentLienCount: recentLienCountFor(permit.state),
+        // Wave 2.A / 2.B — FEMA NRI tier, NFIP flood-claim density,
+        // recent USGS earthquakes. All graceful-degrade to null when
+        // their respective sidecars are empty.
+        nriRiskScore: nriRiskScoreFor(permit.state, permit.city),
+        nfipClaimCount: nfipCountFor(permit.zip),
+        recentQuakeCount: recentQuakeCountFor(permit.latitude, permit.longitude),
       });
 
       const result = calculateScore(signals);

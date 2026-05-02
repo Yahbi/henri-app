@@ -83,6 +83,39 @@ export interface RecentLien {
   snippet: string | null;
 }
 
+/* Wave 2.A/2.B canonical-data-layer surfaces. All independently
+ * nullable so the drawer renders whatever is available without
+ * waiting on the others. */
+
+export interface NriRisk {
+  /** Composite NRI score 0-100 for the matching county. */
+  risk_score: number;
+  /** "Very Low".."Very High" qualitative tier from FEMA. */
+  risk_rating: string | null;
+  /** "AL/Autauga" style human-readable origin so the UI can show
+   *  which county the score came from when the city/county aren't
+   *  the same word. */
+  matched_on: string;
+}
+
+export interface NfipHistory {
+  /** Total claim count in the lead's ZIP since 1978. */
+  claim_count: number;
+  /** Most-recent year-of-loss in the ZIP, when known. */
+  latest_year: number | null;
+  /** Top-3 most common cause-of-damage codes, e.g. ["1","9","13"]. */
+  top_causes: string[];
+}
+
+export interface RecentDisaster {
+  fema_id: string;
+  disaster_number: number | null;
+  declaration_type: string | null;
+  declaration_date: string | null;
+  incident_type: string | null;
+  declaration_title: string | null;
+}
+
 interface ContextResponse {
   derived: DerivedEnrichments;
   adjacent_count_90d: number;
@@ -94,6 +127,13 @@ interface ContextResponse {
    *  days, newest first. Empty when CourtListener table empty or no
    *  matches. */
   recent_liens: RecentLien[];
+  /** Wave 2.A — FEMA NRI risk score for the lead's county, or null. */
+  nri_risk: NriRisk | null;
+  /** Wave 2.B — NFIP flood-claim history in the lead's ZIP. */
+  nfip_history: NfipHistory | null;
+  /** Wave 2.B — up to 5 most-recent FEMA disaster declarations
+   *  affecting the lead's state (last 3 years). */
+  recent_disasters: RecentDisaster[];
 }
 
 /** Approx miles between two lat/lng pairs via haversine. */
@@ -424,12 +464,101 @@ export async function GET(
       }
     }
 
+    /* Wave 2.A — NRI risk for the lead's county. NRI is keyed by
+     * (state_abbrv, county_name); we don't have the lead's county
+     * directly, so we match on city as a heuristic — many cities
+     * share their county name. Best-effort, returns null on no
+     * match.
+     */
+    let nriRisk: NriRisk | null = null;
+    if (lead.state && lead.city) {
+      const { data: nri } = await supabase
+        .from("risk_nri_county")
+        .select("risk_score, risk_rating, county_name, state_abbrv")
+        .ilike("state_abbrv", lead.state)
+        .ilike("county_name", lead.city)
+        .limit(1)
+        .maybeSingle();
+      if (nri && typeof nri.risk_score === "number") {
+        nriRisk = {
+          risk_score: nri.risk_score,
+          risk_rating: typeof nri.risk_rating === "string" ? nri.risk_rating : null,
+          matched_on: `${nri.state_abbrv}/${nri.county_name}`,
+        };
+      }
+    }
+
+    /* Wave 2.B — NFIP flood-claim history in the lead's ZIP. */
+    let nfipHistory: NfipHistory | null = null;
+    if (lead.zip) {
+      const z = String(lead.zip).slice(0, 5);
+      const { data: claims, count } = await supabase
+        .from("claims_nfip")
+        .select("year_of_loss, cause_of_damage", { count: "exact" })
+        .eq("reported_zip_code", z)
+        .order("date_of_loss", { ascending: false, nullsFirst: false })
+        .limit(200);
+      if (claims && (count ?? 0) > 0) {
+        const causeCounts = new Map<string, number>();
+        let latestYear: number | null = null;
+        for (const c of claims) {
+          if (typeof c.year_of_loss === "number") {
+            if (latestYear == null || c.year_of_loss > latestYear) {
+              latestYear = c.year_of_loss;
+            }
+          }
+          if (typeof c.cause_of_damage === "string" && c.cause_of_damage.trim()) {
+            const k = c.cause_of_damage.trim();
+            causeCounts.set(k, (causeCounts.get(k) ?? 0) + 1);
+          }
+        }
+        const topCauses = [...causeCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([k]) => k);
+        nfipHistory = {
+          claim_count: count ?? 0,
+          latest_year: latestYear,
+          top_causes: topCauses,
+        };
+      }
+    }
+
+    /* Wave 2.B — recent FEMA disaster declarations in the lead's
+     * state, last 3 years, top 5 by declaration_date desc. */
+    const recentDisasters: RecentDisaster[] = [];
+    if (lead.state) {
+      const since = new Date(Date.now() - 365 * 3 * 86_400_000).toISOString();
+      const { data: dis } = await supabase
+        .from("claims_disasters_fema")
+        .select(
+          "fema_id, disaster_number, declaration_type, declaration_date, incident_type, declaration_title",
+        )
+        .eq("state", lead.state)
+        .gte("declaration_date", since)
+        .order("declaration_date", { ascending: false, nullsFirst: false })
+        .limit(5);
+      for (const d of dis ?? []) {
+        recentDisasters.push({
+          fema_id: typeof d.fema_id === "string" ? d.fema_id : "",
+          disaster_number: typeof d.disaster_number === "number" ? d.disaster_number : null,
+          declaration_type: typeof d.declaration_type === "string" ? d.declaration_type : null,
+          declaration_date: typeof d.declaration_date === "string" ? d.declaration_date : null,
+          incident_type: typeof d.incident_type === "string" ? d.incident_type : null,
+          declaration_title: typeof d.declaration_title === "string" ? d.declaration_title : null,
+        });
+      }
+    }
+
     const body: ContextResponse = {
       derived,
       adjacent_count_90d,
       storm,
       swdi_nearby: swdiNearby,
       recent_liens: recentLiens,
+      nri_risk: nriRisk,
+      nfip_history: nfipHistory,
+      recent_disasters: recentDisasters,
     };
 
     return NextResponse.json(body, {
