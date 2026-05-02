@@ -32,6 +32,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -300,7 +301,7 @@ export async function GET(request: NextRequest) {
       batches,
     });
 
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       state,
@@ -309,9 +310,23 @@ export async function GET(request: NextRequest) {
       inserted,
       batches,
       status: httpStatus,
+    };
+    await logCronRun("hmda-rotate", startedAt, {
+      pulled: parsed,
+      inserted,
+      summary: result,
+      trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("hmda.error", { state, year, error: String(err) });
+    await logCronRun("hmda-rotate", startedAt, {
+      pulled: parsed,
+      inserted,
+      summary: { state, year, batches },
+      error: String(err),
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       {
         error: "hmda-rotate failed",

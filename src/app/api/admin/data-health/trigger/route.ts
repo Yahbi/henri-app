@@ -108,7 +108,12 @@ export async function POST(request: NextRequest) {
     });
     const res = await fetch(upstream, {
       method: "GET",
-      headers: { Authorization: `Bearer ${cronSecret}` },
+      headers: {
+        Authorization: `Bearer ${cronSecret}`,
+        // Lets the upstream cron route stamp `trigger='manual'` in
+        // its cron_runs audit row instead of the default 'cron'.
+        "x-cron-trigger": "manual",
+      },
       signal: AbortSignal.timeout(290_000),
     });
     const status = res.status;

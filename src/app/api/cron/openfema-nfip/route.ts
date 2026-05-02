@@ -31,6 +31,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -219,16 +220,24 @@ export async function GET(request: NextRequest) {
       pulled,
       inserted,
     });
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       year,
       pages,
       pulled,
       inserted,
+    };
+    await logCronRun("openfema-nfip", startedAt, {
+      pulled, inserted, summary: result, trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("nfip.error", { year, error: String(err) });
+    await logCronRun("openfema-nfip", startedAt, {
+      pulled, inserted, summary: { year, pages },
+      error: String(err), trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "openfema-nfip failed", detail: String(err), year },
       { status: 500 },

@@ -26,6 +26,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -239,9 +240,20 @@ export async function GET(request: NextRequest) {
       tornado_fetched: tornado.length,
       ...summary,
     });
-    return NextResponse.json({ ok: true, duration_ms: Date.now() - startedAt, ...summary });
+    const result = { ok: true, duration_ms: Date.now() - startedAt, ...summary };
+    await logCronRun("swdi-events", startedAt, {
+      pulled: hail.length + wind.length + tornado.length,
+      inserted: summary.hail + summary.wind + summary.tornado,
+      summary: result,
+      trigger: detectTrigger(request),
+    });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("swdi-events.error", { error: String(err) });
+    await logCronRun("swdi-events", startedAt, {
+      error: String(err),
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: "swdi-events failed", detail: String(err) }, { status: 500 });
   }
 }

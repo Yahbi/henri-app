@@ -17,6 +17,15 @@ import { useGodMode } from "@/hooks/useGodMode";
  * CLAUDE.md ("do not add new top-level tabs — deepen existing tabs").
  */
 
+interface CronRunInfo {
+  started_at: string;
+  duration_ms: number | null;
+  status: "ok" | "error" | "partial";
+  inserted: number | null;
+  error: string | null;
+  trigger: "cron" | "manual";
+}
+
 interface HealthRow {
   table: string;
   cron_path: string;
@@ -27,6 +36,7 @@ interface HealthRow {
   last_ingested_at: string | null;
   last_24h: number | null;
   status: "ok" | "stale" | "empty" | "error";
+  recent_runs?: CronRunInfo[];
 }
 
 interface HealthResponse {
@@ -263,6 +273,35 @@ export default function DataHealthPage() {
                     <div className="text-[10px] text-fg-subtle/60 mt-0.5">
                       <code>{r.schedule}</code>
                     </div>
+                    {r.recent_runs && r.recent_runs.length > 0 && (
+                      <div
+                        className="flex items-center gap-0.5 mt-1.5"
+                        aria-label="Last 5 runs (most recent first)"
+                      >
+                        {r.recent_runs.map((run, i) => {
+                          const cls =
+                            run.status === "ok"
+                              ? "bg-emerald-500/70"
+                              : run.status === "error"
+                                ? "bg-rose-500/80"
+                                : "bg-amber-500/70";
+                          const tooltip = [
+                            `${run.status.toUpperCase()} (${run.trigger})`,
+                            new Date(run.started_at).toLocaleString(),
+                            run.duration_ms != null ? `${(run.duration_ms / 1000).toFixed(1)}s` : null,
+                            run.inserted != null ? `inserted ${run.inserted}` : null,
+                            run.error ? `error: ${run.error.slice(0, 100)}` : null,
+                          ].filter(Boolean).join(" · ");
+                          return (
+                            <div
+                              key={`${r.cron_path}-${i}`}
+                              className={`h-2 w-3 rounded-sm ${cls}`}
+                              title={tooltip}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <button

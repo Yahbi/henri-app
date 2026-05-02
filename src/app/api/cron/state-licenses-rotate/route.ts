@@ -28,6 +28,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -491,18 +492,30 @@ export async function GET(request: NextRequest) {
       kind: target.source_kind,
       ...result,
     });
-    return NextResponse.json({
+    const responseBody = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       state: target.state_code,
       state_name: target.state_name,
       source_kind: target.source_kind,
       ...result,
+    };
+    await logCronRun("state-licenses-rotate", startedAt, {
+      pulled: result.pulled,
+      inserted: result.inserted,
+      summary: responseBody,
+      trigger: detectTrigger(request),
     });
+    return NextResponse.json(responseBody);
   } catch (err) {
     logger.error("state-licenses.error", {
       state: target.state_code,
       error: String(err),
+    });
+    await logCronRun("state-licenses-rotate", startedAt, {
+      summary: { state: target.state_code, kind: target.source_kind },
+      error: String(err),
+      trigger: detectTrigger(request),
     });
     return NextResponse.json(
       {

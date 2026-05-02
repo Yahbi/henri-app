@@ -66,6 +66,15 @@ const TABLES: TableSpec[] = [
   { table: "zip_crosswalk_hud",     cron_path: "hud-zipxw",            schedule: "0 1 * * 0",   wave: "2.B.2", description: "HUD ZIP↔Tract/Place/CBSA/County (~320k)",        exact_count: false },
 ];
 
+interface CronRunInfo {
+  started_at: string;
+  duration_ms: number | null;
+  status: "ok" | "error" | "partial";
+  inserted: number | null;
+  error: string | null;
+  trigger: "cron" | "manual";
+}
+
 interface HealthRow {
   table: string;
   cron_path: string;
@@ -76,6 +85,9 @@ interface HealthRow {
   last_ingested_at: string | null;
   last_24h: number | null;
   status: "ok" | "stale" | "empty" | "error";
+  /** Last 5 entries from cron_runs (audit log added migration 00076).
+   *  Empty when migration not applied or this cron isn't yet wrapped. */
+  recent_runs: CronRunInfo[];
 }
 
 const STALE_HOURS = 48;
@@ -86,6 +98,7 @@ async function probeTable(spec: TableSpec): Promise<HealthRow> {
   let lastIngested: string | null = null;
   let last24h: number | null = null;
   let status: HealthRow["status"] = "ok";
+  let recentRuns: CronRunInfo[] = [];
 
   try {
     // Total row count
@@ -103,12 +116,13 @@ async function probeTable(spec: TableSpec): Promise<HealthRow> {
         last_ingested_at: null,
         last_24h: null,
         status: "error",
+        recent_runs: [],
       };
     }
     totalRows = totalRes.count ?? 0;
 
-    // Last ingested timestamp + 24h count run in parallel.
-    const [ingestRes, dayRes] = await Promise.all([
+    // Last ingested timestamp + 24h count + last 5 cron_runs in parallel.
+    const [ingestRes, dayRes, runsRes] = await Promise.all([
       supabase
         .from(spec.table)
         .select("ingested_at")
@@ -119,6 +133,13 @@ async function probeTable(spec: TableSpec): Promise<HealthRow> {
         .from(spec.table)
         .select("*", { count: "estimated", head: true })
         .gte("ingested_at", new Date(Date.now() - 86_400_000).toISOString()),
+      // cron_runs is migration 00076 — graceful-degrade when missing.
+      supabase
+        .from("cron_runs")
+        .select("started_at, duration_ms, status, inserted, error, trigger")
+        .eq("cron_path", spec.cron_path)
+        .order("started_at", { ascending: false })
+        .limit(5),
     ]);
     if (
       ingestRes.data &&
@@ -129,17 +150,35 @@ async function probeTable(spec: TableSpec): Promise<HealthRow> {
     if (!dayRes.error) {
       last24h = dayRes.count ?? 0;
     }
+    if (!runsRes.error && Array.isArray(runsRes.data)) {
+      recentRuns = (runsRes.data as Array<Record<string, unknown>>)
+        .map((r) => ({
+          started_at: String(r.started_at),
+          duration_ms: typeof r.duration_ms === "number" ? r.duration_ms : null,
+          status: ((r.status as string) || "ok") as CronRunInfo["status"],
+          inserted: typeof r.inserted === "number" ? r.inserted : null,
+          error: typeof r.error === "string" ? r.error : null,
+          trigger: ((r.trigger as string) || "cron") as CronRunInfo["trigger"],
+        }))
+        .filter((r) => r.started_at !== "undefined");
+    }
 
-    // Status derivation.
+    // Status derivation. cron_runs adds a stronger signal: if the
+    // most recent run is an error AND the latest table ingest is
+    // older than that, prefer 'error' over 'stale'/'ok'.
     if (totalRows === 0) {
       status = "empty";
     } else if (lastIngested) {
       const ageHours =
         (Date.now() - new Date(lastIngested).getTime()) / 3_600_000;
       if (ageHours > STALE_HOURS && spec.schedule.startsWith("0 ")) {
-        // Daily-ish schedule but no fresh inserts — flag.
         status = "stale";
       }
+    }
+    if (recentRuns.length > 0 && recentRuns[0].status === "error") {
+      const lastRunMs = new Date(recentRuns[0].started_at).getTime();
+      const lastIngestMs = lastIngested ? new Date(lastIngested).getTime() : 0;
+      if (lastRunMs > lastIngestMs) status = "error";
     }
   } catch {
     status = "error";
@@ -155,6 +194,7 @@ async function probeTable(spec: TableSpec): Promise<HealthRow> {
     last_ingested_at: lastIngested,
     last_24h: last24h,
     status,
+    recent_runs: recentRuns,
   };
 }
 

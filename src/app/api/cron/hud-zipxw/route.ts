@@ -27,6 +27,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -212,16 +213,25 @@ export async function GET(request: NextRequest) {
       inserted: totalInserted,
       summary,
     });
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       quarter: QUARTER,
       pulled: totalPulled,
       inserted: totalInserted,
       summary,
+    };
+    await logCronRun("hud-zipxw", startedAt, {
+      pulled: totalPulled, inserted: totalInserted,
+      summary: result, trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("hud-zipxw.error", { error: String(err) });
+    await logCronRun("hud-zipxw", startedAt, {
+      pulled: totalPulled, inserted: totalInserted,
+      error: String(err), trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "hud-zipxw failed", detail: String(err) },
       { status: 500 },

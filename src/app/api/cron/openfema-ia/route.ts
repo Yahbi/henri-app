@@ -29,6 +29,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 280;
@@ -253,16 +254,24 @@ export async function GET(request: NextRequest) {
       pulled,
       inserted,
     });
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       disaster,
       pages,
       pulled,
       inserted,
+    };
+    await logCronRun("openfema-ia", startedAt, {
+      pulled, inserted, summary: result, trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("ia.error", { disaster, error: String(err) });
+    await logCronRun("openfema-ia", startedAt, {
+      pulled, inserted, summary: { disaster, pages },
+      error: String(err), trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "openfema-ia failed", detail: String(err), disaster },
       { status: 500 },
