@@ -137,8 +137,13 @@ async function fetchAndIngest(
   const MAX_PAGES = 60; // hard ceiling — tract dataset is ~42 pages
 
   while (pages < MAX_PAGES) {
+    // returnGeometry=false is critical — without it, each NRI feature
+    // ships its full county/tract polygon, ballooning the response to
+    // ~300MB for 2000 rows and timing out the 120s fetch budget. We
+    // only need the attributes (RISK_SCORE, BUILDVALUE, etc.) — no
+    // map rendering happens server-side.
     const url =
-      `${fsUrl}/query?where=1%3D1&outFields=*&f=json` +
+      `${fsUrl}/query?where=1%3D1&outFields=*&f=json&returnGeometry=false` +
       `&resultOffset=${offset}&resultRecordCount=${PAGE_SIZE}`;
     const res = await fetch(url, {
       headers: { "User-Agent": "Henri-Bot/1.0 (cron@meethenri.com)" },
