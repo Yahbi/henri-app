@@ -43,7 +43,7 @@ describe("calculateScore", () => {
     expect(result).toHaveProperty("factors");
   });
 
-  it("total equals sum of sub-scores (capped at 100)", () => {
+  it("total equals sum of sub-scores + boosters (capped at 100)", () => {
     const result = calculateScore(makeSignals());
     const sum =
       result.freshness +
@@ -51,8 +51,113 @@ describe("calculateScore", () => {
       result.contact +
       result.demand +
       result.engagement +
-      result.conversion;
+      result.conversion +
+      (result.storm ?? 0) +
+      (result.lien ?? 0);
     expect(result.total).toBe(Math.min(100, sum));
+  });
+});
+
+describe("Wave 1.5 storm/lien boosters", () => {
+  it("returns 0 storm boost when stormProximity24h is null", () => {
+    const result = calculateScore(makeSignals({ stormProximity24h: null }));
+    expect(result.storm).toBe(0);
+  });
+
+  it("returns +1 storm boost for marginal proximity (<25)", () => {
+    const result = calculateScore(makeSignals({ stormProximity24h: 10 }));
+    expect(result.storm).toBe(1);
+  });
+
+  it("returns +2 storm boost for 25-50 proximity intensity", () => {
+    const result = calculateScore(makeSignals({ stormProximity24h: 35 }));
+    expect(result.storm).toBe(2);
+  });
+
+  it("returns +3 storm boost for 50-75 proximity intensity (severe wind)", () => {
+    const result = calculateScore(makeSignals({ stormProximity24h: 60 }));
+    expect(result.storm).toBe(3);
+  });
+
+  it("returns +4 storm boost for 75-90 (significant hail / strong wind)", () => {
+    const result = calculateScore(makeSignals({ stormProximity24h: 80 }));
+    expect(result.storm).toBe(4);
+  });
+
+  it("returns +5 storm boost (max) for tornado-level intensity", () => {
+    const result = calculateScore(makeSignals({ stormProximity24h: 95 }));
+    expect(result.storm).toBe(5);
+  });
+
+  it("returns 0 lien boost when recentLienCount is null", () => {
+    const result = calculateScore(makeSignals({ recentLienCount: null }));
+    expect(result.lien).toBe(0);
+  });
+
+  it("returns +1 lien boost for a single nearby lien", () => {
+    const result = calculateScore(makeSignals({ recentLienCount: 1 }));
+    expect(result.lien).toBe(1);
+  });
+
+  it("returns +2 lien boost for 2-4 nearby liens", () => {
+    const result = calculateScore(makeSignals({ recentLienCount: 3 }));
+    expect(result.lien).toBe(2);
+  });
+
+  it("returns +3 lien boost (max) for 5+ nearby liens (cluster)", () => {
+    const result = calculateScore(makeSignals({ recentLienCount: 8 }));
+    expect(result.lien).toBe(3);
+  });
+
+  it("boosters fold into the total score", () => {
+    // Permit with storm + lien hitting the warm tier should get bumped
+    // toward hot when boosters are active.
+    const cold = calculateScore(makeSignals({ permitAge: 5 }));
+    const boosted = calculateScore(
+      makeSignals({
+        permitAge: 5,
+        stormProximity24h: 92, // +5
+        recentLienCount: 7, // +3
+      }),
+    );
+    expect(boosted.total).toBe(Math.min(100, cold.total + 5 + 3));
+  });
+
+  it("boosters cap the total at 100 even when raw sum exceeds it", () => {
+    // Pile every signal high — the sum could push over 100 with
+    // boosters, but the result must clamp.
+    const result = calculateScore(
+      makeSignals({
+        permitAge: 0,
+        daysSinceCreated: 0,
+        permitValue: 250_000,
+        propertyValue: 1_500_000,
+        hasPhone: true,
+        hasEmail: true,
+        hasOwnerName: true,
+        ownerOccupied: true,
+        zipDemandScore: 90,
+        competitorCount: 0,
+        seasonalFactor: 1.5,
+        isHomeownerIntake: true,
+        hasDescription: true,
+        cascadeCount: 5,
+        zipConversionRate: 0.5,
+        tradeConversionRate: 0.5,
+        stormProximity24h: 95,
+        recentLienCount: 10,
+      }),
+    );
+    expect(result.total).toBe(100);
+  });
+
+  it("emits human-readable factor strings for active boosters", () => {
+    const result = calculateScore(
+      makeSignals({ stormProximity24h: 80, recentLienCount: 6 }),
+    );
+    const factors = result.factors.join(" ");
+    expect(factors).toMatch(/storm signature within 25mi/i);
+    expect(factors).toMatch(/payment-distress/i);
   });
 });
 

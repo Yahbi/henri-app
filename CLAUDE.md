@@ -420,3 +420,65 @@ After inspecting [aitmpl.com](https://www.aitmpl.com/plugins) plugin directory, 
 - Claude Hud (context-usage HUD) — nice-to-have, not load-bearing
 - Knowledge Work Plugins / Claude Plugins Official — already installed earlier this session
 - Senior {Frontend,Backend,Fullstack,Reviewer} skills from aitmpl.com — already loaded at user scope
+
+## Sidecar canonical-data-layer (2026-05-01, Wave 1.5 + 2.A + 2.B)
+
+The 14-day data-acquisition plan from `~/.claude/plans/whats-the-14-days-purring-papert.md` is fully shipped. Built 18 sidecar tables + 16 cron routes + 8 migrations on top of Henri's existing permits/leads infra. Service-role-write only, RLS-on-no-policies (matches accepted-risk pattern from voter_*, ppp_loans).
+
+**Migrations 00069–00076**:
+- 00069: weather_swdi_hail / wind / tornado, liens_courtlistener, foreclosures_fha, quakes_usgs (Wave 1)
+- 00070: risk_nri_county, risk_nri_tract, svi_tracts, demo_acs_zcta (Wave 2.A)
+- 00071: claims_disasters_fema, triggers_news_gdelt, mortgages_hmda (Wave 2.B Phase 1)
+- 00072: SWDI lat/lng precision bump from numeric(8,5) → numeric(10,7) (Wave 1.5 fix; collapsing 33k radar pixels into 1k via 5-decimal precision)
+- 00073: claims_nfip, claims_ia, zip_crosswalk_hud, state_license_rosters, contractor_license_sources (Wave 2.B Phase 2)
+- 00074: verified-live state license endpoint URLs (TX/NY/WA/OR seeded after per-state probe)
+- 00075: source_kind 'csv' added; AZ ROC re-enabled with `${YYYY-MM-DD}` placeholder URL pattern
+- 00076: cron_runs audit log (per-execution forensic trail for silent-failure detection)
+
+**Cron routes** (all under `/api/cron/`, all CRON_SECRET-Bearer-auth, all wrapped with `logCronRun` helper):
+- Wave 1: swdi-events, courtlistener-liens, usgs-quakes, hud-reo, census-geocode
+- Wave 2.A: fema-nri, cdc-svi, census-acs (Sunday weekly)
+- Wave 2.B.1: openfema-declarations, gdelt-triggers, hmda-rotate (daily, hmda rotates state/year)
+- Wave 2.B.2: openfema-nfip (year rotator 1978-current), openfema-ia (disaster rotator), state-licenses-rotate (most-overdue picker), hud-zipxw (Sunday weekly)
+- Ops: cron-runs-cleanup (daily, 30-day retention)
+
+**Scoring engine extensions** (`src/lib/scoring/model.ts` + `signals.ts`):
+- Two new optional ScoringSignals fields: `stormProximity24h` (0-100), `recentLienCount`
+- Two additive boosters: `storm` (0-5), `lien` (0-3) — fold into total via `Math.min(100, …)` so existing 75/50/25 urgency thresholds stay stable
+- SCORE_SIGNAL_ORDER renders 8 rows in the drawer breakdown but the 2 boosters carry `optional: true` and only render when scored >0 (keeps drawer clean for leads with no nearby storm/lien)
+- Score cron pre-fetches SWDI events from last 24h + lien counts by state-prefix once per run, then does in-memory bbox + haversine per permit (avoids 5,000 round-trips). Graceful-degrade — when sidecar tables are empty, signals fall through to null and boosters stay 0.
+
+**Lead drawer surfaces** (`/api/leads/[id]/context` + `PropertyContextSection.tsx`):
+- New "Recent storm signatures (25mi · 30d)" panel — hail / wind / tornado from migration 00069 SWDI tables
+- New "Payment-distress filings nearby (90d)" panel — CourtListener mechanic-lien dockets, linked to the upstream URL when available
+- Both panels graceful-hide when their data is empty — no empty-card noise
+
+**Admin observability** (`/dashboard/settings/data-health`):
+- God-mode-only freshness panel for all 17 sidecar tables: total rows, last 24h inserts, last ingest timestamp, status chip (ok / stale / empty / error)
+- Per-row "Run now" button → POST /api/admin/data-health/trigger fires the cron server-to-server with CRON_SECRET (browser never sees it). UI shows pulled / inserted / duration_ms inline.
+- "Trigger all needy" button — sequentially fires every cron whose status is non-ok. Workflow shortcut after deploys.
+- Recent-run mini-chips per cron from cron_runs (last 5, green/red/amber). Hover tooltip: trigger mode / timestamp / duration / inserted / error.
+
+**State license endpoint registry** (`contractor_license_sources` table):
+- Drives `/api/cron/state-licenses-rotate` — picks the most-overdue enabled state per daily run.
+- 5 verified-live: TX TDLR (socrata), NY NYC DCWP (socrata), WA L&I (socrata), OR CCB (socrata), AZ ROC (csv with date-substitution).
+- 4 disabled with documented reasons: CA CSLB (ASP-postback only), FL DBPR (CSV-only 668MB — sidecar work), IL IDFPR (PDF-only), NC NCLBGC (email-request only), GA SOS (paid roster).
+- New states get added by INSERTing a row with field_map mapping our canonical schema → upstream column names. The rotator's existing CSV/Socrata/ArcGIS/scrape dispatch picks it up on next run.
+
+**Trigger script**: `scripts/trigger-data-crons.ts` — reads CRON_SECRET from .env.local, hits all 11 main routes sequentially with 2s pacing. CLI fallback for the dashboard "Trigger all needy" button.
+
+**Test coverage** (Wave 1.5):
+- `src/lib/scoring/__tests__/scoring.test.ts` — 13 new booster-path cases (null → 0, magnitude tiers, sum-cap-at-100, factor strings)
+- `src/lib/scoring/__tests__/signals.test.ts` — 4 new optional-row visibility cases
+- All 66 scoring tests pass; 640 total in repo
+
+**Known gaps left as follow-up work**:
+- HMDA full historical back-fill — currently rotates one state per day across 52 states × 7 years = ~12 months to fully populate. Faster path: deploy `henri_production/` Python sidecar to a $5/mo Hetzner VM.
+- Wave 3 Track-B platform adapters (Accela ACA, eTRAKiT, Cloudpermit) — need Playwright + ASP.NET ViewState scraping. ~4-8 engineering weeks.
+- FL DBPR (state contractor licenses) — 668MB CSV, doesn't fit Vercel's 280s budget. Sidecar VM work.
+- OpenGov ViewPoint — migrated to GraphQL+Auth0; old REST endpoint dead. Needs Playwright + Auth0 token interception.
+- 4 dead-end states (CA, IL, NC, GA) — no public bulk endpoint exists. Needs scraper or paid roster.
+
+**User actions still required**:
+- `CL_TOKEN` env var in Vercel (free token at courtlistener.com → Profile → API). Without it, `liens_courtlistener` stays empty.
+- Per-state research budget if we want to grow beyond the 5 enabled state license sources (most state license boards don't ship public APIs).
