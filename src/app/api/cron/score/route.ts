@@ -1044,12 +1044,46 @@ export async function GET(request: NextRequest) {
     }
 
     /* ── 7. Mark permits as scored ─────────────────────────────────────── */
-
+    /*
+     * Audit fix 2026-05-02: the original single-shot
+     *   .update(...).in("id", permitIds)
+     * silently failed once permitIds passed ~250 rows. PostgREST builds
+     * `id=in.(uuid,uuid,...)` into the GET query string of the PATCH and
+     * Supabase's edge proxy rejects URLs over ~8KB, returning 414/empty.
+     * supabase-js doesn't surface that as an error from .update(), so
+     * the cron looked successful while the same 1000 permits got
+     * re-fetched on every run — backlog stuck at 817,739.
+     *
+     * Fix: chunk into 200-id batches (~7.4KB URL ceiling) and explicitly
+     * capture errors so any future regression is visible in cron_runs.
+     */
     const permitIds = permits.map((p) => p.id);
-    await supabase
-      .from("permits")
-      .update({ scored_at: new Date().toISOString() })
-      .in("id", permitIds);
+    const scoredAt = new Date().toISOString();
+    let scoredAtUpdated = 0;
+    let scoredAtErrors = 0;
+    const SCORED_AT_BATCH = 200;
+    for (let i = 0; i < permitIds.length; i += SCORED_AT_BATCH) {
+      const chunk = permitIds.slice(i, i + SCORED_AT_BATCH);
+      const { error: updErr, count } = await supabase
+        .from("permits")
+        .update({ scored_at: scoredAt }, { count: "exact" })
+        .in("id", chunk);
+      if (updErr) {
+        scoredAtErrors++;
+        logger.error("score.permits-scored_at-update-failed", {
+          batch_start: i,
+          batch_size: chunk.length,
+          error: updErr.message,
+        });
+      } else {
+        scoredAtUpdated += count ?? chunk.length;
+      }
+    }
+    logger.info("score.permits-scored_at-updated", {
+      total_permits: permitIds.length,
+      updated: scoredAtUpdated,
+      batch_errors: scoredAtErrors,
+    });
 
     const responseBody = {
       success: true,
@@ -1064,6 +1098,8 @@ export async function GET(request: NextRequest) {
         territory_rows: territoryRows?.length ?? 0,
         zip_to_contractors_map_size: zipToContractors.size,
         leads_to_insert_count: leadsToInsert.length,
+        permits_marked_scored: scoredAtUpdated,
+        permits_mark_errors: scoredAtErrors,
         scoreDistribution: {
           hot: scoredLeads.filter((sl) => sl.urgency === "hot").length,
           warm: scoredLeads.filter((sl) => sl.urgency === "warm").length,
