@@ -162,13 +162,15 @@ async function fetchAndIngest(
       .filter((r): r is NonNullable<typeof r> => r !== null);
 
     if (rows.length > 0) {
-      // Chunk into 100-row batches. NRI features carry ~467
-      // attributes each (~25KB), so 2000 rows × 25KB = 50MB which
-      // blows past Supabase REST's 8MB body limit (PGRST413). 100
-      // rows × 25KB = 2.5MB stays well under the ceiling. ArcGIS
-      // FeatureServer also occasionally duplicates rows across page
-      // boundaries — onConflict absorbs the dupes via the unique PK.
-      const BATCH = 100;
+      // Chunk to dodge Supabase REST's 8MB body limit (PGRST413).
+      // With returnGeometry=false (commit 0b8ce5e) each row is now
+      // ~5KB (just attributes, no polygon), so 500 rows × 5KB =
+      // 2.5MB stays well under the ceiling. Bigger batches mean
+      // fewer round-trips, which matters for tract ingest where
+      // 84k rows / 2000 per page = 42 pages — at 5x fewer batches
+      // per page (4 not 20) we fit the full tract pull in the
+      // 280s function budget.
+      const BATCH = 500;
       for (let i = 0; i < rows.length; i += BATCH) {
         const slice = rows.slice(i, i + BATCH);
         const { error, count } = await supabase

@@ -184,10 +184,48 @@ export async function GET(request: NextRequest) {
     ? stateOverride
     : todaysState();
   const reqYear = Number(params.get("year"));
-  const year =
+  // CFPB typically publishes year N data in spring of year N+1, so
+  // mid-year N+1 we may need to fall back to year N. We try the
+  // requested year first, then walk back up to 2 years if CFPB
+  // returns 4xx (e.g. 400 "data not available yet"). Year override
+  // via ?year= short-circuits the fallback.
+  const baseYear =
     Number.isFinite(reqYear) && reqYear >= 2018
       ? reqYear
       : new Date().getUTCFullYear() - 1;
+  const yearCandidates = Number.isFinite(reqYear) && reqYear >= 2018
+    ? [reqYear]
+    : [baseYear, baseYear - 1, baseYear - 2];
+
+  // Probe each candidate year via a HEAD-like quick GET; first one
+  // that returns 200 is the year we'll actually use.
+  let year = baseYear;
+  for (const cand of yearCandidates) {
+    const probeUrl =
+      `https://ffiec.cfpb.gov/v2/data-browser-api/view/csv?` +
+      `states=${state}&years=${cand}&actions_taken=1&loan_purposes=5`;
+    try {
+      const probe = await fetch(probeUrl, {
+        method: "GET",
+        headers: {
+          Referer: "https://ffiec.cfpb.gov/data-browser/",
+          Accept: "text/csv,*/*;q=0.9",
+          "Accept-Language": "en-US,en;q=0.9",
+          "User-Agent": "Mozilla/5.0 (Henri-Bot/1.0; cron@meethenri.com)",
+        },
+        signal: AbortSignal.timeout(30_000),
+        redirect: "follow",
+      });
+      if (probe.ok) {
+        year = cand;
+        // Drain the probe body so we don't leak streams.
+        await probe.body?.cancel();
+        break;
+      }
+    } catch {
+      /* try next candidate */
+    }
+  }
 
   const url =
     `https://ffiec.cfpb.gov/v2/data-browser-api/view/csv?` +
