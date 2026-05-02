@@ -48,7 +48,12 @@ const cspDirectives = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   "worker-src 'self' blob:",
-  "connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://api.openai.com https://nominatim.openstreetmap.org https://api.mapbox.com https://*.cartocdn.com https://*.vercel-insights.com",
+  // 2026-05-02: added Sentry ingest hosts — CSP was blocking client-side
+  // envelope POSTs, so browser errors caught by instrumentation-client.ts
+  // never reached Sentry. The whole client-side observability layer was
+  // dark. *.ingest.us.sentry.io covers our project; *.ingest.sentry.io
+  // is the EU/legacy fallback in case Sentry rotates regions.
+  "connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://api.openai.com https://nominatim.openstreetmap.org https://api.mapbox.com https://*.cartocdn.com https://*.vercel-insights.com https://*.ingest.us.sentry.io https://*.ingest.sentry.io",
   "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
   "frame-ancestors 'none'",
   "form-action 'self' https://checkout.stripe.com",
