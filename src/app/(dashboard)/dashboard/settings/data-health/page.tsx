@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, RefreshCw, AlertTriangle, AlertCircle, CircleDot, Database } from "lucide-react";
+import { ArrowLeft, RefreshCw, AlertTriangle, AlertCircle, CircleDot, Database, Play, Loader2 } from "lucide-react";
 import { useGodMode } from "@/hooks/useGodMode";
 
 /**
@@ -79,6 +79,45 @@ export default function DataHealthPage() {
   const [data, setData] = useState<HealthResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** cron_path → "running" | "ok: <summary>" | "fail: <msg>". Toast-style. */
+  const [triggerState, setTriggerState] = useState<Record<string, string>>({});
+
+  const triggerCron = async (cronPath: string) => {
+    setTriggerState((s) => ({ ...s, [cronPath]: "running" }));
+    try {
+      const res = await fetch("/api/admin/data-health/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cron_path: cronPath }),
+      });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        upstream?: { pulled?: number; inserted?: number; duration_ms?: number };
+        error?: string;
+        status?: number;
+      };
+      if (!res.ok || !body.ok) {
+        setTriggerState((s) => ({
+          ...s,
+          [cronPath]: `fail (${body.status ?? res.status}): ${body.error ?? "see logs"}`,
+        }));
+        return;
+      }
+      const u = body.upstream ?? {};
+      const parts: string[] = [];
+      if (u.pulled != null) parts.push(`pulled ${u.pulled}`);
+      if (u.inserted != null) parts.push(`inserted ${u.inserted}`);
+      if (u.duration_ms != null) parts.push(`${(u.duration_ms / 1000).toFixed(1)}s`);
+      setTriggerState((s) => ({
+        ...s,
+        [cronPath]: parts.length > 0 ? `ok · ${parts.join(" · ")}` : "ok",
+      }));
+      // Pull a fresh data-health snapshot so row counts reflect the run.
+      void refresh();
+    } catch (err) {
+      setTriggerState((s) => ({ ...s, [cronPath]: `fail: ${String(err)}` }));
+    }
+  };
 
   const refresh = async () => {
     setIsLoading(true);
@@ -181,18 +220,24 @@ export default function DataHealthPage() {
                 <th className="text-right px-3 py-2 font-semibold">Last 24h</th>
                 <th className="text-left px-3 py-2 font-semibold">Last ingest</th>
                 <th className="text-left px-3 py-2 font-semibold">Cron</th>
+                <th className="text-left px-3 py-2 font-semibold w-24">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && !isLoading && (
                 <tr>
-                  <td colSpan={7} className="text-center px-3 py-12 text-fg-subtle">
+                  <td colSpan={8} className="text-center px-3 py-12 text-fg-subtle">
                     <Database className="inline h-4 w-4 mr-1 align-text-bottom" />
                     No data yet — first run will populate.
                   </td>
                 </tr>
               )}
-              {rows.map((r) => (
+              {rows.map((r) => {
+                const trig = triggerState[r.cron_path];
+                const running = trig === "running";
+                const ok = trig?.startsWith("ok");
+                const failed = trig?.startsWith("fail");
+                return (
                 <tr key={r.table} className="border-t border-border hover:bg-muted/30">
                   <td className="px-3 py-2">
                     <StatusChip status={r.status} />
@@ -219,8 +264,40 @@ export default function DataHealthPage() {
                       <code>{r.schedule}</code>
                     </div>
                   </td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => void triggerCron(r.cron_path)}
+                      disabled={running}
+                      className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border transition-colors ${
+                        running
+                          ? "border-amber-500/40 bg-amber-500/10 text-amber-700 cursor-wait"
+                          : ok
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15"
+                          : failed
+                          ? "border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/15"
+                          : "border-border bg-card hover:bg-muted/40"
+                      }`}
+                      title={trig ?? "Trigger this cron now"}
+                    >
+                      {running ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Play className="h-3 w-3" />
+                      )}
+                      {running ? "Running…" : "Run now"}
+                    </button>
+                    {trig && !running && (
+                      <div className={`text-[9px] mt-1 truncate max-w-[160px] ${
+                        ok ? "text-emerald-700" : "text-rose-700"
+                      }`}>
+                        {trig}
+                      </div>
+                    )}
+                  </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

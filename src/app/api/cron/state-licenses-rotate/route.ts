@@ -35,7 +35,7 @@ export const maxDuration = 280;
 interface SourceRow {
   state_code: string;
   state_name: string;
-  source_kind: "socrata" | "arcgis" | "scrape";
+  source_kind: "socrata" | "arcgis" | "csv" | "scrape";
   endpoint_url: string;
   field_map: Record<string, string>;
   enabled: boolean;
@@ -160,6 +160,126 @@ async function fetchSocrataPage(
   return [];
 }
 
+/**
+ * CSV-source path. The `endpoint_url` may contain `${YYYY-MM-DD}`
+ * placeholders that we substitute with today's UTC date (and fall
+ * back through the previous 7 days if today's file 404s — common for
+ * sources like AZ ROC that publish a dated daily file but skip
+ * weekends).
+ *
+ * Returns a list of upstream records (one per CSV row, header used
+ * for keys). Uses a Mozilla User-Agent because some hosts (AZ ROC)
+ * block default Node fetch UAs at the Cloudflare edge.
+ */
+async function fetchCsvSource(
+  baseUrl: string,
+): Promise<Record<string, unknown>[]> {
+  // Try today and the previous 7 UTC days. Stops at the first 200.
+  const candidates: string[] = [];
+  if (baseUrl.includes("${YYYY-MM-DD}")) {
+    const today = new Date();
+    for (let back = 0; back < 8; back++) {
+      const d = new Date(today.getTime() - back * 86_400_000);
+      const ymd = d.toISOString().slice(0, 10);
+      candidates.push(baseUrl.replace("${YYYY-MM-DD}", ymd));
+    }
+  } else {
+    candidates.push(baseUrl);
+  }
+
+  const browserHeaders = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+    Accept: "text/csv,application/octet-stream,*/*;q=0.9",
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+
+  let csvText: string | null = null;
+  let resolvedUrl: string | null = null;
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: browserHeaders,
+        signal: AbortSignal.timeout(180_000),
+      });
+      if (res.ok) {
+        csvText = await res.text();
+        resolvedUrl = url;
+        break;
+      }
+    } catch {
+      /* try next candidate */
+    }
+  }
+  if (!csvText) {
+    logger.warn("state-licenses.csv_fetch_failed", { tried: candidates.length });
+    return [];
+  }
+  logger.info("state-licenses.csv_fetched", {
+    url: resolvedUrl,
+    bytes: csvText.length,
+  });
+
+  // Minimal RFC-4180 parser. Build a streamed line walk so we don't
+  // double-allocate when the file is 10–50 MB.
+  const out: Record<string, unknown>[] = [];
+  let header: string[] | null = null;
+  let cur = "";
+  let inQuote = false;
+  const cells: string[] = [];
+
+  const pushRow = (rawRow: string) => {
+    cells.length = 0;
+    cur = "";
+    inQuote = false;
+    for (let i = 0; i < rawRow.length; i++) {
+      const c = rawRow[i];
+      if (inQuote) {
+        if (c === '"' && rawRow[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else if (c === '"') {
+          inQuote = false;
+        } else {
+          cur += c;
+        }
+      } else if (c === '"') {
+        inQuote = true;
+      } else if (c === ",") {
+        cells.push(cur);
+        cur = "";
+      } else {
+        cur += c;
+      }
+    }
+    cells.push(cur);
+    if (!header) {
+      // Normalize header keys: lowercased, spaces→underscore.
+      header = cells.map((h) =>
+        h
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-z0-9_]/g, ""),
+      );
+      return;
+    }
+    const rec: Record<string, unknown> = {};
+    for (let i = 0; i < header.length && i < cells.length; i++) {
+      rec[header[i]] = cells[i];
+    }
+    out.push(rec);
+  };
+
+  for (const line of csvText.split(/\r?\n/)) {
+    if (line.length === 0) continue;
+    pushRow(line);
+  }
+
+  return out;
+}
+
 async function fetchArcgisPage(
   baseUrl: string,
   offset: number,
@@ -197,6 +317,62 @@ async function ingestState(
   let pages = 0;
   const PAGE_SIZE = 1000;
   const MAX_PAGES = 200; // 200k rows ceiling per state per run
+
+  // CSV-source is single-shot — fetch once, parse the whole file.
+  // We pre-load it before the page loop and feed it through the
+  // existing batch-upsert path by wrapping it as a single "page".
+  if (source.source_kind === "csv") {
+    const upstream = await fetchCsvSource(source.endpoint_url);
+    if (upstream.length === 0) {
+      // Stamp the source row even on no-result so the rotator
+      // doesn't immediately re-pick this state on the next run.
+      await supabase
+        .from("contractor_license_sources")
+        .update({
+          last_run_at: new Date().toISOString(),
+          last_inserted: 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("state_code", source.state_code);
+      return { pulled: 0, inserted: 0, pages: 0 };
+    }
+    // Chunk into 1000-row pages and reuse the existing upsert pattern.
+    const BATCH = 1000;
+    for (let i = 0; i < upstream.length; i += BATCH) {
+      const slice = upstream.slice(i, i + BATCH);
+      const rows = slice
+        .map((u) => mapRecord(source, u))
+        .filter((r): r is CanonicalRow => r !== null);
+      if (rows.length > 0) {
+        const { error, count } = await supabase
+          .from("state_license_rosters")
+          .upsert(rows, {
+            onConflict: "state_code,license_number",
+            count: "exact",
+          });
+        if (error) {
+          logger.warn("state-licenses.csv_insert_error", {
+            state: source.state_code,
+            batchStart: i,
+            error: error.message,
+          });
+        } else {
+          inserted += count ?? 0;
+        }
+      }
+      pulled += slice.length;
+      pages += 1;
+    }
+    await supabase
+      .from("contractor_license_sources")
+      .update({
+        last_run_at: new Date().toISOString(),
+        last_inserted: inserted,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("state_code", source.state_code);
+    return { pulled, inserted, pages };
+  }
 
   while (pages < MAX_PAGES) {
     let upstream: Record<string, unknown>[] = [];
