@@ -79,20 +79,56 @@ async function handler(request: NextRequest): Promise<NextResponse> {
   const supabase = createAdminClient();
 
   try {
-    /* Fetch all active contractors */
-    const { data: contractors, error: cError } = await supabase
+    /*
+     * Audit fix 2026-05-02: this cron was 500-erroring with
+     * "Failed to fetch contractors" because profiles has no
+     * `last_login` column. Real login timestamps live in
+     * auth.users.last_sign_in_at, which supabase-js can't join into
+     * the public schema directly. Pulling them via a separate query
+     * to auth.users (service-role can read it).
+     *
+     * Without this, the engagement_scores table stayed empty and the
+     * data-health panel showed a permanent red chip.
+     */
+    const { data: contractorsRaw, error: cError } = await supabase
       .from("profiles")
-      .select("id, last_login")
+      .select("id")
       .eq("role", "contractor")
       .eq("onboarding_completed", true);
 
     if (cError) {
-      logger.error("Failed to fetch contractors", { error: String(cError) });
+      const detail = cError.message;
+      logger.error("engagement.contractors-fetch-failed", { error: detail, code: cError.code });
       return NextResponse.json(
-        { error: "Failed to fetch contractors" },
+        { error: "Failed to fetch contractors", detail, code: cError.code },
         { status: 500 }
       );
     }
+
+    // Fetch last_sign_in_at from auth.users for these contractor IDs.
+    // Use admin.listUsers() since direct .from("auth.users") needs a
+    // service-role grant beyond what the JS client bypass exposes.
+    const lastLoginById = new Map<string, string | null>();
+    try {
+      const { data: usersRes } = await supabase.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+      for (const u of usersRes?.users ?? []) {
+        if (u.id) lastLoginById.set(u.id, u.last_sign_in_at ?? null);
+      }
+    } catch (e) {
+      // Soft-fail — we still produce engagement scores, just with
+      // login_score=0 for everyone. Better than blocking the cron.
+      logger.warn("engagement.auth-listUsers-failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
+    const contractors = (contractorsRaw ?? []).map((c) => ({
+      id: c.id,
+      last_login: lastLoginById.get(c.id) ?? null,
+    }));
 
     const thirtyDaysAgo = new Date(
       Date.now() - 30 * 24 * 60 * 60 * 1000

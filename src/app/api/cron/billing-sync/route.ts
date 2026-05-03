@@ -76,8 +76,15 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    logger.error("Billing sync cron error", { error: String(error) });
-    return NextResponse.json({ error: "Cron job failed" }, { status: 500 });
+    // 2026-05-02 audit: surface error detail in response. Generic
+    // "Cron job failed" 500s show up as red chips in the data-health
+    // panel with no way to debug from the UI.
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Billing sync cron error", { error: errMsg });
+    return NextResponse.json(
+      { error: "Cron job failed", detail: errMsg },
+      { status: 500 },
+    );
   }
 }
 
