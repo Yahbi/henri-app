@@ -38,6 +38,41 @@
 # the `feedback` DB table are both unavailable. Must not be committed —
 # it contains user emails, IDs, and browser fingerprints.
 .henri-feedback.jsonl
+# Newsletter signup fallback inbox (same threat model as feedback).
+.henri-newsletter.jsonl
+
+# Operational state for resumable backfill scripts. The scripts encode
+# offset/cursor here so a crash doesn't force a re-scan from zero.
+# Don't commit — values change on every run and leak nothing useful.
+/scripts/.backfill-contact.state.json
+/scripts/.import-state.json
+# Operational logs from one-shot ops scripts (drain, enrich loop).
+/scripts/_score_drain.log
+
+# Claude Code session state (auto-generated lock + watch state).
+/.claude/scheduled_tasks.lock
+/.claude/data-watch-state.json
+/.claude/settings.local.json.bak*
+
+# Playwright artifacts (snapshots, console logs, traces).
+/.playwright-mcp/
+/test-results/
+
+# Hex code-graph mirror dir.
+/.hex-skills/
+
+# Ad-hoc preview / screenshot output (don't commit).
+/preview-*.html
+/test-*.jpeg
+/test-*.png
+/henri-*.jpeg
+/dashboard-*.jpeg
+/dashboard-*.png
+/drawer-*.jpeg
+/drawer-*.png
+/dev-mode-*.jpeg
+/final-*.jpeg
+/live-*.jpeg
 
 # debug
 npm-debug.log*
