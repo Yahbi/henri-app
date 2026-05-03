@@ -83,31 +83,59 @@ async function fetchQuery(q: string, days: number): Promise<GdeltArticle[]> {
     timespan: `${days}d`,
   });
   const url = `${API}?${params}`;
-  const res = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "Henri-Bot/1.0 (cron@meethenri.com)",
-    },
-    signal: AbortSignal.timeout(60_000),
-  });
-  if (!res.ok) {
-    logger.warn("gdelt.fetch_failed", { status: res.status, query: q });
-    return [];
+  /*
+   * 2026-05-02: GDELT's API occasionally throws TypeError: fetch failed
+   * (DNS / TLS handshake / 502). Without per-query try/catch, one
+   * failure aborts the whole cron via the outer catch, returning a
+   * generic 500. Wrap each query so a single bad request just yields
+   * an empty array and the rest of the queries still run. Two-attempt
+   * retry with 2s backoff covers transient blips.
+   */
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "Henri-Bot/1.0 (cron@meethenri.com)",
+        },
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!res.ok) {
+        logger.warn("gdelt.fetch_failed", { status: res.status, query: q, attempt });
+        if (attempt === 0 && (res.status >= 500 || res.status === 429)) {
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+        return [];
+      }
+      // GDELT occasionally returns text/html with an HTML error wrapper
+      // even with format=json. Defensively parse.
+      const text = await res.text();
+      if (!text.trim() || text.trim().startsWith("<")) {
+        logger.warn("gdelt.bad_body", { query: q, attempt });
+        return [];
+      }
+      try {
+        const json = JSON.parse(text) as GdeltResponse;
+        return json.articles ?? [];
+      } catch (err) {
+        logger.warn("gdelt.parse_failed", { query: q, error: String(err) });
+        return [];
+      }
+    } catch (err) {
+      logger.warn("gdelt.network_error", {
+        query: q,
+        attempt,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      return [];
+    }
   }
-  // GDELT occasionally returns text/html with an HTML error wrapper
-  // even with format=json. Defensively parse.
-  const text = await res.text();
-  if (!text.trim() || text.trim().startsWith("<")) {
-    logger.warn("gdelt.bad_body", { query: q });
-    return [];
-  }
-  try {
-    const json = JSON.parse(text) as GdeltResponse;
-    return json.articles ?? [];
-  } catch (err) {
-    logger.warn("gdelt.parse_failed", { query: q, error: String(err) });
-    return [];
-  }
+  return [];
 }
 
 export async function GET(request: NextRequest) {
