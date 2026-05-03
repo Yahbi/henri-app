@@ -67,12 +67,21 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
   try {
     const now = Date.now();
-    const thirtyDaysAgo = new Date(
-      now - 30 * 24 * 60 * 60 * 1000
-    ).toISOString();
-    const sixtyDaysAgo = new Date(
-      now - 60 * 24 * 60 * 60 * 1000
-    ).toISOString();
+    /*
+     * 2026-05-02 fix: send DATE-only strings (YYYY-MM-DD) instead of
+     * full ISO timestamps. The permits.issued_date column is type
+     * `date`, not `timestamp`. Sending a timestamp forces PostgREST
+     * to cast at query time, and the planner can't always prove the
+     * cast is constant — it falls back to a seq scan on the 1.4M-row
+     * table and hits the 60s statement timeout. Date-only strings let
+     * the existing idx_permits_issued_date btree range-scan directly.
+     */
+    const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const sixtyDaysAgo = new Date(now - 60 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
     /* -------------------------------------------------------------------- */
     /*  Fetch all permits from the last 60 days, grouped by ZIP             */
