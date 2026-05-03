@@ -129,8 +129,15 @@ function ChevronDown({ className = "" }: { className?: string }) {
 // acquires a lock and no cron enforces the 72h forfeit, so the claim
 // was overclaiming. See ~/.claude/plans/whats-the-14-days-purring-papert.md
 // for the full audit. Dormant code stays; user-facing claim removed.
+//
+// 2026-05-03 stat refresh: live Supabase counts now read 1,416,065
+// permits and 38 states with active ingest pipelines (231,110 leads,
+// of which ~21k are ≥50 score). Rounded to 1.4M+ for headroom — never
+// inflated, always under the true count. Bumping the state count from
+// 30+ → 30+ (we still want to under-promise on lead-coverage states,
+// which sits at 15; ingest is broader than scored-leads).
 const STATS = [
-  { num: "900k+", label: "Live permits across major metro areas in 30+ US states" },
+  { num: "1.4M+", label: "Live permits across major metro areas in 30+ US states" },
   { num: "Daily", label: "Permits refreshed every day (vercel.json: /api/cron/scrape)" },
   { num: "24 hrs", label: "Free trial to evaluate before any charge" },
 ];

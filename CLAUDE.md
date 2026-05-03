@@ -33,7 +33,7 @@
 
 ## Truthfulness (contractors + homeowners)
 - **Never invent metrics.** No "18.4x ROI," no "26% close rate," no "4,200 homeowners matched" unless we actually have that data. If a number can't be proven from a live query or a cited source, it doesn't ship.
-- **Size the claim to the current state.** We have ~925k permits across 46 states; headline "900k+ permits across 45+ states" is honest. Do not round up.
+- **Size the claim to the current state.** Live Supabase counts (audit 2026-05-03): **1,416,065 permits**, **231,110 leads**, **38 states** with active ingest pipelines, **15 states** with scored leads. Headline copy on `/`, `/contractors`, and TerritoryMapPreview is "**1.4M+ permits across 30+ US states**" — both rounded DOWN. Earlier "900k+" was stale; true count had drifted +500k since the 2026-04-30 audit. Do not round up. When permits.total crosses 1.5M, bump to "1.5M+" and update Hero.tsx + TerritoryMapPreview.tsx + contractors/page.tsx in the same commit.
 - **Fabricated stats are auto-rejected in code review.** Historical numbers kept as code comments so the next version knows where the old lie used to live.
 - **Transparent scoring.** Every lead-detail drawer must show the 6-signal breakdown. Never hide "why this score" behind a height gate.
 

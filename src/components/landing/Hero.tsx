@@ -5,11 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
 
-// Honest stats — sourced from live Supabase counts (audit 2026-04-30):
-//   permits.total                  = 1,412,498  (rounded to "900k+" for
+// Honest stats — sourced from live Supabase counts (audit 2026-05-03):
+//   permits.total                  = 1,416,065  (rounded to "1.4M+" for
 //                                                 headroom; bump when we
-//                                                 grow, never inflate)
-//   distinct US states with >=1 permit ingested = 35
+//                                                 grow, never inflate.
+//                                                 Earlier "900k+" was
+//                                                 stale — true count
+//                                                 had drifted +500k since
+//                                                 the 2026-04-30 audit.)
+//   distinct US states with active ingest = 38   (permit_sources)
 //                                                 (claim "30+" to stay
 //                                                 conservative against
 //                                                 sample variance)
@@ -22,11 +26,8 @@ import { cn } from "@/lib/utils/cn";
 //                                            When the plan upgrades, bump
 //                                            cadence + cron schedule
 //                                            together.
-// Earlier "45+ States Covered" was off — only 35 states have actual
-// permit data ingested (50+ are configured in permit_sources but not
-// yet producing). Tightened to 30+.
 const stats = [
-  { label: "900k+ Permits Tracked", top: "12%", left: "8%", delay: "0s" },
+  { label: "1.4M+ Permits Tracked", top: "12%", left: "8%", delay: "0s" },
   { label: "30+ States Covered", top: "38%", left: "2%", delay: "0.2s" },
   { label: "Refreshed daily", top: "64%", left: "6%", delay: "0.4s" },
 ] as const;

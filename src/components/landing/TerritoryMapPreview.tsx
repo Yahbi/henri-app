@@ -18,9 +18,12 @@ import { Card, CardContent } from "@/components/ui/card";
  * reads honestly, and conveys "one contractor per trade per ZIP" at a
  * glance without needing the contractor workspace.
  *
- * Truthfulness: stats below reflect what CLAUDE.md says we actually
- * have — ~925k permits across 46 states — rounded down ("900k+",
- * "46 states"). Never invent metrics.
+ * Truthfulness: stats below reflect live Supabase counts (audit
+ * 2026-05-03):
+ *   permits.total           = 1,416,065  (rounded down to "1.4M+")
+ *   permit_sources.states   = 38         (kept at "30+" — under-promise)
+ *   leads.total             = 231,110
+ * Always rounded DOWN. Never invent metrics.
  */
 
 type TileStatus = "active" | "coming";
@@ -95,7 +98,8 @@ const STATUS_STYLES: Record<TileStatus, {
    claim was overclaiming. See plan file
    ~/.claude/plans/whats-the-14-days-purring-papert.md. */
 const STATS = [
-  { icon: MapPin,      value: "900k+", label: "Permits tracked" },
+  // 2026-05-03 stat refresh: 1,416,065 permits live → "1.4M+".
+  { icon: MapPin,      value: "1.4M+", label: "Permits tracked" },
   { icon: ShieldCheck, value: "30+",   label: "States covered" },
   { icon: Clock,       value: "Daily",  label: "Catalog refresh" },
 ] as const;
