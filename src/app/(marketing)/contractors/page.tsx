@@ -118,10 +118,10 @@ function ChevronDown({ className = "" }: { className?: string }) {
 // Replaced fabricated performance stats (18.4x ROI / $41 per job /
 // 26% close rate) — we're still in Beta so no cohort exists to derive
 // them honestly. These three claims are all independently verifiable:
-//   - permit count is live (DB audit 2026-04-30: 1.41M permits)
-//   - state count is live (DB audit 2026-04-30: 35 states; claim "30+"
-//                          to stay conservative against sample variance)
-//   - 30-min cadence matches `/api/cron/scrape` in vercel.json
+//   - permit count is live (DB audit 2026-05-03: 1,416,065 permits → "1.4M+")
+//   - state count is live (DB audit 2026-05-03: 38 states with active
+//                          ingest; headline "30+" stays conservative)
+//   - daily cadence matches `/api/cron/scrape` in vercel.json
 //   - 24-hr trial is the Stripe `trial_period_days=1` config
 //
 // 2026-04-30 strip: removed the "1 / permit · 14-day exclusivity" stat.

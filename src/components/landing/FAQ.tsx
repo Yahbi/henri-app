@@ -13,7 +13,7 @@ const faqs: FAQItem[] = [
   {
     question: "What cities do you cover?",
     answer:
-      "Henri's permit catalog spans major metropolitan areas in 30+ US states (35 states with at least one ingested permit as of the last DB audit). New jurisdictions are added as we onboard their data sources.",
+      "Henri's permit catalog spans major metropolitan areas in 30+ US states (38 states with active ingest pipelines as of the 2026-05-03 DB audit, totaling 1.4M+ permits). New jurisdictions are added as we onboard their data sources.",
   },
   {
     question: "How fast do I get leads?",
