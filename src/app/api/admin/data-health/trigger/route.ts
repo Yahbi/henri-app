@@ -31,6 +31,18 @@ export const maxDuration = 300;
  * sidecar list in /api/admin/data-health. Adding a new sidecar cron
  * means adding it here too — defends against arbitrary-URL injection
  * if the UI is ever compromised. */
+/*
+ * 2026-05-02 retrospective audit: pruned 6 dead/pending crons whose
+ * data wasn't reaching contractors. Removed:
+ *   cdc-svi          → CDC SVI dataset deprecated (route still exists, just unscheduled)
+ *   census-acs       → demo_acs_zcta unused in src/ (drawer + scoring don't read it)
+ *   hmda-rotate      → 2 rows after weeks of rotation; defer to Hetzner sidecar
+ *   hud-zipxw        → HUD requires authenticated download
+ *   code-violations  → no drawer panel or scoring booster wired yet
+ *   nifc-wildfires   → no drawer panel or scoring booster wired yet
+ * Route files are kept on disk; they're just not in the trigger
+ * allow-list anymore. Re-add when the consumer side is ready.
+ */
 const ALLOWED: ReadonlySet<string> = new Set([
   "swdi-events",
   "courtlistener-liens",
@@ -38,18 +50,12 @@ const ALLOWED: ReadonlySet<string> = new Set([
   "hud-reo",
   "census-geocode",
   "fema-nri",
-  "cdc-svi",
-  "census-acs",
   "openfema-declarations",
   "gdelt-triggers",
-  "hmda-rotate",
   "openfema-nfip",
   "openfema-ia",
   "state-licenses-rotate",
-  "hud-zipxw",
   "activate-arcgis-sources",
-  "code-violations",
-  "nifc-wildfires",
   // The legacy main scoring cron — wrapped with logCronRun in commit
   // (post-audit 2026-05-02) and added here so the data-health Run-now
   // button can fire it manually when Vercel's auto-cron drops it.

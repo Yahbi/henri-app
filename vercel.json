@@ -113,24 +113,12 @@
       "schedule": "0 20 * * 0"
     },
     {
-      "path": "/api/cron/cdc-svi",
-      "schedule": "30 20 * * 0"
-    },
-    {
-      "path": "/api/cron/census-acs",
-      "schedule": "0 21 * * 0"
-    },
-    {
       "path": "/api/cron/openfema-declarations",
       "schedule": "0 22 * * *"
     },
     {
       "path": "/api/cron/gdelt-triggers",
       "schedule": "30 22 * * *"
-    },
-    {
-      "path": "/api/cron/hmda-rotate",
-      "schedule": "0 23 * * *"
     },
     {
       "path": "/api/cron/openfema-nfip",
@@ -145,24 +133,12 @@
       "schedule": "30 0 * * *"
     },
     {
-      "path": "/api/cron/hud-zipxw",
-      "schedule": "0 1 * * 0"
-    },
-    {
       "path": "/api/cron/cron-runs-cleanup",
       "schedule": "0 2 * * *"
     },
     {
       "path": "/api/cron/activate-arcgis-sources",
       "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/cron/code-violations",
-      "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/nifc-wildfires",
-      "schedule": "30 8 * * *"
     }
   ]
 }

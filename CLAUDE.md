@@ -554,3 +554,28 @@ After ingesting ~308k canonical sidecar rows we did a full gap audit and shipped
 | claims_ia | Drawer panel (via disaster declarations) |
 | mortgages_hmda | None yet (sparse) |
 | demo_acs_zcta | None yet (Sunday cron) |
+
+## Sidecar pruning (audit 2026-05-02 retrospective, migration 00079)
+
+After Wave 2.C shipped we paused to audit which sidecars actually
+reach the contractor surface (drawer / scoring / outreach / onboarding)
+vs. which were collected-but-never-read. Six tables were dropped:
+
+| Dropped sidecar | Cron unscheduled | Reason |
+|---|---|---|
+| `svi_tracts` | `cdc-svi` | CDC SVI Socrata feed deprecated; ATSDR ArcGIS endpoint requires auth |
+| `demo_acs_zcta` | `census-acs` | 236k rows but zero readers in src/ — demographics belong in onboarding capacity_prefs, not per-lead |
+| `mortgages_hmda` | `hmda-rotate` | 2 rows after weeks of state-rotation; rotator approach too slow for Vercel cron, defer to Hetzner sidecar |
+| `zip_crosswalk_hud` | `hud-zipxw` | HUD requires authenticated form download; stateless cron can't reauthenticate |
+| `code_violations` | `code-violations` | 11k rows ingested today but no drawer/scoring/outreach consumer; pause until consumer ships |
+| `wildfires_nifc` | `nifc-wildfires` | 603 rows ingested today but no drawer/scoring/outreach consumer; pause until consumer ships |
+
+Cron route files at `src/app/api/cron/{cdc-svi,census-acs,hmda-rotate,hud-zipxw,code-violations,nifc-wildfires}/route.ts` are kept on disk for fast re-enable when the consumer side is built. They're just removed from `vercel.json` schedule + the admin-trigger ALLOWED set + the data-health freshness panel.
+
+**Post-prune inventory**:
+- 15 sidecar tables (was 21)
+- 13 cron routes (was 19) — 6 unscheduled but kept on disk
+- Score booster math unchanged (only NRI fires regularly anyway; the 5 boosters max 15 pts)
+- Score realism: top score in production is 61/100, hot threshold is 75. The cap is contact-completeness sparsity (39% owner_name, 1% phone), NOT a missing sidecar — adding more data sources won't move it. Next sprint focuses on contact enrichment (Numverify / Cloudmersive / Apollo) instead of new sources.
+
+The pruning rationale lives in detail at `~/.claude/plans/whats-the-14-days-purring-papert.md` ("2026-05-02 retrospective" section).

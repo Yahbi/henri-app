@@ -42,31 +42,40 @@ interface TableSpec {
   exact_count: boolean;
 }
 
+/*
+ * 2026-05-02 retrospective audit pruned 6 tables/crons whose data
+ * never reached the contractor surface (drawer, scoring, outreach):
+ *   svi_tracts        (cdc-svi)         — CDC dataset deprecated
+ *   demo_acs_zcta     (census-acs)      — never read in src/
+ *   mortgages_hmda    (hmda-rotate)     — 2 rows after weeks of rotation
+ *   zip_crosswalk_hud (hud-zipxw)       — HUD requires authenticated login
+ *   code_violations   (code-violations) — drawer panel not built yet
+ *   wildfires_nifc    (nifc-wildfires)  — drawer panel not built yet
+ * Routes still exist on disk; just unscheduled and removed from the
+ * data-health panel so the freshness UI stops showing red chips for
+ * empty/dead tables. See plan retrospective in
+ * ~/.claude/plans/whats-the-14-days-purring-papert.md.
+ */
 const TABLES: TableSpec[] = [
   // Wave 1
-  { table: "weather_swdi_hail",     cron_path: "swdi-events",          schedule: "0 16 * * *",  wave: "1",     description: "NOAA SWDI hail signatures (7d window)",         exact_count: false },
-  { table: "weather_swdi_wind",     cron_path: "swdi-events",          schedule: "0 16 * * *",  wave: "1",     description: "NOAA SWDI wind/mesocyclone signatures (7d)",     exact_count: false },
-  { table: "weather_swdi_tornado",  cron_path: "swdi-events",          schedule: "0 16 * * *",  wave: "1",     description: "NOAA SWDI tornado vortex signatures (7d)",       exact_count: false },
+  { table: "weather_swdi_hail",     cron_path: "swdi-events",          schedule: "0 23 * * *",  wave: "1",     description: "NOAA SWDI hail signatures (7d window)",         exact_count: false },
+  { table: "weather_swdi_wind",     cron_path: "swdi-events",          schedule: "0 23 * * *",  wave: "1",     description: "NOAA SWDI wind/mesocyclone signatures (7d)",     exact_count: false },
+  { table: "weather_swdi_tornado",  cron_path: "swdi-events",          schedule: "0 23 * * *",  wave: "1",     description: "NOAA SWDI tornado vortex signatures (7d)",       exact_count: false },
   { table: "liens_courtlistener",   cron_path: "courtlistener-liens",  schedule: "30 16 * * *", wave: "1",     description: "CourtListener mechanic-lien dockets (30d)",      exact_count: true  },
   { table: "quakes_usgs",           cron_path: "usgs-quakes",          schedule: "0 17 * * *",  wave: "1",     description: "USGS earthquakes M2.5+ (7d, CONUS+AK)",          exact_count: true  },
   { table: "foreclosures_fha",      cron_path: "hud-reo",              schedule: "0 18 * * 0",  wave: "1",     description: "HUD FHA REO foreclosures (full)",                exact_count: true  },
-  // Wave 2.A
+  // Wave 2.A — kept only NRI county/tract; svi_tracts + demo_acs_zcta pruned
   { table: "risk_nri_county",       cron_path: "fema-nri",             schedule: "0 20 * * 0",  wave: "2.A",   description: "FEMA National Risk Index — counties (~3k)",      exact_count: true  },
   { table: "risk_nri_tract",        cron_path: "fema-nri",             schedule: "0 20 * * 0",  wave: "2.A",   description: "FEMA National Risk Index — tracts (~84k)",       exact_count: true  },
-  { table: "svi_tracts",            cron_path: "cdc-svi",              schedule: "30 20 * * 0", wave: "2.A",   description: "CDC Social Vulnerability Index by tract (~73k)", exact_count: true  },
-  { table: "demo_acs_zcta",         cron_path: "census-acs",           schedule: "0 21 * * 0",  wave: "2.A",   description: "Census ACS 5-yr 7 vars × ~33k ZCTAs",            exact_count: false },
-  // Wave 2.B Phase 1
+  // Wave 2.B Phase 1 — mortgages_hmda pruned (starved)
   { table: "claims_disasters_fema", cron_path: "openfema-declarations",schedule: "0 22 * * *",  wave: "2.B.1", description: "FEMA disaster declarations (~70k)",              exact_count: true  },
   { table: "triggers_news_gdelt",   cron_path: "gdelt-triggers",       schedule: "30 22 * * *", wave: "2.B.1", description: "GDELT construction-trigger news (7d)",           exact_count: true  },
-  { table: "mortgages_hmda",        cron_path: "hmda-rotate",          schedule: "0 23 * * *",  wave: "2.B.1", description: "HMDA Modified LAR home-improvement (state rot.)",exact_count: false },
-  // Wave 2.B Phase 2
+  // Wave 2.B Phase 2 — zip_crosswalk_hud pruned (auth blocker)
   { table: "claims_nfip",           cron_path: "openfema-nfip",        schedule: "30 23 * * *", wave: "2.B.2", description: "FEMA NFIP redacted claims (year rotator)",       exact_count: false },
   { table: "claims_ia",             cron_path: "openfema-ia",          schedule: "0 0 * * *",   wave: "2.B.2", description: "FEMA IA valid registrations (disaster rot.)",    exact_count: false },
   { table: "state_license_rosters", cron_path: "state-licenses-rotate",schedule: "30 0 * * *",  wave: "2.B.2", description: "Public state contractor license rosters (rot.)",exact_count: true  },
-  { table: "zip_crosswalk_hud",     cron_path: "hud-zipxw",            schedule: "0 1 * * 0",   wave: "2.B.2", description: "HUD ZIP↔Tract/Place/CBSA/County (~320k)",        exact_count: false },
-  // Wave 2.C
-  { table: "code_violations",       cron_path: "code-violations",      schedule: "0 8 * * *",   wave: "2.C",   description: "Code violations — NYC DOB, Chicago, SF (90d)",   exact_count: true  },
-  { table: "wildfires_nifc",        cron_path: "nifc-wildfires",       schedule: "30 8 * * *",  wave: "2.C",   description: "NIFC current-year US wildfire incidents",        exact_count: true  },
+  // Wave 2.C pruned entirely — code_violations + wildfires_nifc had no
+  // drawer / scoring consumer at the time of the audit.
 ];
 
 interface CronRunInfo {
