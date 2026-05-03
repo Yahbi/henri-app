@@ -53,7 +53,17 @@ const cspDirectives = [
   // never reached Sentry. The whole client-side observability layer was
   // dark. *.ingest.us.sentry.io covers our project; *.ingest.sentry.io
   // is the EU/legacy fallback in case Sentry rotates regions.
-  "connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://api.openai.com https://nominatim.openstreetmap.org https://api.mapbox.com https://*.cartocdn.com https://*.vercel-insights.com https://*.ingest.us.sentry.io https://*.ingest.sentry.io",
+  //
+  // 2026-05-03: added basemap tile providers. Earlier CSP only had
+  // *.cartocdn.com; the dashboard map and TerritoryMapPreview also pull
+  // from server.arcgisonline.com (ESRI satellite/hybrid/streets),
+  // tiles.openfreemap.org (OpenFreeMap road styles), api.maptiler.com
+  // (when NEXT_PUBLIC_MAPTILER_KEY set), basemaps.cartocdn.com (already
+  // covered by wildcard). MapLibre fetches raster tiles via fetch() so
+  // connect-src is the gating directive (img-src 'https:' is permissive
+  // enough for the <img> fallback path). Without these the satellite
+  // basemap rendered blank — exactly the symptom the user reported.
+  "connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://api.openai.com https://nominatim.openstreetmap.org https://api.mapbox.com https://*.cartocdn.com https://*.vercel-insights.com https://*.ingest.us.sentry.io https://*.ingest.sentry.io https://server.arcgisonline.com https://*.arcgis.com https://tiles.openfreemap.org https://api.maptiler.com https://*.tile.openstreetmap.org https://tile.openstreetmap.org",
   "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
   "frame-ancestors 'none'",
   "form-action 'self' https://checkout.stripe.com",
