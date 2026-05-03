@@ -93,18 +93,24 @@ async function handler(request: NextRequest): Promise<NextResponse> {
      * at the row mapper level below.
      */
     /*
-     * 2026-05-02: switched primary date filter from applied_date to
-     * issued_date because >98% of permits in production have
-     * applied_date=NULL (only 19,911 of 1.4M rows are populated). The
-     * issued_date column is filled on 1.0M permits, so the 60-day
-     * window catches ~36k rows vs ~4k. Combined with the zip filter
-     * downstream, that means ~14k permits across ~948 ZIPs.
+     * 2026-05-02: switched filter from applied_date to issued_date.
+     * >98% of permits in production have applied_date=NULL (only
+     * 19,911 of 1.4M rows). issued_date is filled on 1.0M permits
+     * AND has a btree index (idx_permits_issued_date). An OR across
+     * both columns forces a seq-scan on a 1.4M-row table and times
+     * out the Supabase 60s statement budget; using issued_date alone
+     * is index-sargable and returns in <500ms.
+     *
+     * 30-day window (was 60d) keeps the working set tight without
+     * losing demand-signal accuracy — older permits don't reflect
+     * current ZIP demand.
      */
     const { data: recentPermits, error: permitError } = await supabase
       .from("permits")
       .select("zip, estimated_value, permit_type, applied_date, issued_date")
-      .or(`issued_date.gte.${sixtyDaysAgo},applied_date.gte.${sixtyDaysAgo}`)
+      .gte("issued_date", thirtyDaysAgo)
       .not("zip", "is", null)
+      .order("issued_date", { ascending: false })
       .limit(50_000); // safety cap; 50k rows = ~6MB JSON
 
     if (permitError) {
