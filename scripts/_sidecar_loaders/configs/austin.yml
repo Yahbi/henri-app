@@ -1,0 +1,20 @@
+# Verified working 2026-05-04. Inserted 50 rows in ~1s.
+name: AUSTIN-TX
+city: Austin
+state: TX
+url: https://data.austintexas.gov/resource/3syk-w9eu.json
+limit: 50
+order_field: issue_date
+fields:
+  permit_no:        permit_number
+  issued_date:      issue_date
+  address:          original_address1
+  zip:              original_zip
+  description:      description
+  estimated_value:  declared_valuation
+  applicant:        applicant_full_name
+  contractor:       contractor_company_name
+  permit_class:     permit_class
+  work_class:       work_class
+  permit_type_desc: permit_type_desc
+  status:           status_current

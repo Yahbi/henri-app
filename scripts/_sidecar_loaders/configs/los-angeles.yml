@@ -1,0 +1,20 @@
+# Los Angeles Building & Safety Permits
+# https://data.lacity.org/Building-and-Safety/Building-and-Safety-Permit-Information-Old/yv23-pmwf
+name: LA-CA
+city: Los Angeles
+state: CA
+url: https://data.lacity.org/resource/yv23-pmwf.json
+limit: 100
+order_field: issue_date
+fields:
+  permit_no:        pcis_permit_no
+  issued_date:      issue_date
+  address:          address_start
+  zip:              zip_code
+  description:      use_description
+  estimated_value:  valuation
+  applicant:        applicant_first_name
+  contractor:       contractors_business_name
+  permit_type_desc: permit_type
+  permit_class:     permit_sub_type
+  status:           status

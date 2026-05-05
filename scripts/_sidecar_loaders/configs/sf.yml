@@ -1,0 +1,20 @@
+# San Francisco Building Permits
+# https://data.sfgov.org/Housing-and-Buildings/Building-Permits/i98e-djp9
+name: SF-CA
+city: San Francisco
+state: CA
+url: https://data.sfgov.org/resource/i98e-djp9.json
+limit: 100
+order_field: issued_date
+fields:
+  permit_no:        permit_number
+  issued_date:      issued_date
+  address:          street_name
+  zip:              zipcode
+  description:      description
+  estimated_value:  estimated_cost
+  applicant:        first_construction_document_date
+  contractor:       contractor_address
+  permit_type_desc: permit_type_definition
+  permit_class:     existing_construction_type_description
+  status:           current_status

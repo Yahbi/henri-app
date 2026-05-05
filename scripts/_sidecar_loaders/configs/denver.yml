@@ -1,0 +1,19 @@
+# Denver Building Permits — denvergov.org
+# https://www.denvergov.org/opendata/dataset/city-and-county-of-denver-residential-building-permits-status
+name: DENVER-CO
+city: Denver
+state: CO
+url: https://opendata.arcgis.com/api/v3/datasets/...# probe before use; ArcGIS not Socrata
+limit: 100
+order_field: issue_date
+fields:
+  permit_no:        permit_no
+  issued_date:      issue_date
+  address:          address_line_1
+  zip:              zip_code
+  description:      scope_of_work
+  estimated_value:  estimated_project_cost
+  applicant:        applicant_full_name
+  contractor:       contractor_name
+  permit_type_desc: permit_type
+  status:           status

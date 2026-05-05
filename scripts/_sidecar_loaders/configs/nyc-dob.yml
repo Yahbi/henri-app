@@ -1,0 +1,22 @@
+# NYC DOB issued permits (Department of Buildings)
+# Probe before relying on field names — NYC datasets evolve.
+# https://data.cityofnewyork.us/Housing-Development/DOB-Permit-Issuance/ipu4-2q9a
+name: NYC-DOB
+city: New York
+state: NY
+url: https://data.cityofnewyork.us/resource/ipu4-2q9a.json
+limit: 100
+order_field: issuance_date
+fields:
+  permit_no:        job__
+  issued_date:      issuance_date
+  address:          house__
+  zip:              zip_code
+  description:      job_description
+  estimated_value:  initial_cost
+  applicant:        applicant_s_first_name
+  contractor:       owner_s_business_name
+  permit_class:     job_type
+  work_class:       work_type
+  permit_type_desc: permit_type
+  status:           job_status_descrp

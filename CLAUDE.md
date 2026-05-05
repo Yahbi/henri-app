@@ -579,3 +579,68 @@ Cron route files at `src/app/api/cron/{cdc-svi,census-acs,hmda-rotate,hud-zipxw,
 - Score realism: top score in production is 61/100, hot threshold is 75. The cap is contact-completeness sparsity (39% owner_name, 1% phone), NOT a missing sidecar — adding more data sources won't move it. Next sprint focuses on contact enrichment (Numverify / Cloudmersive / Apollo) instead of new sources.
 
 The pruning rationale lives in detail at `~/.claude/plans/whats-the-14-days-purring-papert.md` ("2026-05-02 retrospective" section).
+
+## Hetzner Scrapling sidecar (2026-05-04, Wave 3 kickoff)
+
+The 14-day plan's "Wave 2 Hetzner sidecar" finally shipped tonight. Scope: a $20/mo Hetzner VPS that runs Scrapling-driven loaders Henri's Vercel cron can't (Cloudflare-protected state portals, JS-rendered SPAs, voter file forms, hardened license rosters).
+
+### Server inventory
+- **Provider**: Hetzner Cloud
+- **Project**: `henri-sidecar`
+- **Server**: `henri-scrapling-sidecar`
+- **Type**: **CCX13** (dedicated 2 vCPU / 8 GB RAM / 80 GB SSD) — €19.99/mo. CX22 wasn't available in HIL Oregon; CCX13 is dedicated CPU which actually wins for headless Chromium scraping.
+- **Region**: 🇺🇸 Hillsboro OR (HIL, us-west) — closest Hetzner DC to Supabase's N. California region (~25ms RTT).
+- **Public IPv4**: `5.78.152.250`
+- **OS**: Ubuntu 24.04 LTS
+- **Backups**: enabled (€0.90/mo, weekly)
+- **Total cost**: ~$22/mo all-in.
+
+### SSH access
+- Key: `~/.ssh/henri_sidecar` (ed25519, passphrase-protected) on the founder's Windows machine.
+- Public key fingerprint: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBMqeIPlyrjGT5IvCXg/yztHM6LtVqb/Rib3zK+lfogg henri-sidecar`
+- User: `henri` (non-root, NOPASSWD sudo via cloud-init).
+- Login command: `ssh -i $HOME\.ssh\henri_sidecar henri@5.78.152.250`
+- Root SSH **disabled** (cloud-init hardening). Console-level fallback uses Hetzner's web serial console + the project SSH key.
+
+### Cloud-config (the version that worked)
+A previous cloud-config used `runcmd: useradd -G sudo henri` which created `henri` with a locked password — sudo prompted but no password existed. The fix was to use cloud-init's native `users:` directive with `sudo: ALL=(ALL) NOPASSWD:ALL`. The working YAML is committed at `scripts/_hetzner_cloud_config.yaml` for re-use when scaling out.
+
+### Stack on the box
+- `~/scrapling-env/` — Python 3.12 venv with Scrapling 0.4.7 + Playwright 1.x + Chromium + Firefox
+- `~/.henri-sidecar.env` (chmod 600) — `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SIDECAR_REGION`, `SIDECAR_HOSTNAME`
+- `~/scrapling_loaders/` — Python loaders, one per source
+- `~/scrapling_loaders/run.sh` — wrapper that sources env + activates venv + runs a loader, used by cron
+- `~/scrapling-loaders.log` — append-only log (every cron fire writes one block)
+
+### Pipeline (proven 2026-05-05 ~01:50 UTC)
+```
+Hetzner CCX13
+  └─→ Scrapling Fetcher (with stealth headers)
+       └─→ Austin Socrata API (data.austintexas.gov)
+            └─→ JSON parse
+                 └─→ map permit_class/work_class → Henri's permit_type enum
+                      └─→ map status_current → Henri's permit_status enum
+                           └─→ Supabase REST POST (/rest/v1/permits)
+                                └─→ Prefer: resolution=merge-duplicates → idempotent upsert via uq_permits_source
+                                     └─→ Henri permits table (1.4M+ rows, +50 from this loader)
+```
+
+First loader: `~/scrapling_loaders/load_austin.py`. Pulls 50 most recently issued Austin TX construction permits, maps to Henri schema, upserts. ~1 second wall time. Cron schedule: `30 */4 * * *` (every 4h at :30 past — 6 runs/day).
+
+### What's confirmed working
+- Cloudflare-protected pages: tested with `nopecha.com/demo/cloudflare`, `solve_cloudflare=True` solved the turnstile in 13 seconds.
+- Supabase service-role write from external IP: tested with the Austin loader, status 201/200 on insert/update.
+- Idempotent re-runs: second run returned 200 (PostgREST UPDATE) instead of 201 (CREATE). uq_permits_source dedup works.
+
+### Phase scope (2-4 weeks for full nationwide coverage)
+1. **Phase 1 — Generic Socrata loader (this session, IN PROGRESS)**: refactor Austin into config-driven loader. ~50 cities use Socrata; covers ~50% of US permit volume.
+2. **Phase 2 — Generic Tyler EnerGov loader**: Tyler's REST `/api/v2/records` is consistent. ~80 cities (TX, GA, FL, NC). +30%.
+3. **Phase 3 — Generic ArcGIS Open Data loader**: ~150 county portals. +10%.
+4. **Phase 4 — Per-platform Scrapling stealth scrapers**: Accela ACA / eTRAKiT / Cloudpermit / SmartGov. Hardest, ~1 week per platform.
+
+### Operational notes
+- Loader logs: `tail -f ~/scrapling-loaders.log`
+- Crontab: `crontab -l`
+- DB writes go through `SUPABASE_SERVICE_ROLE_KEY` which bypasses RLS — same pattern as Vercel-side cron writers.
+- The sidecar never serves user traffic; it's a one-way pipe (scrape → Supabase). If the box dies, Henri's UI keeps serving from existing data — no user-visible outage.
+- **Service-role JWT was exposed in chat once** (2026-05-04 ~01:35 UTC during env-file setup debugging). Schedule a rotation via Supabase dashboard → Project Settings → API → "Reset service_role secret" when convenient. Then update `~/.henri-sidecar.env` on the box AND Vercel env AND any local `.env.local`.

@@ -1,0 +1,19 @@
+# Chicago Building Permits — data.cityofchicago.org
+# https://data.cityofchicago.org/Buildings/Building-Permits/ydr8-5enu
+name: CHICAGO-IL
+city: Chicago
+state: IL
+url: https://data.cityofchicago.org/resource/ydr8-5enu.json
+limit: 100
+order_field: issue_date
+fields:
+  permit_no:        permit_
+  issued_date:      issue_date
+  address:          street_number
+  zip:              zip_code
+  description:      work_description
+  estimated_value:  reported_cost
+  applicant:        contact_1_name
+  contractor:       contact_2_name
+  permit_type_desc: permit_type
+  status:           processing_time

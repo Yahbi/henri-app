@@ -1,0 +1,21 @@
+# Seattle Building Permits — data.seattle.gov
+# https://data.seattle.gov/Permitting/Building-Permits/76t5-zqzr
+name: SEATTLE-WA
+city: Seattle
+state: WA
+url: https://data.seattle.gov/resource/76t5-zqzr.json
+limit: 100
+order_field: issued_date
+fields:
+  permit_no:        permitnum
+  issued_date:      issued_date
+  address:          originaladdress1
+  zip:              originalzip
+  description:      description
+  estimated_value:  estprojectcost
+  applicant:        applicantname
+  contractor:       contractorcompanyname
+  permit_type_desc: permittype
+  permit_class:     permitclassmapped
+  work_class:       workclass
+  status:           statuscurrent

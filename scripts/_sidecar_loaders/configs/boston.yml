@@ -1,0 +1,18 @@
+# Boston Building Permits — data.boston.gov
+# https://data.boston.gov/dataset/approved-building-permits
+name: BOSTON-MA
+city: Boston
+state: MA
+url: https://data.boston.gov/api/3/action/datastore_search?resource_id=6ddcd912-32a0-43df-9908-63574f8c7e77
+limit: 100
+fields:
+  permit_no:        permitnumber
+  issued_date:      issued_date
+  address:          address
+  zip:              zip
+  description:      description
+  estimated_value:  declared_valuation
+  applicant:        applicant
+  contractor:       owner
+  permit_type_desc: permittypedescr
+  status:           status

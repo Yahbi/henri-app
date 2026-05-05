@@ -1,0 +1,18 @@
+# Portland OR Building Permits — Portland Maps Open Data (ArcGIS, not Socrata)
+# Probe via probe_socrata.py before relying on this — Portland uses ArcGIS Open Data Portal.
+name: PORTLAND-OR
+city: Portland
+state: OR
+url: https://www.portlandmaps.com/api/v3/buildingpermits.json
+limit: 100
+fields:
+  permit_no:        permit_number
+  issued_date:      issued_date
+  address:          address_line_1
+  zip:              zip
+  description:      description_of_work
+  estimated_value:  total_project_valuation
+  applicant:        applicant_name
+  contractor:       contractor_name
+  permit_type_desc: permit_type
+  status:           status

@@ -1,0 +1,19 @@
+# Sacramento Building Permits — data.cityofsacramento.org
+# Probe before relying — column names may differ.
+name: SACRAMENTO-CA
+city: Sacramento
+state: CA
+url: https://data.cityofsacramento.org/resource/4ms9-jgvp.json
+limit: 100
+order_field: issued_date
+fields:
+  permit_no:        permit_number
+  issued_date:      issued_date
+  address:          address_line_1
+  zip:              zip_code
+  description:      project_description
+  estimated_value:  estimated_value
+  applicant:        applicant_name
+  contractor:       contractor_name
+  permit_type_desc: permit_type
+  status:           status

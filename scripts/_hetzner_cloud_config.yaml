@@ -1,0 +1,45 @@
+#cloud-config
+# Hetzner CCX13 / CX22 cloud-init for Henri Scrapling sidecar.
+# Used 2026-05-04 to provision the first Hetzner box (5.78.152.250 in HIL).
+#
+# Critical lesson learned: the FIRST attempt at provisioning used
+# `runcmd: useradd -G sudo henri` which creates the user with a LOCKED
+# password — sudo then prompts for a password but henri has none, and
+# the SSH session is wedged because root login was simultaneously
+# disabled. The fix below uses cloud-init's native `users:` directive
+# with `sudo: ALL=(ALL) NOPASSWD:ALL`, which is the only way to get
+# usable sudo on a passwordless cloud-init account.
+#
+# Drop this YAML into the "Cloud Config" textarea on the Hetzner Add
+# Server form (or use it via the API user-data parameter).
+#
+# IMPORTANT: replace the ssh_authorized_keys entry with the actual
+# public key from the founder's machine before re-using.
+package_update: true
+package_upgrade: true
+packages:
+  - ufw
+  - fail2ban
+  - python3-pip
+  - python3-venv
+  - postgresql-client
+  - htop
+  - tmux
+  - git
+users:
+  - default
+  - name: henri
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: sudo
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBMqeIPlyrjGT5IvCXg/yztHM6LtVqb/Rib3zK+lfogg henri-sidecar
+runcmd:
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 22/tcp
+  - ufw --force enable
+  - systemctl enable --now fail2ban
+  - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+  - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+  - systemctl restart ssh
