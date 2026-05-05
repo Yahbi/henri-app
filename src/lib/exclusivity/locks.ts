@@ -1,11 +1,21 @@
 /* ── Per-permit exclusivity locks — Phase 0a wedge #1 ─────────────────── */
 /*                                                                        */
-/*  The anti-Angi primitive: one contractor per permit per trade for a    */
-/*  configurable window (default 14 days). The "lead" itself (public      */
-/*  permit record) is not gated — the ENRICHED packet is. Contact info,   */
-/*  scored urgency, auto-filled outreach templates are all keyed off an   */
-/*  active lock. If a contractor doesn't log outreach within 72h the      */
-/*  "forfeit" cron releases the lock to the next contractor in the zip.   */
+/*  The anti-Angi primitive: one contractor per permit per trade. The     */
+/*  "lead" itself (public permit record) is not gated — the ENRICHED      */
+/*  packet is. Contact info, scored urgency, auto-filled outreach         */
+/*  templates are all keyed off an active lock.                           */
+/*                                                                        */
+/*  2026-05-05 policy update: REMOVED the 14-day window and the 72h       */
+/*  forfeit. The founder's call: a contractor holds the lead "until the   */
+/*  lead disappears" — i.e., the lock stays active for the lifetime of    */
+/*  the permit's relevance, with explicit release as the only normal      */
+/*  path back to the pool. This matches the marketing copy that was       */
+/*  already stripped of "14-day exclusivity" and "use-it-or-lose-it" on   */
+/*  2026-04-30 (the claims were unbacked — no UI acquired locks, no cron  */
+/*  flipped them). Going forward, the wedge promise is simply "one        */
+/*  contractor at a time per permit; release when you're done." We use a  */
+/*  far-future window_end (10 years) so existing schema stays the same,   */
+/*  but the cron-driven expiry is functionally a no-op.                   */
 /*                                                                        */
 /*  Graceful-degradation contract: every function returns a valid "empty  */
 /*  state" shape if the `lead_exclusivity_locks` table doesn't exist yet  */
@@ -83,11 +93,26 @@ function watcherBucket(n: number): WatcherBucket {
   return "5+";
 }
 
-/** Default lock window — 14 days. Matches the plan's wedge #1 default. */
-export const DEFAULT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+/**
+ * Lock window — 2026-05-05 policy update: changed from 14 days to a
+ * far-future sentinel (10 years). The lock stays active until the
+ * contractor explicitly releases it (won / declined) or the permit
+ * itself becomes stale. This matches the founder's stated wedge:
+ * "they have the lead until the lead disappears." The schema column
+ * `window_end` is still required (NOT NULL) so we keep filling it,
+ * but treat it as a sentinel. If a future expiration policy is needed,
+ * change this constant in one place.
+ */
+export const DEFAULT_WINDOW_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 
-/** Default forfeit deadline — 72 hours of no outreach logged. */
-export const DEFAULT_FORFEIT_MS = 72 * 60 * 60 * 1000;
+/**
+ * Forfeit deadline — 2026-05-05 policy update: removed. Was 72 hours
+ * of no outreach. The new policy is "no auto-forfeit; contractor
+ * releases explicitly." We still write the column (sentinel = same
+ * far-future value) so DB constraints don't break, but no cron should
+ * flip locks based on this anymore.
+ */
+export const DEFAULT_FORFEIT_MS = DEFAULT_WINDOW_MS;
 
 function tableMissing(msg: string | null | undefined): boolean {
   return !!msg && /Could not find the table|does not exist/i.test(msg);

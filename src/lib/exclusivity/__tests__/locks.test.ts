@@ -1,6 +1,9 @@
 /**
  * Tests for `src/lib/exclusivity/locks.ts` — wedge bullet #1
- * (one contractor per permit per trade for 14 days).
+ * (one contractor per permit per trade until contractor releases or
+ * the permit becomes stale; previously time-windowed at 14 days, now
+ * a 10-year sentinel — see locks.ts header comment for the 2026-05-05
+ * policy update).
  *
  * The audit-priority-#5 list flagged this module at 0% coverage; it's
  * load-bearing for the entire wedge. Specifically, the B4+B5 fix earlier
