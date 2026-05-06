@@ -1,0 +1,48 @@
+# Tyler EnerGov starter config — Atlanta, GA.
+#
+# UNVERIFIED — Atlanta uses Tyler EnerGov but the exact citizen-portal
+# REST endpoint shifts between Tyler client builds. Run probe_energov.py
+# (see below) before flipping this to enabled, OR open a browser to the
+# portal, hit the search form, watch the Network tab for the actual
+# POST URL + payload, then paste the resolved URL into base_url + the
+# observed body keys into the `payload:` block.
+#
+# When the probe confirms a working URL, set status: verified and add
+# the slug to the cron's --all-energov rotation.
+
+loader: energov
+name: ATLANTA-GA
+city: Atlanta
+state: GA
+status: unverified            # change to "verified" after a successful run
+
+# These two fields together form the upstream URL.
+base_url: https://aca-prod.accela.com/atlanta_ga
+# NOTE: Atlanta actually runs Accela ACA, NOT Tyler — left here as a
+# placeholder reminder that you need to swap to a real Tyler EnerGov
+# city. Real Tyler EnerGov candidates: Augusta GA, Savannah GA, Plano TX,
+# Frisco TX, Lubbock TX, Greensboro NC, Cary NC, Wilmington NC, Tampa FL.
+# When ready, copy this file to <city-slug>-energov.yml and update.
+search_path: /api/v2/Records/Search
+
+payload:
+  moduleId: 1                  # 1 = Building module in most Tyler tenants
+  fromDate: '{{NOW_MINUS_DAYS:7}}'
+  toDate: '{{NOW}}'
+  pageSize: 100
+
+data_path: data                # JSON path to the records array
+
+cloudflare: false              # most Tyler subdomains are not CF-fronted
+
+fields:
+  permit_no:        recordNumber
+  issued_date:      issuedDate
+  address:          address
+  zip:              postalCode
+  description:      description
+  estimated_value:  jobValue
+  applicant:        applicantName
+  contractor:       contractorName
+  record_type:      recordType
+  status:           status

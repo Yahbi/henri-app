@@ -644,3 +644,43 @@ First loader: `~/scrapling_loaders/load_austin.py`. Pulls 50 most recently issue
 - DB writes go through `SUPABASE_SERVICE_ROLE_KEY` which bypasses RLS — same pattern as Vercel-side cron writers.
 - The sidecar never serves user traffic; it's a one-way pipe (scrape → Supabase). If the box dies, Henri's UI keeps serving from existing data — no user-visible outage.
 - **Service-role JWT was exposed in chat once** (2026-05-04 ~01:35 UTC during env-file setup debugging). Schedule a rotation via Supabase dashboard → Project Settings → API → "Reset service_role secret" when convenient. Then update `~/.henri-sidecar.env` on the box AND Vercel env AND any local `.env.local`.
+
+## Pre-launch $0 push (2026-05-05)
+
+Audit aligned the work to two tiers of launch blockers and rejected anything that costs money or is post-revenue scope. Goal: soft-launch to 5 contractors at $149/mo on a $0 marginal-spend stack. New artifacts shipped this session:
+
+**TIER 1 (must-fix-before-charging) deliverables**:
+- `scripts/cleanup-test-territories.sql` — two-step (preview → transactional DELETE) to drop the ~11,444 god-mode-claimed territories. Uses `god-mode.ts` allowlist (2 founder emails; extend array to 4 if more exist). Idempotent — safe to re-run.
+- `e2e/onboarding-stripe.spec.ts` — Playwright smoke for `/signup → /onboarding/license → /plan → /payment → Stripe checkout → /territory → /dashboard`. Asserts no 5xx, no console errors, prices match source-of-truth ($149/$749/$1,499/$2,555), Stripe in test mode (`pk_test_` prefix), no password input field (passwordless brand rule). Full happy-path is sketched in a comment block; needs an auth bypass (`/api/dev/login-as`) or a Mailpit interceptor to run end-to-end.
+- `scripts/_sidecar_loaders/UPLOAD.md` extended with §7 (Tyler EnerGov deploy), §8 ($0-tier API-key checklist for Vercel), §9 (NC + OH voter ingest one-liners). FL voter file deferred — public-records fee may apply.
+
+**TIER 2 deliverables**:
+- `scripts/_sidecar_loaders/load_energov.py` — Phase 2 nationwide-coverage loader. Generic Tyler EnerGov POST-search wrapper, mirrors `load_socrata.py` shape (YAML config in, normalized rows upserted to `permits` via PostgREST). Optional Cloudflare bypass via DynamicFetcher when a tenant is CF-fronted. Cron-ready: `0 */4 * * * load_energov.py --all-energov` (staggered :00 vs Socrata :30).
+- `scripts/_sidecar_loaders/probe_energov.py` — companion probe. POSTs a default 7-day search payload, auto-locates the records array (`data` / `results` / `records` / `items`), prints all keys + the Tyler-canonical likely-fields. Used to fill a city's YAML without DevTools.
+- `scripts/_sidecar_loaders/configs/atlanta-energov.yml` — starter config (`status: unverified`). Doc comment lists real Tyler EnerGov candidate cities to copy-paste-modify: Augusta GA, Savannah GA, Plano TX, Frisco TX, Lubbock TX, Greensboro NC, Cary NC, Wilmington NC, Tampa FL.
+
+**Hunter free-tier protection (orchestrator change)**:
+- `src/lib/enrichment/orchestrator.ts` line 651 — Hunter gate tightened. Previous gate `!result.email && businessName` fired on every enrichable lead, including homeowner permits (where `applicant_name` is the homeowner's personal name, treated as a fake "business name" and burning the 25/mo budget). New gate requires BOTH `applicant_classification === "contractor"` AND `ctx.contractor_name` (not the applicant_name fallback). Cuts Hunter calls ~95% so the 25/mo free tier lasts.
+
+**The $0 enricher stack** (all wired in `orchestrator.ts`, all need only env-var provisioning):
+| Vercel env var | Provider | Free quota |
+|---|---|---|
+| `HUNTER_API_KEY` | hunter.io | 25/mo (now score-gated) |
+| `GOOGLE_PLACES_API_KEY` | console.cloud.google.com | $200/mo credit (~10k req) |
+| `OPENCORPORATES_API_KEY` | opencorporates.com | 500/day |
+| `FEC_API_KEY` | api.fec.gov/developers | 1,000/hour |
+| `NUMVERIFY_API_KEY` | numverify.com | 100/mo |
+| `CLOUDMERSIVE_API_KEY` | cloudmersive.com | 800/mo |
+| `CL_TOKEN` | courtlistener.com | unlimited |
+
+**Apollo (`APOLLO_API_KEY`) is intentionally deferred** — paid floor (~$49/mo cheapest). Plan: launch on NC + OH voter coverage (free phone source for those 2 states), prove revenue, fund Apollo from first MRR.
+
+**Explicitly NOT done** (out of $0 launch scope per Tier-3 rejection list): Wave 3 platform adapters (Accela ACA / eTRAKiT / Cloudpermit), HMDA / SVI / ACS rotators (already pruned in 00079, staying pruned), LLM Layer 2 mining ($90/mo), FL voter file (public-records fee), MLS / insurance claims / consumer phone lists, tribal-land permits, Henri-on-Hetzner migration, refactor of LeadDetailDrawer / ChatIntakeModal, new top-level dashboard tabs, more cities beyond the 10 already configured (verify those 10 first), code violations / wildfires_nifc resurrection.
+
+**Pre-launch action sequence (~6h, $0)**:
+1. **Rotate the exposed service-role key FIRST** (per the 2026-05-04 note above — blocking for outside contractor signups). Update Hetzner env + Vercel env + `.env.local`.
+2. Provision the 7 free-tier env vars (~20 min). Redeploy Vercel.
+3. Run `cleanup-test-territories.sql` STEP 0 → confirm count → run STEP 1 transactionally.
+4. SCP `_sidecar_loaders` → Hetzner per `UPLOAD.md`. Smoke-test Austin. Probe + verify the other 9 Socrata cities (only Austin carries the `# Verified working` marker — budget ~10 min/city).
+5. Download NC + OH voter files in background; ingest while doing the Stripe E2E pass.
+6. Run `pnpm exec playwright test e2e/onboarding-stripe.spec.ts` against staging.

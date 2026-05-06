@@ -648,15 +648,30 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
    * so we run them in parallel. On a typical enrichment with all keys
    * set this cuts another ~800ms off the tail.
    */
+  // Hunter gate (tightened 2026-05-05): Hunter.io's free tier is 25
+  // searches/mo. The previous gate `!result.email && businessName` fired
+  // on every enrichable lead, including homeowner permits where
+  // `applicant_name` is the homeowner's personal name (Hunter treats it
+  // as a "business name" and burns a search returning nothing). Two
+  // hard gates now:
+  //   1. applicant_classification === "contractor"  — only contractor
+  //      permits, never homeowner DIY.
+  //   2. ctx.contractor_name (not the applicant_name fallback) — only
+  //      when we have a real company name to look up a domain for.
+  // Together these cut Hunter calls by ~95% so the 25/mo budget lasts.
+  const hunterShouldFire =
+    !result.email &&
+    ctx.applicant_classification === "contractor" &&
+    !!ctx.contractor_name;
   const [voterHit, emailHit] = await Promise.all([
     !result.phone && ctx.state && result.owner_last && ctx.zip
       ? trace("voter_reg_vendor", () =>
           lookupVoterByAddress(ctx.state!, ctx.address, ctx.zip!, result.owner_last!),
         )
       : Promise.resolve(null),
-    !result.email && businessName
+    hunterShouldFire
       ? trace("hunter_io", () =>
-          inferEmailFromBusinessName(businessName, result.owner_first, result.owner_last),
+          inferEmailFromBusinessName(ctx.contractor_name!, result.owner_first, result.owner_last),
         )
       : Promise.resolve(null),
   ]);

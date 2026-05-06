@@ -36,17 +36,42 @@ export default async function OGImage() {
           }}
         />
 
-        {/* Brand name */}
+        {/* Brand mark + wordmark lockup. The mark is the same SVG
+            geometry as `icon.svg` and `apple-icon.tsx` — a circular
+            stamp containing "H." Brand consistency: every surface
+            shows the same glyph at proportional size. */}
         <div
           style={{
-            fontSize: 96,
-            fontFamily: "Georgia, serif",
-            color: "#FFFFFF",
-            letterSpacing: "-0.02em",
-            lineHeight: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 28,
+            color: "#D4886A",
           }}
         >
-          Henri.
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 64 64"
+            width="120"
+            height="120"
+            fill="none"
+          >
+            <circle cx="32" cy="32" r="29" stroke="#D4886A" strokeWidth="3" />
+            <rect x="20" y="18" width="5" height="28" fill="#D4886A" />
+            <rect x="35" y="18" width="5" height="28" fill="#D4886A" />
+            <rect x="25" y="30" width="10" height="4" fill="#D4886A" />
+            <circle cx="47" cy="44" r="3" fill="#D4886A" />
+          </svg>
+          <div
+            style={{
+              fontSize: 128,
+              fontFamily: "Georgia, serif",
+              color: "#FFFFFF",
+              letterSpacing: "-0.02em",
+              lineHeight: 1,
+            }}
+          >
+            Henri.
+          </div>
         </div>
 
         {/* Tagline */}
