@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
             permit_type, estimated_value, description,
             applied_date, issued_date,
             applicant_name, contractor_name,
-            latitude, longitude, location
+            latitude, longitude
           )
         `,
         )
@@ -192,24 +192,14 @@ export async function GET(request: NextRequest) {
       ) as Record<string, unknown> | null;
       if (!permit) continue;
 
-      let lat = Number(permit.latitude);
-      let lng = Number(permit.longitude);
+      const lat = Number(permit.latitude);
+      const lng = Number(permit.longitude);
 
-      // Fallback: extract from PostGIS geography JSON if lat/lng columns are null
-      if ((!Number.isFinite(lat) || !Number.isFinite(lng)) && permit.location) {
-        try {
-          const loc =
-            typeof permit.location === "string"
-              ? JSON.parse(permit.location)
-              : permit.location;
-          if (loc?.coordinates) {
-            lng = Number(loc.coordinates[0]);
-            lat = Number(loc.coordinates[1]);
-          }
-        } catch {
-          // location not parseable, skip
-        }
-      }
+      // (Previously had a PostGIS-geography fallback at this point. The
+      // `permits.location` column was empty across 1.4M rows so the
+      // fallback never fired; the column + the PostGIS extension were
+      // both dropped in migration 00080 to clear the
+      // `rls_disabled_in_public` advisor finding on spatial_ref_sys.)
 
       // Skip leads without valid coordinates
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
@@ -300,7 +290,7 @@ export async function GET(request: NextRequest) {
     if (includePermits) {
       let permitQuery = supabase
         .from("permits")
-        .select("id, address, city, state, zip, permit_type, estimated_value, description, latitude, longitude, location, created_at, source_type")
+        .select("id, address, city, state, zip, permit_type, estimated_value, description, latitude, longitude, created_at, source_type")
         .in("zip", userZips)
         .is("scored_at", null)
         .limit(10000);
@@ -315,18 +305,10 @@ export async function GET(request: NextRequest) {
       const { data: rawPermits } = await permitQuery;
 
       for (const permit of rawPermits ?? []) {
-        let lat = Number(permit.latitude);
-        let lng = Number(permit.longitude);
-
-        if ((!Number.isFinite(lat) || !Number.isFinite(lng)) && permit.location) {
-          try {
-            const loc = typeof permit.location === "string" ? JSON.parse(permit.location) : permit.location;
-            if (loc?.coordinates) {
-              lng = Number(loc.coordinates[0]);
-              lat = Number(loc.coordinates[1]);
-            }
-          } catch { /* skip */ }
-        }
+        const lat = Number(permit.latitude);
+        const lng = Number(permit.longitude);
+        // Same note as above — the geography fallback was retired in
+        // migration 00080 (column was empty across 1.4M rows).
 
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
         if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
