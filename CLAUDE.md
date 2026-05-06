@@ -270,7 +270,7 @@ Henri is on **Free plan** as of 2026-04-29. Live data: 1.4M permits + 165K leads
 - `auth_leaked_password_protection` (HaveIBeenPwned check on signup) — Pro-only. Toggle returns "Configuring leaked password protection via HaveIBeenPwned.org is available on Pro Plans and up." Documented as accepted-risk WARN until upgrade.
 
 **Extension-owned advisor findings (cannot fix without superuser):**
-- `spatial_ref_sys` RLS disabled (PostGIS reference table, no PII)
+- `spatial_ref_sys` RLS disabled (PostGIS reference table, no PII). Re-tested 2026-05-06 with the project-owner Management API token after a fresh "Table publicly accessible" alert: `ALTER TABLE public.spatial_ref_sys ENABLE ROW LEVEL SECURITY` returns `42501: must be owner of table spatial_ref_sys`. Project owner ≠ table owner; PostGIS extension owns it. The only paths to clear the alert are (a) Supabase support ticket asking them to enable RLS server-side, or (b) clicking **Resolve issue** in the Supabase dashboard advisor and marking as accepted. **Path (b) is the chosen remediation** — the table is reference data, no PII, and ST_Transform / spatial functions need unfettered SELECT for every role anyway. If the advisor email re-fires, dismiss again; do not write a migration (it will fail).
 - `st_estimatedextent(...)` 3 PostGIS variants (SECURITY DEFINER, anon/authenticated callable)
 
 **Intentional design (documented in 00059/00060 migrations):**
