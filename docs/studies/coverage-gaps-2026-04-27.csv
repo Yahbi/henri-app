@@ -1,0 +1,57 @@
+kind,code,name,state,pop,sources,permits,distinct_zips,distinct_cities,status
+state,AL,"Alabama",,,4939,20010,190,1007,ok
+state,AK,"Alaska",,,1892,5,3,235,thin
+state,AZ,"Arizona",,,2601,20957,3,369,thin
+state,AR,"Arkansas",,,4334,1,0,979,thin
+state,CA,"California",,,9273,8966,196,1303,ok
+state,CO,"Colorado",,,9671,0,0,667,thin
+state,CT,"Connecticut",,,2763,0,0,313,thin
+state,DE,"Delaware",,,1236,0,0,129,thin
+state,FL,"Florida",,,12015,0,0,1452,thin
+state,GA,"Georgia",,,10982,0,0,981,thin
+state,HI,"Hawaii",,,2027,0,0,215,thin
+state,ID,"Idaho",,,2535,0,0,341,thin
+state,IL,"Illinois",,,13046,0,0,1767,thin
+state,IN,"Indiana",,,4639,0,0,975,thin
+state,IA,"Iowa",,,4779,0,0,1073,thin
+state,KS,"Kansas",,,2260,0,0,768,thin
+state,KY,"Kentucky",,,4895,0,0,1130,thin
+state,LA,"Louisiana",,,3014,0,0,720,thin
+state,ME,"Maine",,,1586,0,0,399,thin
+state,MD,"Maryland",,,5916,0,0,852,thin
+state,MA,"Massachusetts",,,3871,0,0,626,thin
+state,MI,"Michigan",,,9222,0,0,1095,thin
+state,MN,"Minnesota",,,6006,0,0,897,thin
+state,MS,"Mississippi",,,399,0,0,107,thin
+state,MO,"Missouri",,,4946,0,0,1246,thin
+state,MT,"Montana",,,2203,0,0,534,thin
+state,NE,"Nebraska",,,2657,0,0,585,thin
+state,NV,"Nevada",,,1552,0,0,203,thin
+state,NH,"New Hampshire",,,1731,0,0,369,thin
+state,NJ,"New Jersey",,,8744,0,0,1070,thin
+state,NM,"New Mexico",,,3547,0,0,677,thin
+state,NY,"New York",,,16902,0,0,1678,thin
+state,NC,"North Carolina",,,4826,0,0,965,thin
+state,ND,"North Dakota",,,930,0,0,387,thin
+state,OH,"Ohio",,,10192,0,0,1852,thin
+state,OK,"Oklahoma",,,6981,0,0,948,thin
+state,OR,"Oregon",,,6784,0,0,571,thin
+state,PA,"Pennsylvania",,,10308,0,0,2477,thin
+state,RI,"Rhode Island",,,934,0,0,100,thin
+state,SC,"South Carolina",,,4493,0,0,745,thin
+state,SD,"South Dakota",,,4042,0,0,690,thin
+state,TN,"Tennessee",,,4309,0,0,818,thin
+state,TX,"Texas",,,15881,0,0,2297,thin
+state,UT,"Utah",,,2641,0,0,297,thin
+state,VT,"Vermont",,,1568,0,0,306,thin
+state,VA,"Virginia",,,5420,0,0,918,thin
+state,WA,"Washington",,,6896,0,0,652,thin
+state,WV,"West Virginia",,,5448,0,0,930,thin
+state,WI,"Wisconsin",,,11375,0,0,1191,thin
+state,WY,"Wyoming",,,976,0,0,219,thin
+state,DC,"District of Columbia",,,662,0,0,31,thin
+state,PR,"Puerto Rico",,,74,0,0,2,thin
+state,VI,"U.S. Virgin Islands",,,93,0,0,2,thin
+state,GU,"Guam",,,15,0,0,0,thin
+state,AS,"American Samoa",,,76,0,0,1,thin
+state,MP,"Northern Mariana Islands",,,1,0,0,1,thin

@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Henri Competitive Battlecard — 2026-04-24</title>
+<style>
+:root {
+  --bg-primary: #0a0d14;
+  --bg-elevated: #0f131c;
+  --bg-surface: #161b28;
+  --bg-hover: #1e2536;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.72);
+  --text-muted: rgba(255, 255, 255, 0.48);
+
+  --accent: #D4886A;
+  --accent-hover: #C4775A;
+  --accent-soft: rgba(212, 136, 106, 0.12);
+
+  --you-win: #10b981;
+  --they-win: #ef4444;
+  --tie: #f59e0b;
+
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 32px rgba(0, 0, 0, 0.32);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.55;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Layout ─────────────────────────────────────────────────────── */
+
+.shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 28px 80px;
+}
+
+header.banner {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 20px;
+  margin-bottom: 24px;
+}
+header.banner h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+header.banner .meta {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+header.banner .accent { color: var(--accent); font-weight: 500; }
+
+/* ── Tab navigation ────────────────────────────────────────────── */
+
+nav.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: var(--bg-elevated);
+  padding: 6px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  margin-bottom: 24px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+}
+nav.tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 200ms, color 200ms, border-color 200ms;
+  font-family: inherit;
+}
+nav.tabs button:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+nav.tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+nav.tabs button.active {
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border-color: var(--border-strong);
+}
+
+/* ── Tab content ───────────────────────────────────────────────── */
+
+.tab-panel {
+  display: none;
+  animation: fadein 200ms ease-out;
+}
+.tab-panel.active { display: block; }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ── Cards ─────────────────────────────────────────────────────── */
+
+section.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 22px 24px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow-card);
+}
+section.card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+section.card h3 {
+  margin: 18px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+section.card h3 .label {
+  display: inline-block;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-right: 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+section.card p, section.card li {
+  color: var(--text-secondary);
+}
+section.card a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(212, 136, 106, 0.35);
+}
+section.card a:hover { color: var(--accent-hover); border-bottom-color: var(--accent-hover); }
+
+.card .profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.card .profile-grid .field {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.card .profile-grid .field .key {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.card .profile-grid .field .val {
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+ul.bullets { padding-left: 20px; margin: 0 0 8px; }
+ul.bullets li { margin-bottom: 6px; }
+
+.win-row, .lose-row {
+  border-left: 3px solid;
+  padding: 8px 14px;
+  margin: 6px 0;
+  background: var(--bg-elevated);
+  border-radius: 6px;
+}
+.win-row { border-left-color: var(--you-win); }
+.lose-row { border-left-color: var(--they-win); }
+.win-row .area, .lose-row .area {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-right: 6px;
+}
+
+.talk-track {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px dashed var(--border);
+}
+.talk-track:first-of-type { border-top: none; }
+.talk-track .scenario {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.talk-track .quote {
+  color: var(--text-primary);
+  font-style: italic;
+}
+.talk-track .quote::before { content: "\""; color: var(--text-muted); }
+.talk-track .quote::after  { content: "\""; color: var(--text-muted); }
+
+.objection {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.objection .q {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.objection .q::before { content: "Q: "; color: var(--text-muted); font-weight: 500; }
+.objection .a { color: var(--text-secondary); }
+.objection .a::before { content: "A: "; color: var(--accent); font-weight: 600; }
+
+.landmines { padding: 0; list-style: none; counter-reset: lm; }
+.landmines li {
+  counter-increment: lm;
+  margin: 6px 0;
+  padding: 10px 14px 10px 36px;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  position: relative;
+  color: var(--text-primary);
+}
+.landmines li::before {
+  content: counter(lm);
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Comparison matrix ─────────────────────────────────────────── */
+
+.matrix-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+table.matrix {
+  width: 100%;
+  min-width: 880px;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+table.matrix thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-strong);
+  padding: 12px 14px;
+  text-align: left;
+  color: var(--text-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+table.matrix thead th.henri {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+table.matrix tbody td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+table.matrix tbody td.feat {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+table.matrix tbody td.henri-cell {
+  background: rgba(212, 136, 106, 0.05);
+  color: var(--text-primary);
+}
+
+.cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cell .ico {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.cell.win .ico    { background: rgba(16, 185, 129, 0.16); color: var(--you-win); }
+.cell.lose .ico   { background: rgba(239, 68, 68, 0.16); color: var(--they-win); }
+.cell.tie .ico    { background: rgba(245, 158, 11, 0.16); color: var(--tie); }
+
+.win-loss-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+.win-loss-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+.win-loss-card h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.win-loss-card .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+.win-loss-card .label.win  { color: var(--you-win); }
+.win-loss-card .label.lose { color: var(--they-win); }
+.win-loss-card p { margin: 0 0 4px; font-size: 13px; }
+
+/* ── Henri tab ─────────────────────────────────────────────────── */
+
+.wedge-list {
+  counter-reset: wedge;
+  list-style: none;
+  padding: 0;
+}
+.wedge-list li {
+  counter-increment: wedge;
+  position: relative;
+  padding: 12px 14px 12px 52px;
+  margin: 8px 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+}
+.wedge-list li::before {
+  content: counter(wedge);
+  position: absolute;
+  left: 14px;
+  top: 12px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg-primary);
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wedge-list .title {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+footer.foot {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .shell { padding: 20px 16px 60px; }
+  header.banner h1 { font-size: 22px; }
+  nav.tabs { position: static; }
+  .talk-track { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<header class="banner">
+  <h1>Henri Competitive Battlecard</h1>
+  <p class="meta">
+    <span class="accent">Henri.</span> &middot; Generated 2026-04-24 &middot;
+    Competitors: Angi, HomeAdvisor, Thumbtack, AccuLynx, Construction Monitor, BuildZoom
+  </p>
+</header>
+
+<!-- ── Tab navigation ─────────────────────────────────────────── -->
+<nav class="tabs" role="tablist" aria-label="Battlecard sections">
+  <button role="tab" class="active" data-tab="matrix" aria-selected="true">Comparison Matrix</button>
+  <button role="tab" data-tab="angi" aria-selected="false">Angi</button>
+  <button role="tab" data-tab="homeadvisor" aria-selected="false">HomeAdvisor</button>
+  <button role="tab" data-tab="thumbtack" aria-selected="false">Thumbtack</button>
+  <button role="tab" data-tab="acculynx" aria-selected="false">AccuLynx</button>
+  <button role="tab" data-tab="cm" aria-selected="false">Construction Monitor</button>
+  <button role="tab" data-tab="buildzoom" aria-selected="false">BuildZoom</button>
+  <button role="tab" data-tab="henri" aria-selected="false">Henri</button>
+</nav>
+
+<main>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     COMPARISON MATRIX
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="tab-panel active" id="matrix" role="tabpanel" aria-labelledby="tab-matrix">
+  <section class="card">
+    <h2>Head-to-head comparison</h2>
+    <p>Rows that overlap with the public <code>/contractors</code> page on henri.app are aligned word-for-word with that page. New columns (HomeAdvisor, Construction Monitor, BuildZoom) sourced from the per-competitor research below.</p>
+    <div class="matrix-wrap">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th class="henri">Henri.</th>
+            <th>Angi</th>
+            <th>HomeAdvisor</th>
+            <th>Thumbtack</th>
+            <th>AccuLynx</th>
+            <th>Construction Monitor</th>
+            <th>BuildZoom</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="feat">Monthly cost</td>
+            <td class="henri-cell">$149&ndash;$2,555 flat</td>
+            <td>$300&ndash;$2,500+</td>
+            <td>$25&ndash;$120/lead + $288&ndash;$300/yr</td>
+            <td>$10&ndash;$200/lead</td>
+            <td>$250&ndash;$500+</td>
+            <td>$156&ndash;$219/mo per jurisdiction</td>
+            <td>2.5% commission on signed contracts</td>
+          </tr>
+          <tr>
+            <td class="feat">Lead exclusivity</td>
+            <td class="henri-cell"><span class="cell win"><span class="ico">&#10003;</span> 1 contractor / ZIP</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> Shared with 3&ndash;8</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> Shared with 3&ndash;8</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> Shared with 3&ndash;5</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> No leads</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> Same data sold to all</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> Up to 4 contractors</span></td>
+          </tr>
+          <tr>
+            <td class="feat">Lead source</td>
+            <td class="henri-cell">Building permits (before homeowner calls)</td>
+            <td>Homeowner form fills</td>
+            <td>Homeowner form fills</td>
+            <td>Homeowner form fills</td>
+            <td>Manual import only</td>
+            <td>Raw permit data (unscored)</td>
+            <td>Homeowner-led project intake</td>
+          </tr>
+          <tr>
+            <td class="feat">AI lead scoring</td>
+            <td class="henri-cell"><span class="cell win"><span class="ico">&#10003;</span> 0&ndash;100, 6 signals visible</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> No</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> No</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> No</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> No</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> Raw rows only</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> Opaque match</span></td>
+          </tr>
+          <tr>
+            <td class="feat">Automated outreach</td>
+            <td class="henri-cell"><span class="cell win"><span class="ico">&#10003;</span> Instant SMS + email</span></td>
+            <td><span class="cell tie"><span class="ico">&deg;</span> Partial</span></td>
+            <td><span class="cell tie"><span class="ico">&deg;</span> mHelpDesk add-on</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> No</span></td>
+            <td><span class="cell tie"><span class="ico">&deg;</span> Add-on cost</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> No</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> No</span></td>
+          </tr>
+          <tr>
+            <td class="feat">Storm Center</td>
+            <td class="henri-cell"><span class="cell win"><span class="ico">&#10003;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+          </tr>
+          <tr>
+            <td class="feat">Cascade detection</td>
+            <td class="henri-cell"><span class="cell win"><span class="ico">&#10003;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+          </tr>
+          <tr>
+            <td class="feat">Compliance monitoring</td>
+            <td class="henri-cell"><span class="cell win"><span class="ico">&#10003;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell tie"><span class="ico">&deg;</span> Manual only</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span></span></td>
+            <td><span class="cell tie"><span class="ico">&deg;</span> Profile-level</span></td>
+          </tr>
+          <tr>
+            <td class="feat">Cancel anytime</td>
+            <td class="henri-cell"><span class="cell win"><span class="ico">&#10003;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> 12-month lock-in</span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> Annual + ~$1,200 fee</span></td>
+            <td><span class="cell win"><span class="ico">&#10003;</span></span></td>
+            <td><span class="cell lose"><span class="ico">&times;</span> Annual contract</span></td>
+            <td><span class="cell tie"><span class="ico">&deg;</span> Per-jurisdiction</span></td>
+            <td><span class="cell win"><span class="ico">&#10003;</span> Free unless closed</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Quick win/loss guide</h2>
+    <div class="win-loss-grid">
+
+      <div class="win-loss-card">
+        <h4>vs. Angi</h4>
+        <div class="label win">When Henri wins</div>
+        <p>Contractor wants exclusivity, dislikes the 12-month lock-in, has been burned by shared leads.</p>
+        <div class="label lose">When Angi wins</div>
+        <p>Contractor needs raw homeowner volume across many trades; doesn't have time to build their own outreach.</p>
+      </div>
+
+      <div class="win-loss-card">
+        <h4>vs. HomeAdvisor</h4>
+        <div class="label win">When Henri wins</div>
+        <p>Contractor knows the FTC settlement, has had cancellation friction, sees per-lead spend climbing.</p>
+        <div class="label lose">When HomeAdvisor wins</div>
+        <p>Contractor wants a bundled CRM (mHelpDesk) plus leads from one vendor.</p>
+      </div>
+
+      <div class="win-loss-card">
+        <h4>vs. Thumbtack</h4>
+        <div class="label win">When Henri wins</div>
+        <p>Contractor is paying for leads they don't close, hates dynamic-price weekly changes, runs $20k+ jobs.</p>
+        <div class="label lose">When Thumbtack wins</div>
+        <p>Contractor wants horizontal categories (events, photography) and homeowner brand reach.</p>
+      </div>
+
+      <div class="win-loss-card">
+        <h4>vs. AccuLynx</h4>
+        <div class="label win">When Henri wins</div>
+        <p>Contractor needs <em>leads</em>; AccuLynx provides none. Most win-loss cases here are <em>both</em>, not <em>either-or</em>.</p>
+        <div class="label lose">When AccuLynx wins</div>
+        <p>Contractor needs job-management depth (estimating, supplier ordering, insurance restoration). Henri doesn't compete on CRM.</p>
+      </div>
+
+      <div class="win-loss-card">
+        <h4>vs. Construction Monitor</h4>
+        <div class="label win">When Henri wins</div>
+        <p>Contractor doesn't have time to score 200 raw permits; wants outreach + exclusivity + scoring built in.</p>
+        <div class="label lose">When CM wins</div>
+        <p>Contractor has an in-house scoring team and needs the Bloomberg-feed / multi-state archive depth.</p>
+      </div>
+
+      <div class="win-loss-card">
+        <h4>vs. BuildZoom</h4>
+        <div class="label win">When Henri wins</div>
+        <p>Contractor wants supply-side workflow &mdash; alert me when the permit issues, before homeowners shop me against 3 others.</p>
+        <div class="label lose">When BuildZoom wins</div>
+        <p>Contractor wants pure pay-on-close; doesn't mind being one of four bidders on $150k+ remodel jobs.</p>
+      </div>
+
+    </div>
+  </section>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     ANGI
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="tab-panel" id="angi" role="tabpanel">
+  <section class="card">
+    <h2>Angi</h2>
+
+    <div class="profile-grid">
+      <div class="field"><div class="key">Founded</div><div class="val">1995 (Angie's List)</div></div>
+      <div class="field"><div class="key">Parent</div><div class="val">Angi Inc. (NASDAQ: ANGI)</div></div>
+      <div class="field"><div class="key">Headcount</div><div class="val">~2,450 (post Q1 2026 cuts)</div></div>
+      <div class="field"><div class="key">Target</div><div class="val">U.S. home-services pros + homeowners</div></div>
+      <div class="field"><div class="key">Position</div><div class="val">Legacy incumbent, declining revenue</div></div>
+    </div>
+
+    <h3><span class="label">Pricing</span> Pay-per-lead + annual membership</h3>
+    <p>~$288&ndash;$300/yr access fee plus $25&ndash;$120 per lead by trade and metro. HVAC ~$65&ndash;$85; roofing $100+.
+    Typical contractor spend $300&ndash;$2,500/mo. Contracts often 12-month auto-renew with 30&ndash;35% early-cancel penalty.
+    Sources: <a href="https://www.leadtruffle.co/blog/angi-leads-cost-pricing-contractors-2026/">LeadTruffle 2026</a>,
+    <a href="https://hookagency.com/blog/angi-leads-reviews/">Hook Agency</a>,
+    <a href="https://pipelineon.com/blog/angi-leads-hidden-costs/">Pipeline On</a>.</p>
+
+    <h3><span class="label">What they sell</span></h3>
+    <p>Two-sided marketplace: homeowners post jobs; Angi sells those leads to contractors, typically matching one homeowner to "up to four local pros" simultaneously. Adjacent products: reviews, profile listings, payments / invoicing, Angi Services (fixed-price jobs).</p>
+
+    <h3><span class="label">Their positioning</span></h3>
+    <p>"Get jobs done well by connecting homeowners with reliable pros and connecting pros with homeowners who have the jobs they want."
+      <a href="https://www.angi.com/careers">(Angi Careers)</a></p>
+
+    <h3><span class="label">Recent releases</span> (last 90 days)</h3>
+    <ul class="bullets">
+      <li><strong>Mar 4, 2026</strong> &mdash; Launched the Angi App inside ChatGPT for AI-guided homeowner-to-pro matching.
+        <a href="https://ir.angi.com/news-releases/news-release-details/angi-launches-angi-app-chatgpt">(Angi IR)</a></li>
+      <li><strong>Feb 10, 2026</strong> &mdash; Q4 2025 earnings + shareholder letter from CEO Jeffrey Kip.
+        <a href="https://ir.angi.com/">(Angi IR)</a></li>
+      <li><strong>Jan 7, 2026</strong> &mdash; SEC filing: cutting ~350 jobs (12.5% of staff, mostly engineering), citing "AI-driven efficiency"; expects $70&ndash;80M annualized savings, $22&ndash;30M restructuring charge.
+        <a href="https://www.ibj.com/articles/angi-to-eliminate-350-jobs">(IBJ)</a></li>
+    </ul>
+
+    <h3><span class="label">Where they win</span></h3>
+    <div class="lose-row"><span class="area">Brand recognition + homeowner traffic.</span> Decades of TV/SEO spend. <em>Counter:</em> Henri doesn't compete for homeowner mindshare; we surface contractors <em>before</em> the homeowner form-fills, by triggering on the permit.</div>
+    <div class="lose-row"><span class="area">Breadth of trades + national footprint.</span> <em>Counter:</em> Henri is permit-driven across 46 states; coverage is the live record, not a directory.</div>
+    <div class="lose-row"><span class="area">Adjacent tools (payments, reviews, invoicing).</span> <em>Counter:</em> Henri integrates with the contractor's existing stack; we focus on the lead, not the back-office.</div>
+
+    <h3><span class="label">Where Henri wins</span></h3>
+    <div class="win-row"><span class="area">Exclusivity.</span> One contractor per ZIP per trade for 14 days, with 72-hour use-it-or-lose-it auto-release. Angi sells the same lead to "up to four local pros" by design.</div>
+    <div class="win-row"><span class="area">Permits-first sourcing.</span> Henri catches the homeowner at the permit pull, before they form-fill on a marketplace.</div>
+    <div class="win-row"><span class="area">Transparent 6-signal scoring.</span> Every lead drawer shows freshness, value, contact-completeness, ZIP demand, engagement, historical conversion with weights. Angi's match algorithm is opaque.</div>
+    <div class="win-row"><span class="area">Flat monthly + cancel anytime.</span> $149&ndash;$2,555 flat; no auto-renewing 12-month contract, no 30&ndash;35% early-cancel penalty, no per-lead surprise charges. The FTC's $7.2M settlement against HomeAdvisor (FTC v. HomeAdvisor, file no. 192-3124, 2023) was specifically about misrepresented lead quality &mdash; Henri shows the source permit so the contractor verifies it themselves.</div>
+
+    <h3><span class="label">Talk tracks</span></h3>
+    <div class="talk-track">
+      <div class="scenario">Early mention</div>
+      <div class="quote">Angi sells the same homeowner to up to four pros at once. Henri locks the permit to one contractor per ZIP per trade for 14 days. Different product, same trade &mdash; exclusivity vs. auction.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Displacement</div>
+      <div class="quote">Keep Angi if it's working &mdash; but run Henri's permit feed alongside for 30 days. You'll see leads Angi never gets, because we trigger off the permit, not the form-fill. Cancel anytime, no contract.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Late addition</div>
+      <div class="quote">If you've evaluated Angi, Thumbtack, and HomeAdvisor, you've seen the shared-lead model. Henri is the only feed where the lead is yours alone for 14 days, and you can see exactly why it scored 78.</div>
+    </div>
+
+    <h3><span class="label">Objections + responses</span></h3>
+    <div class="objection"><div class="q">Angi has more brand recognition with homeowners.</div><div class="a">True, and homeowners will keep finding Angi. Henri isn't a homeowner brand; we're the contractor's permit intelligence. Different category.</div></div>
+    <div class="objection"><div class="q">Angi is cheaper per lead.</div><div class="a">Angi's $25&ndash;$120 per lead is paid 3&ndash;8 times by 3&ndash;8 contractors competing for the same homeowner. Henri's $149&ndash;$2,555 flat = unlimited permits in your ZIPs, exclusive for 14 days. Math flips at ~6 leads/month.</div></div>
+    <div class="objection"><div class="q">I've already paid Angi for the year.</div><div class="a">Run them in parallel. Henri is month-to-month, no lock-in. If we don't earn the seat in 30 days, cancel. Angi's contract isn't a reason to skip the comparison.</div></div>
+    <div class="objection"><div class="q">How do I know your data is real?</div><div class="a">Every lead links back to its source permit number, applicant name, scope, and value. We don't synthesize leads &mdash; we surface public records and enrich them. The score breakdown is visible in every drawer.</div></div>
+
+    <h3><span class="label">Landmine questions</span></h3>
+    <ol class="landmines">
+      <li>When Angi sends you a lead, how many other contractors got the same lead at the same time? How does that affect your close rate?</li>
+      <li>Walk me through the last time Angi gave you a refund credit for a bad lead &mdash; how long did that take, and how often did you actually get one?</li>
+      <li>If you had to pause Angi tomorrow because work slowed down, what would canceling cost you?</li>
+    </ol>
+  </section>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     HOMEADVISOR
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="tab-panel" id="homeadvisor" role="tabpanel">
+  <section class="card">
+    <h2>HomeAdvisor (Angi Leads)</h2>
+
+    <div class="profile-grid">
+      <div class="field"><div class="key">Founded</div><div class="val">1998 (as ServiceMagic)</div></div>
+      <div class="field"><div class="key">Parent</div><div class="val">Angi Inc. (NASDAQ: ANGI)</div></div>
+      <div class="field"><div class="key">Headcount</div><div class="val">Within ~2,450 Angi total</div></div>
+      <div class="field"><div class="key">Target</div><div class="val">Residential home-services contractors</div></div>
+      <div class="field"><div class="key">Position</div><div class="val">Legacy shared-lead marketplace; under FTC scrutiny</div></div>
+    </div>
+
+    <h3><span class="label">Pricing</span> Pay-per-lead, not flat monthly</h3>
+    <p>Per-lead $25&ndash;$80; effective cost-per-booked-job widely cited at ~$542 in 2026.
+    Annual membership ~$350/yr historically. mHelpDesk add-on (Angi-owned field-service software): varies &mdash; not publicly fixed (third-party estimates $99&ndash;$169/user/mo).
+    Hidden costs: cancellation fees reported up to $1,200, charges for unanswered leads.
+    Sources: <a href="https://earnifyhub.com/blog/angi-vs-homeadvisor-contractor.php">earnifyhub 2026</a>,
+    <a href="https://bluegridmedia.com/lsa-vs-thumbtack-vs-angi-contractors">bluegridmedia</a>,
+    <a href="https://www.bbb.org/us/co/denver/profile/contractor-referral/homeadvisor-1296-1000106395/customer-reviews">BBB</a>.</p>
+
+    <h3><span class="label">What they sell</span></h3>
+    <p>Shared homeowner inquiry leads matched via "ProFinder," "Exact Match," and "Market Match" &mdash; same lead routed to multiple pros. Adjacent SaaS via mHelpDesk (scheduling, invoicing, dispatch).</p>
+
+    <h3><span class="label">Their positioning</span></h3>
+    <p>"Match homeowners with screened home-improvement and service professionals" &mdash; volume-marketplace pitch built on background-checked "Seal of Approval" pros and Instant Booking.
+    <a href="https://pro.homeadvisor.com/success-stories/">(HomeAdvisor Pro)</a></p>
+
+    <h3><span class="label">Recent releases</span> (last 90 days)</h3>
+    <ul class="bullets">
+      <li>No dated, verifiable HomeAdvisor product release notes surfaced. <em>Skipped per truthfulness rule</em> &mdash; better to leave blank than invent a release.</li>
+    </ul>
+
+    <h3><span class="label">Where they win</span></h3>
+    <div class="lose-row"><span class="area">Brand recognition + homeowner traffic volume.</span> <em>Counter:</em> Henri doesn't compete for homeowner inquiries; we deliver permitted projects already in motion.</div>
+    <div class="lose-row"><span class="area">Adjacent SaaS bundle (mHelpDesk for ops).</span> <em>Counter:</em> Henri stays focused on top-of-funnel; integrates with existing CRMs rather than forcing a switch.</div>
+    <div class="lose-row"><span class="area">National category breadth.</span> <em>Counter:</em> Henri is permit-driven, so coverage scales with public records &mdash; ~925k permits across 46 states.</div>
+
+    <h3><span class="label">Where Henri wins</span></h3>
+    <div class="win-row"><span class="area">Exclusivity.</span> 1 contractor per ZIP per trade for 14 days. HomeAdvisor sells the same lead to "up to four local pros" or "3&ndash;8 contractors" by design.</div>
+    <div class="win-row"><span class="area">Permit-driven sourcing.</span> Henri starts with public permit records (real projects, real addresses). HomeAdvisor relies on form-fill homeowner intent &mdash; the FTC found that intent was misrepresented (FTC v. HomeAdvisor 2023, $7.2M, file no. 192-3124).</div>
+    <div class="win-row"><span class="area">Transparent scoring.</span> Henri shows the 6-signal breakdown on every lead. HomeAdvisor's match logic is opaque.</div>
+    <div class="win-row"><span class="area">Flat predictable pricing + cancel anytime.</span> Henri: $149&ndash;$2,555/mo, no cancellation fee. HomeAdvisor: per-lead with reported $1,200 cancellation fees and ballooning bills.</div>
+
+    <h3><span class="label">Talk tracks</span></h3>
+    <div class="talk-track">
+      <div class="scenario">Early mention</div>
+      <div class="quote">If a contractor is comparing us to HomeAdvisor, the framing is: shared form-fills vs. permitted projects with one contractor per ZIP.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Displacement</div>
+      <div class="quote">Most pros we onboard came off Angi/HomeAdvisor after a $500&ndash;$2,000/month spend with little to show. We charge a flat $149&ndash;$1,499 and lock the ZIP &mdash; bring your last 3 invoices, we'll show you what would have come through Henri.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Late addition</div>
+      <div class="quote">Keep HomeAdvisor for now if it's working. Henri runs alongside &mdash; different inputs (permits, not form-fills), different exclusivity model. Many pros run both for 60 days then drop the one with worse ROI.</div>
+    </div>
+
+    <h3><span class="label">Objections + responses</span></h3>
+    <div class="objection"><div class="q">HomeAdvisor has way more leads.</div><div class="a">Volume isn't the bottleneck for most contractors; close rate is. Shared leads to 4+ pros and a per-job effective cost of ~$542 is why we built around exclusivity instead.</div></div>
+    <div class="objection"><div class="q">Aren't you just another lead-gen platform?</div><div class="a">We don't generate inquiries &mdash; we surface permits already filed with your city. The homeowner has already committed to the project.</div></div>
+    <div class="objection"><div class="q">What if my ZIP isn't available?</div><div class="a">Then you're protected from the contractor who got there first. That's the point. Three ZIPs on the Founder plan, up to 20 on Enterprise.</div></div>
+    <div class="objection"><div class="q">How do I know your leads are real?</div><div class="a">Every lead links to the public permit record. Click through and verify. The 6-signal score breakdown is on every lead detail &mdash; we don't hide why a lead scored 65 vs. 85.</div></div>
+
+    <h3><span class="label">Landmine questions</span></h3>
+    <ol class="landmines">
+      <li>Have you ever felt like a lead you paid for wasn't actually a real project? The FTC's 2023 settlement with HomeAdvisor (file no. 192-3124, $7.2M) was specifically about lead-quality representations &mdash; that's a hard one to walk back from, and it shaped how we think about sourcing.</li>
+      <li>When you've cancelled a lead service before, how clean was the exit? We hear a lot of stories about cancellation friction &mdash; that's why we made cancel-anytime, no-fee a public policy.</li>
+      <li>If two contractors in your ZIP both pay for the same lead, who actually wins? That's the tension we're trying to remove with one-contractor-per-ZIP exclusivity.</li>
+    </ol>
+  </section>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     THUMBTACK
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="tab-panel" id="thumbtack" role="tabpanel">
+  <section class="card">
+    <h2>Thumbtack</h2>
+
+    <div class="profile-grid">
+      <div class="field"><div class="key">Founded</div><div class="val">2008 (San Francisco)</div></div>
+      <div class="field"><div class="key">Funding</div><div class="val">~$700M+; ~$3.2B private valuation</div></div>
+      <div class="field"><div class="key">Headcount</div><div class="val">~800&ndash;900 (post-2020 cuts)</div></div>
+      <div class="field"><div class="key">Target</div><div class="val">SMB home-services pros + horizontal categories</div></div>
+      <div class="field"><div class="key">Position</div><div class="val">Top-3 horizontal home-services marketplace</div></div>
+    </div>
+
+    <h3><span class="label">Pricing</span> Pay-per-lead via credits</h3>
+    <p>~$1.50/credit; leads consume variable credit counts based on job value. Per-lead $15&ndash;$60 typical messaged contacts; high-value categories (HVAC, remodel, roofing) $100&ndash;$200+. Pros pay even if they don't win the job. Dynamic pricing updates weekly. No monthly fee.
+    Hidden cost: 10&ndash;30% conversion, so true CAC is 3&ndash;10x the lead price.
+    Sources: <a href="https://savullc.com/thumbtack-pro-reviews/">savullc 2026</a>,
+    <a href="https://7ten.marketing/how-much-does-thumbtack-charge-for-leads/">7ten.marketing</a>,
+    <a href="https://help.thumbtack.com/article/pay-for-leads">Thumbtack help</a>.</p>
+
+    <h3><span class="label">What they sell</span></h3>
+    <p>A horizontal homeowner-form-fill marketplace where homeowners post job requests and pros bid/message for the right to win the job, paid per outbound contact.</p>
+
+    <h3><span class="label">Their positioning</span></h3>
+    <p>"Free to join, pay only for leads you want. We bring you customers, you grow your business." Recently leaning into AI distribution: "Find the right pro, however you search."</p>
+
+    <h3><span class="label">Recent releases</span> (last 90 days)</h3>
+    <ul class="bullets">
+      <li><strong>Apr 23, 2026</strong> &mdash; Thumbtack inside Anthropic's Claude (Free/Pro/Max users can find/hire pros without leaving Claude).
+        <a href="https://www.morningstar.com/news/business-wire/20260423884720/thumbtack-delivers-home-services-experience-in-anthropics-claude">(Morningstar)</a></li>
+      <li><strong>Dec 2, 2025</strong> &mdash; 2026 Home Trend Predictions Report co-released with Redfin (PR play, not a product release).
+        <a href="https://www.businesswire.com/news/home/20251202390725/en/Thumbtack-and-Redfin-Reveal-the-Top-Home-Trend-Predictions-Shaping-2026">(BusinessWire)</a></li>
+      <li><strong>Oct 6, 2025</strong> &mdash; Thumbtack inside ChatGPT (OpenAI partnership extending the Jan 2025 Operator integration).
+        <a href="https://www.businesswire.com/news/home/20251006760229/en/Thumbtack-Partners-with-OpenAI-to-Power-Home-Services-in-ChatGPT">(BusinessWire)</a></li>
+    </ul>
+
+    <h3><span class="label">Where they win</span></h3>
+    <div class="lose-row"><span class="area">Homeowner brand awareness + volume.</span> 15+ years of Google SEO; multi-million homeowner DAU. <em>Counter:</em> Henri doesn't compete for homeowner attention &mdash; we work the permit record; our leads have already committed to the project.</div>
+    <div class="lose-row"><span class="area">Category breadth.</span> 300+ services, including event/personal. <em>Counter:</em> Henri is trade-native (roofing, HVAC, solar, remodel, ADU, electrical, plumbing). Specialization beats horizontal sprawl when the job is $20k+.</div>
+    <div class="lose-row"><span class="area">AI distribution (Claude, ChatGPT, Operator).</span> <em>Counter:</em> AI surfaces favor structured data; permits are the structured data. Distribution to homeowners doesn't help when 4 other pros are also distributed to the same homeowner.</div>
+
+    <h3><span class="label">Where Henri wins</span></h3>
+    <div class="win-row"><span class="area">ZIP exclusivity.</span> Thumbtack runs a bid-down auction &mdash; 4&ndash;8 pros message the same homeowner, lowest price wins, you pay either way. Henri locks the territory.</div>
+    <div class="win-row"><span class="area">Permits-first sourcing.</span> Thumbtack waits for a homeowner to fill a form. Henri pulls 925k permits across 46 states &mdash; actual filed work, not "I'm thinking about it" form-fills.</div>
+    <div class="win-row"><span class="area">Transparent 6-signal scoring.</span> Thumbtack ships no scoring &mdash; pros guess and pay.</div>
+    <div class="win-row"><span class="area">Flat $149&ndash;$2,555/mo, cancel anytime.</span> Thumbtack's per-lead variable pricing means pros can't forecast CAC; weekly dynamic-price changes are documented complaints.</div>
+
+    <h3><span class="label">Talk tracks</span></h3>
+    <div class="talk-track">
+      <div class="scenario">Early mention</div>
+      <div class="quote">We're not a marketplace. We don't make you bid against three other contractors for the same homeowner. One ZIP, one trade, one contractor &mdash; we read the permit, you get the lead.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Displacement</div>
+      <div class="quote">If you're spending $400/wk on Thumbtack and closing 1 in 8, you're paying $3,200 per booked job. Henri Pro is $1,499/mo flat, 12 ZIPs, no auction, no per-lead surprise.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Late addition</div>
+      <div class="quote">Keep Thumbtack for the wedding photography work. For your $30k roofing jobs, you want the permit, not the form-fill.</div>
+    </div>
+
+    <h3><span class="label">Objections + responses</span></h3>
+    <div class="objection"><div class="q">Thumbtack has the volume.</div><div class="a">Volume of form-fills isn't volume of jobs. 925k filed permits across 46 states is verified intent. The permit was pulled &mdash; the work is happening.</div></div>
+    <div class="objection"><div class="q">Pay-per-lead means I only pay when I get something.</div><div class="a">You pay even when you lose. After 4 pros bid on the same job, 3 of you paid for nothing. Henri locks the ZIP &mdash; no bid war.</div></div>
+    <div class="objection"><div class="q">I already pay Thumbtack.</div><div class="a">Run them in parallel for 30 days. Henri is cancel-anytime. If our 6-signal scoring doesn't beat your Thumbtack close rate, leave.</div></div>
+    <div class="objection"><div class="q">Thumbtack is in ChatGPT and Claude now.</div><div class="a">Distribution to homeowners doesn't help you when 4 other pros are also distributed to the same homeowner. Exclusivity beats reach.</div></div>
+
+    <h3><span class="label">Landmine questions</span></h3>
+    <ol class="landmines">
+      <li>How many leads do you typically pay for to close one job on Thumbtack?</li>
+      <li>When dynamic pricing jumps your lead cost overnight, how do you re-plan the week's budget?</li>
+      <li>When you message a homeowner and three other pros also messaged them, what's your win rate, and does Thumbtack refund the loss?</li>
+    </ol>
+  </section>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     ACCULYNX
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="tab-panel" id="acculynx" role="tabpanel">
+  <section class="card">
+    <h2>AccuLynx</h2>
+    <p style="color: var(--text-muted); font-size: 13px; margin-top: -6px;">
+      <em>AccuLynx is a roofing CRM, NOT a lead-gen platform. They show up in evaluations because roofers buy CRMs and lead-gen in the same purchase cycle &mdash; but they coexist with Henri rather than compete on lead-gen.</em>
+    </p>
+
+    <div class="profile-grid">
+      <div class="field"><div class="key">Founded</div><div class="val">2006 (Beloit, WI)</div></div>
+      <div class="field"><div class="key">Status</div><div class="val">Independent (Verisk $2.35B deal terminated Dec 2025)</div></div>
+      <div class="field"><div class="key">Vertical</div><div class="val">Roofing-only CRM</div></div>
+      <div class="field"><div class="key">Target</div><div class="val">Established roofing ops (insurance restoration, multi-location)</div></div>
+      <div class="field"><div class="key">Position</div><div class="val">#1 roofing-specific CRM; G2 High Performer</div></div>
+    </div>
+
+    <h3><span class="label">Pricing</span></h3>
+    <p>Quote-only historically; <strong>Essential plan starts at $250/month (2026)</strong>. Third-party estimates ~$100&ndash;$120/user/month for small accounts, $500&ndash;$1,000 implementation, annual contracts.
+    Sources: <a href="https://fieldserviceguide.com/acculynx-pricing/">Field Service Guide</a>,
+    <a href="https://roofingsoftwareguide.com/guides/acculynx-pricing/">Roofing Software Guide</a>.</p>
+
+    <h3><span class="label">What they sell</span></h3>
+    <p>All-in-one roofing CRM and job-management platform: pipeline, estimating, supplier ordering (ABC, SRS, QXO), aerial measurements (EagleView, GAF, RoofScope), photo/document management, invoicing, reporting. <strong>Provides zero leads</strong> &mdash; every job must be manually entered or imported.</p>
+
+    <h3><span class="label">Their positioning</span></h3>
+    <p>"The #1 business management software designed to help roofing companies grow &hellip; from initial lead to a completed job."</p>
+
+    <h3><span class="label">Recent releases</span> (last 90 days)</h3>
+    <ul class="bullets">
+      <li><strong>Spring 2026</strong> &mdash; Custom Fields Manager, side-by-side calendars, appointment-outcome tracking, multi-estimate "Good/Better/Best" Smart Fields.
+        <a href="https://acculynx.com/spring-2026-product-updates/">(AccuLynx)</a></li>
+      <li><strong>Feb 24, 2026</strong> &mdash; RoofScope aerial-measurement integration, reports in &lt;12h.
+        <a href="https://acculynx.com/spring-2026-product-updates/">(AccuLynx)</a></li>
+      <li><strong>Dec 29, 2025</strong> &mdash; Verisk acquisition terminated; AccuLynx remains independent.
+        <a href="https://www.insurancejournal.com/news/national/2025/12/30/852657.htm">(Insurance Journal)</a></li>
+    </ul>
+
+    <h3><span class="label">Where they win</span> (Henri's stance: "we're not trying to replace your CRM")</h3>
+    <div class="lose-row"><span class="area">Deep estimating + supplier ordering.</span> Direct ABC / SRS / QXO integrations; build estimates from aerial measurements and order materials in-app. Henri has none of this.</div>
+    <div class="lose-row"><span class="area">Insurance-restoration workflow.</span> Supplement tracking, claims data, photo packets that adjusters expect.</div>
+    <div class="lose-row"><span class="area">Production-stage management.</span> Crew scheduling, job-cost tracking, multi-location ops (Ridgeline scaled to 13 locations on AccuLynx).</div>
+
+    <h3><span class="label">Where Henri wins</span> (lead-gen, not CRM)</h3>
+    <div class="win-row"><span class="area">Henri delivers permit-driven leads;</span> AccuLynx requires every job to be manually keyed or imported.</div>
+    <div class="win-row"><span class="area">AI scoring + 6-signal transparency.</span> Henri shows why a lead scored 65 vs. 85; AccuLynx has no scoring layer because it has no leads to score.</div>
+    <div class="win-row"><span class="area">ZIP exclusivity.</span> Henri prevents 5 roofers from chasing the same permit; AccuLynx has nothing to enforce because it doesn't source.</div>
+    <div class="win-row"><span class="area">Flat, transparent pricing.</span> $149&ndash;$2,555 with cancel-anytime. AccuLynx requires sales conversations and 12-month commits.</div>
+
+    <h3><span class="label">Talk tracks</span></h3>
+    <div class="talk-track">
+      <div class="scenario">Early mention</div>
+      <div class="quote">Different layers &mdash; they're a CRM, we're a lead source. Most successful roofers run both.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Displacement</div>
+      <div class="quote">Not applicable. Recommend coexistence.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Late addition</div>
+      <div class="quote">If you're already on AccuLynx, Henri is a no-conflict add &mdash; we hand you scored permits with contact info, you push them into AccuLynx for production.</div>
+    </div>
+
+    <h3><span class="label">Objections + responses</span></h3>
+    <div class="objection"><div class="q">I already have AccuLynx, why pay you too?</div><div class="a">AccuLynx manages jobs you've already won. Henri is upstream &mdash; we feed you new permitted jobs the day they file, with the homeowner's contact and an urgency score. Different problem.</div></div>
+    <div class="objection"><div class="q">Can't I just use AccuLynx's lead source?</div><div class="a">AccuLynx doesn't sell leads. They integrate with sources you bring (door-knocking, marketing spend, referrals). We <em>are</em> the source.</div></div>
+    <div class="objection"><div class="q">AccuLynx integrates with EagleView and suppliers &mdash; can Henri?</div><div class="a">Not today, and we won't try to. We'll export to your AccuLynx job board so the production workflow stays where your team already works.</div></div>
+    <div class="objection"><div class="q">AccuLynx is $400/mo &mdash; is Henri worth another $749?</div><div class="a">One Starter ZIP averages a real number of permits/mo. If two convert at your average roof job, Henri pays for itself and AccuLynx combined. We don't replace AccuLynx; we feed it.</div></div>
+
+    <h3><span class="label">Landmine questions</span></h3>
+    <ol class="landmines">
+      <li>When a lead comes into AccuLynx today, where did it come from &mdash; and how long after the permit was filed did you reach the homeowner?</li>
+      <li>How do you currently know if three other roofers in your ZIP are also chasing the same job?</li>
+      <li>If your marketing spend dropped to zero next month, what's your pipeline of new jobs in AccuLynx?</li>
+    </ol>
+  </section>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     CONSTRUCTION MONITOR
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="tab-panel" id="cm" role="tabpanel">
+  <section class="card">
+    <h2>Construction Monitor</h2>
+    <p style="color: var(--text-muted); font-size: 13px; margin-top: -6px;">
+      <em>The most direct competitor &mdash; sells the same raw input (building permits) Henri enriches. Their pitch: "raw permit data, you score and call." Henri's pitch: "scored, exclusive, enriched, ready-to-call."</em>
+    </p>
+
+    <div class="profile-grid">
+      <div class="field"><div class="key">Founded</div><div class="val">1989 (Cedar City, UT)</div></div>
+      <div class="field"><div class="key">Parent</div><div class="val">Hubexo (formerly Byggfakta Group, SE)</div></div>
+      <div class="field"><div class="key">Headcount</div><div class="val">~50 W2 + 150+ field collectors</div></div>
+      <div class="field"><div class="key">Target</div><div class="val">Suppliers, subcontractors, GCs, manufacturers</div></div>
+      <div class="field"><div class="key">Position</div><div class="val">Pure-play permit-data vendor (CSV/feed, not workflow)</div></div>
+    </div>
+
+    <h3><span class="label">Pricing</span> Jurisdiction-based subscriptions</h3>
+    <p>Sold via WooCommerce shop. Houston North Commercial Permits Monthly <strong>$156/mo</strong>; Fort Worth Commercial Permits Monthly <strong>$219/mo</strong>.
+    Self-serve catalog covers AL, CA, FL, GA, TX only; everywhere else and all multi-jurisdiction / API / FTP deals are quoted by phone (800-925-6085). Enterprise Bloomberg-feed and API tiers: <strong>varies</strong>.
+    Source: <a href="https://shop.constructionmonitor.com/product/fort-worth-commercial-permits-monthly/">shop.constructionmonitor.com</a>.</p>
+
+    <h3><span class="label">What they sell</span></h3>
+    <p>Raw building-permit records &mdash; weekly editions, real-time leads, address history, mapping, bulk single-family / solar / pool data dumps. The contractor receives the file; scoring, dialing, and prioritization are entirely their problem.</p>
+
+    <h3><span class="label">Their positioning</span></h3>
+    <p>"The Ultimate Lead Source" &mdash; "top source for timely, accurate, and complete building and solar permit information in the United States." 31.8M total permits, 2.96M in last 12 months, 57k this week.
+    <a href="https://www.constructionmonitor.com/">(constructionmonitor.com)</a>.</p>
+
+    <h3><span class="label">Recent releases</span> (last 90 days)</h3>
+    <ul class="bullets">
+      <li><strong>Dec 2025</strong> &mdash; Rebrand to Hubexo identity; new logo file shipped on shop site, privacy policy now points to na.hubexo.com.
+        <a href="https://shop.constructionmonitor.com/">(shop.constructionmonitor.com)</a></li>
+      <li>Latest customer-facing news entries on the corporate news feed are from Aug 2024. Public release cadence is light.
+        <a href="https://www.constructionmonitor.com/aboutus/news">(news feed)</a></li>
+    </ul>
+
+    <h3><span class="label">Where they win</span></h3>
+    <div class="lose-row"><span class="area">Geographic breadth + history.</span> 31.8M permits going back decades. <em>Counter:</em> Contractors don't dial 1989 permits &mdash; recency is what converts. Henri's freshness-weighted scoring is built for current opportunities.</div>
+    <div class="lose-row"><span class="area">Raw-data depth for power users.</span> Full schema via API/FTP, Bloomberg feed, top-builder analytics. <em>Counter:</em> That's a data product for analysts and manufacturers; a remodeling contractor doesn't need a Bloomberg terminal.</div>
+    <div class="lose-row"><span class="area">Brand recognition.</span> 36 years in market. <em>Counter:</em> Incumbency, not differentiation. Most of those citations are journalists, not contractors winning jobs.</div>
+
+    <h3><span class="label">Where Henri wins</span></h3>
+    <div class="win-row"><span class="area">6-signal AI scoring vs. raw rows.</span> Henri scores permit_freshness, permit_value, contact_completeness, zip_demand, homeowner_engagement, historical_conversion with transparent weights. CM hands over a CSV-grade row.</div>
+    <div class="win-row"><span class="area">ZIP exclusivity (1 contractor per permit per trade for 14 days).</span> CM resells the same data to every contractor in the market. Henri's enriched packet is yours alone.</div>
+    <div class="win-row"><span class="area">Permit-specific outreach bundles.</span> Henri generates SMS/email referencing the actual permit #, scope, and address. CM gives you a phone number; the script is your problem.</div>
+    <div class="win-row"><span class="area">Workflow vs. spreadsheet.</span> Capacity filter (radius / value band / max active jobs), missed-call text-back via Twilio in 10s, exclusivity locks, scoring drawer. CM is fundamentally an Excel export.</div>
+    <div class="win-row"><span class="area">Per-ZIP simplicity.</span> Henri Founder $149/3 ZIPs vs. CM stacking $156&ndash;$219/mo per jurisdiction &times; N cities, with no scoring layer to make it usable.</div>
+
+    <h3><span class="label">Talk tracks</span></h3>
+    <div class="talk-track">
+      <div class="scenario">Early mention</div>
+      <div class="quote">Different products &mdash; they're a data feed, we're a workflow. Most contractors graduate from raw data to scored leads.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Displacement</div>
+      <div class="quote">If you've been on CM for &gt;3 months, ask yourself honestly: how many of those permits did you actually call? The data isn't the bottleneck &mdash; knowing which 5 to call today is.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Late addition</div>
+      <div class="quote">If your bottleneck is finding permits, CM works. If your bottleneck is figuring out which ones to actually call, that's us.</div>
+    </div>
+
+    <h3><span class="label">Objections + responses</span></h3>
+    <div class="objection"><div class="q">We already pay for raw permit data from CM.</div><div class="a">Keep it if your team is scoring those rows. Henri layers scoring + exclusivity + outreach on top &mdash; complementary for the first 60 days. Most customers drop CM once they realize they were paying twice for the same permits.</div></div>
+    <div class="objection"><div class="q">CM has way more permits than you.</div><div class="a">True for archive depth. We focus on the recency window that actually converts &mdash; permits in the last 30&ndash;60 days where the homeowner is still hiring. Old permits are a research dataset, not a sales pipeline.</div></div>
+    <div class="objection"><div class="q">CM is half the price.</div><div class="a">For one Texas city, yes. Stack 5 metros and you're at $750&ndash;$1,000/mo with no scoring. Pro at $1,499 covers 12 ZIPs with the full enriched packet. The price comparison only works if you ignore the time-cost of unscored data.</div></div>
+    <div class="objection"><div class="q">We have our own scoring team.</div><div class="a">Then CM is the right product for you &mdash; we're honest about that. Henri is for the contractor who doesn't have an analyst on staff and can't burn 3 hours a day triaging rows.</div></div>
+
+    <h3><span class="label">Landmine questions</span></h3>
+    <ol class="landmines">
+      <li>When CM drops 200 permits in your inbox on Monday morning, walk me through what happens &mdash; who scores them, who calls first, how do you decide?</li>
+      <li>Have you ever called a homeowner only to find out 4 other contractors hit them the same week off the same permit list? How do you handle that?</li>
+      <li>Of the permits you got from CM last month, how many had a phone number you could actually dial vs. just an applicant business name?</li>
+      <li>If you had to point to a single permit in the last 90 days that turned into a closed job from CM, could you trace it back? Or does it disappear into the spreadsheet?</li>
+    </ol>
+  </section>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     BUILDZOOM
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="tab-panel" id="buildzoom" role="tabpanel">
+  <section class="card">
+    <h2>BuildZoom</h2>
+    <p style="color: var(--text-muted); font-size: 13px; margin-top: -6px;">
+      <em>Permit-aware like Henri, but demand-side: homeowners go to BuildZoom to find contractors. Henri is supply-side: contractors go to Henri to find homeowners. Both touch permits, opposite directions.</em>
+    </p>
+
+    <div class="profile-grid">
+      <div class="field"><div class="key">Founded</div><div class="val">2013 (San Francisco)</div></div>
+      <div class="field"><div class="key">Parent</div><div class="val">Block Renovation (acquired Nov 6, 2025)</div></div>
+      <div class="field"><div class="key">Headcount</div><div class="val">~50&ndash;100 + active 2026 hires</div></div>
+      <div class="field"><div class="key">Target</div><div class="val">Homeowners ($150k+ residential / small commercial)</div></div>
+      <div class="field"><div class="key">Position</div><div class="val">Demand-side marketplace; trust-layer via license + permit data</div></div>
+    </div>
+
+    <h3><span class="label">Pricing</span> Pay-on-success commission</h3>
+    <p>Free to claim a contractor profile; <strong>2.5% referral fee on signed contracts</strong> is the current standard, with historical reports of 2.5%&ndash;4.5% on contracts under $50k. Premium subscription tier exists but pricing is gated behind sales contact.
+    Sources: <a href="https://www.buildzoom.com/subscriptions">BuildZoom Subscriptions</a>,
+    <a href="https://www.buildzoom.com/answers/t/what-does-buildzoom-charge-for-this-service/856">BuildZoom Answers</a>.</p>
+
+    <h3><span class="label">What they sell</span></h3>
+    <p>A homeowner-led marketplace where property owners describe a project and get matched with up to ~4 vetted licensed contractors. Permit + license data drives the contractor profile and trust layer; matching is demand-side (homeowner initiates).</p>
+
+    <h3><span class="label">Their positioning</span></h3>
+    <p>"The most trusted place to plan and hire for major residential and small commercial projects" (post-Block messaging). Pre-acquisition framing: "data-driven contractor vetting" using ~160M permits and ~7.5M licenses.</p>
+
+    <h3><span class="label">Recent releases</span> (last 90 days)</h3>
+    <ul class="bullets">
+      <li><strong>Nov 6, 2025</strong> &mdash; Acquired by Block Renovation; nationwide expansion across all 50 states.
+        <a href="https://www.prnewswire.com/news-releases/block-renovation-acquires-buildzoom-marketplace-creating-the-nations-largest-ai-renovation-and-construction-platform-302606448.html">(PRNewswire)</a></li>
+      <li><strong>Dec 2025</strong> &mdash; Hired Alexander Litvak as CTO; integration with Block's AI design/pricing/PM tools underway.</li>
+      <li>Project Pulse market reports cadence appears paused during integration (last in May 2025).</li>
+    </ul>
+
+    <h3><span class="label">Where they win</span></h3>
+    <div class="lose-row"><span class="area">Homeowner trust + brand recognition.</span> 4.1 stars on Trustpilot, 4.2 on Sitejabber. <em>Counter:</em> Henri arms the contractor who'd otherwise show up as one of BZ's four.</div>
+    <div class="lose-row"><span class="area">License + permit-history depth on the contractor profile.</span> <em>Counter:</em> Henri uses the same public permit substrate but applies it to outbound timing, not inbound trust badges.</div>
+    <div class="lose-row"><span class="area">Larger project mix ($150k+ remodels).</span> <em>Counter:</em> Henri serves the broader trade mix (roofing, HVAC, solar, electrical) where speed-to-permit beats marketplace shopping.</div>
+
+    <h3><span class="label">Where Henri wins</span></h3>
+    <div class="win-row"><span class="area">Exclusivity vs. race-of-four.</span> BuildZoom matches a homeowner with up to ~4 contractors; Henri locks 1 contractor per ZIP per trade for 14 days.</div>
+    <div class="win-row"><span class="area">Permit-FIRST timing.</span> Henri alerts you when the permit issues, days/weeks before the homeowner ever fills out a BZ form.</div>
+    <div class="win-row"><span class="area">Supply-side workflow.</span> Henri is a contractor dashboard (leads, scoring, capacity, outreach). BuildZoom is a homeowner intake form bolted to a contractor directory.</div>
+    <div class="win-row"><span class="area">Transparent 6-signal scoring.</span> Henri shows the breakdown in the drawer. BuildZoom's matching logic is opaque to both sides.</div>
+
+    <h3><span class="label">Talk tracks</span></h3>
+    <div class="talk-track">
+      <div class="scenario">Early mention</div>
+      <div class="quote">Different sides of the same coin &mdash; BuildZoom is for homeowners shopping; Henri is for contractors hunting. Plenty of customers use both.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Displacement</div>
+      <div class="quote">When a homeowner uses BuildZoom, you're one of four bidding. When you use Henri, you're the only contractor in that ZIP with that permit alerted, for 14 days.</div>
+    </div>
+    <div class="talk-track">
+      <div class="scenario">Late addition</div>
+      <div class="quote">BuildZoom is reactive &mdash; you wait for a homeowner to fill out a form. Henri lets you go proactive on every permit pulled in your ZIP, before they ever start shopping.</div>
+    </div>
+
+    <h3><span class="label">Objections + responses</span></h3>
+    <div class="objection"><div class="q">BuildZoom matches me with homeowners directly &mdash; why pay Henri a subscription?</div><div class="a">BZ is a great inbound channel. Henri is your outbound channel. The homeowner hasn't started shopping yet when we alert you, so you're not competing with three other bids. Both work; they don't overlap.</div></div>
+    <div class="objection"><div class="q">BuildZoom is free unless I close &mdash; Henri charges monthly even if I don't close.</div><div class="a">Fair. The 2.5% on a $150k job is $3,750 &mdash; one job a quarter on BZ pays for a year of Henri Pro at $1,499/mo. And Henri's territory exclusivity means fewer bids you lose to the other three contractors BZ matched.</div></div>
+    <div class="objection"><div class="q">BuildZoom has the brand and the homeowner traffic.</div><div class="a">Right &mdash; and that traffic gets split four ways. Henri gives you the ZIP exclusively. Different math.</div></div>
+    <div class="objection"><div class="q">Now that Block owns BZ, won't they get even better?</div><div class="a">Block is building for the homeowner-AI side &mdash; design, pricing, PM. That's a deeper homeowner experience, which means more contractors competing for each match. Henri's lane (supply-side, exclusive, pre-form) gets more valuable, not less.</div></div>
+
+    <h3><span class="label">Landmine questions</span></h3>
+    <ol class="landmines">
+      <li>When BuildZoom matches a homeowner with four contractors, what's your typical close rate on those leads &mdash; and how does that compare to a lead where you're the only contractor calling?</li>
+      <li>How often do you find out the homeowner already signed with someone else before you even got the BZ intro email?</li>
+      <li>When the homeowner posts on BZ, the permit was probably pulled weeks earlier &mdash; would it change your pipeline if you knew about that permit the day it issued, before they started shopping?</li>
+    </ol>
+  </section>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     HENRI
+     ════════════════════════════════════════════════════════════════════ -->
+<section class="tab-panel" id="henri" role="tabpanel">
+  <section class="card">
+    <h2>Henri.</h2>
+    <p>Permit-driven contractor lead-gen with enforced exclusivity, transparent scoring, capacity-fit filtering, and permit-specific outreach.</p>
+
+    <div class="profile-grid">
+      <div class="field"><div class="key">Stage</div><div class="val">Beta (Founder tier capped at 100)</div></div>
+      <div class="field"><div class="key">Pricing</div><div class="val">$149 / $749 / $1,499 / $2,555 flat</div></div>
+      <div class="field"><div class="key">Territory</div><div class="val">3 / 5 / 12 / 20 ZIPs</div></div>
+      <div class="field"><div class="key">Coverage</div><div class="val">~925k permits across 46 states</div></div>
+      <div class="field"><div class="key">Cancel</div><div class="val">Anytime, end of cycle</div></div>
+      <div class="field"><div class="key">Trial</div><div class="val">24 hours, credit card required</div></div>
+    </div>
+
+    <h3><span class="label">Wedge contract</span> (the 6 reasons contractors pick Henri)</h3>
+    <p style="color: var(--text-muted); font-size: 12.5px; margin-top: -6px;">Verbatim from <code>CLAUDE.md</code> lines 49&ndash;56.</p>
+    <ol class="wedge-list">
+      <li><span class="title">Exclusivity is enforced on the enriched packet, not the data.</span><br>
+        Public permit records stay public. Henri gates contact info + scored urgency + outreach bundle. One contractor per permit per trade for a 14-day window. Auto-release after 72h of no outreach logged ("use-it-or-lose-it").</li>
+      <li><span class="title">Confidence is transparent.</span><br>
+        Never hide why a lead scored 65 vs. 85. The 6 score signals (<code>permit_freshness</code>, <code>permit_value</code>, <code>contact_completeness</code>, <code>zip_demand</code>, <code>homeowner_engagement</code>, <code>historical_conversion</code>) render in the drawer with their weights, values, and detail reasons.</li>
+      <li><span class="title">Capacity is respected.</span><br>
+        Contractor sets radius / value band / start window / max-active-jobs in Settings &rarr; Capacity. Out-of-envelope leads are hidden from the Leads tab with a clear "N filtered out, widen to see" counter. Never silently drop rows.</li>
+      <li><span class="title">Outreach is permit-specific.</span><br>
+        Templates reference the actual permit # + scope + address. Generic spam templates get removed.</li>
+      <li><span class="title">Speed-to-lead is mechanical.</span><br>
+        Missed-call text-back via Twilio fires within 10s. Auto-fire outreach-on-lead-create is opt-in per contractor.</li>
+      <li><span class="title">Competitive intel is coarse.</span><br>
+        "N other contractors are watching this permit" shows a bucketed count (1&ndash;2 / 3&ndash;5 / 5+), never names. Discourages racing.</li>
+    </ol>
+
+    <h3><span class="label">Recent shipping</span> (last 90 days)</h3>
+    <ul class="bullets">
+      <li>13-source enrichment orchestrator: county GIS, FEC contributors, CSLB / TDLR / DBPR licenses, OpenCorporates principals, Google Places, Yelp Fusion, OSM extratags, PPP loans, voter files (FL/NC/OH), USPS normalization, description mining, Hunter.io, Regrid parcel.</li>
+      <li>Owner-name coverage: 7.6% &rarr; 26.6% via raw-permit-JSON backfill (37,390 leads patched).</li>
+      <li>Exclusivity locks (migration <code>00031</code>): 14-day window per permit per trade with 72h use-it-or-lose-it auto-release.</li>
+      <li>Transparent scoring drawer: 6 score signals rendered with weights and detail reasons (no height gate).</li>
+      <li>Capacity filter (Settings &rarr; Capacity): radius / value band / start window / max-active-jobs, with "N filtered out" counter.</li>
+      <li>Missed-call text-back via Twilio in &lt;10s.</li>
+    </ul>
+
+    <h3><span class="label">Sourced proof points</span> (use these in any deal &mdash; all citation-ready)</h3>
+    <ul class="bullets">
+      <li><strong>FTC v. HomeAdvisor 2023</strong> &mdash; $7.2M settlement for deceptive lead-quality marketing (FTC file no. 192-3124).</li>
+      <li><strong>Angi onboarding</strong> &mdash; tells homeowners they will be "matched with up to four local pros."</li>
+      <li><strong>BBB complaint corpus 2024</strong> &mdash; contractor satisfaction averages 1.96 / 5 across 3,000+ reviews of contractor-referral platforms.</li>
+      <li><strong>NASDAQ: ANGI 10-K filings</strong> &mdash; Angi Inc. annual revenue declined materially from its 2021 peak.</li>
+      <li><strong>Henri pricing</strong> (verifiable on the public site) &mdash; Founder $149, Starter $749, Pro $1,499, Enterprise $2,555. Flat monthly. No per-lead surprise.</li>
+    </ul>
+  </section>
+</section>
+
+</main>
+
+<footer class="foot">
+  <p>
+    <strong>Henri.</strong> Competitive Battlecard &middot; Generated 2026-04-24 for internal sales use.
+    Refresh by re-running <code>/sales:competitive-intelligence</code>. Recommended cadence: monthly,
+    or before any deal where the contractor names a competitor.
+  </p>
+  <p>
+    Truthfulness contract: every numeric claim above traces to a public source (FTC settlement, NASDAQ 10-K,
+    BBB corpus, public pricing page) or a Henri internal source-of-truth (<code>CLAUDE.md</code> wedge contract,
+    pricing block, public <code>/contractors</code> comparison table). No invented metrics. No fabricated ROI.
+  </p>
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var tabs = document.querySelectorAll("nav.tabs button[role='tab']");
+  var panels = document.querySelectorAll(".tab-panel");
+
+  function activate(name) {
+    tabs.forEach(function (t) {
+      var on = t.getAttribute("data-tab") === name;
+      t.classList.toggle("active", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    panels.forEach(function (p) {
+      p.classList.toggle("active", p.id === name);
+    });
+    if (history.replaceState) {
+      history.replaceState(null, "", "#" + name);
+    }
+  }
+
+  tabs.forEach(function (t, i) {
+    t.addEventListener("click", function () {
+      activate(t.getAttribute("data-tab"));
+      t.focus();
+    });
+    t.addEventListener("keydown", function (e) {
+      var dir = 0;
+      if (e.key === "ArrowRight") dir = 1;
+      else if (e.key === "ArrowLeft") dir = -1;
+      else if (e.key === "Home") { tabs[0].focus(); tabs[0].click(); e.preventDefault(); return; }
+      else if (e.key === "End")  { tabs[tabs.length - 1].focus(); tabs[tabs.length - 1].click(); e.preventDefault(); return; }
+      if (dir === 0) return;
+      var next = (i + dir + tabs.length) % tabs.length;
+      tabs[next].focus();
+      tabs[next].click();
+      e.preventDefault();
+    });
+  });
+
+  // Deep-link via #hash on load.
+  var hash = (location.hash || "").replace("#", "");
+  if (hash && document.getElementById(hash)) {
+    activate(hash);
+  }
+})();
+</script>
+
+</body>
+</html>
