@@ -1,0 +1,24 @@
+# City of Miami, FL — building permits issued 2014-present.
+# Socrata at data.miamigov.com.
+
+loader: socrata
+name: MIAMI-FL
+city: Miami
+state: FL
+url: https://data.miamigov.com/resource/7ey5-m434.json
+limit: 100
+order_field: issued_date
+
+fields:
+  permit_no:        permit_number
+  issued_date:      issued_date
+  applied_date:     application_date
+  address:          property_address
+  zip:              zip
+  description:      description
+  estimated_value:  estimated_cost
+  applicant:        applicant_name
+  contractor:       contractor_name
+  permit_type_desc: permit_type
+  work_class:       work_type
+  status:           status

@@ -1,0 +1,27 @@
+# Mecklenburg County, NC (Charlotte metro) — building permits.
+# ResidentialBuildingPermit feed for residential leads (highest contractor
+# value). EC_BldgPermit_Service has all permit types but is older.
+
+loader: arcgis
+name: MECKLENBURG-COUNTY-NC
+city: Mecklenburg County
+state: NC
+status: unverified
+
+url: https://services.arcgis.com/BWD3gDuaqc7SQmy7/arcgis/rest/services/ResidentialBuildingPermit/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: ISSUED_DATE
+
+fields:
+  permit_no:        PERMIT_NUMBER
+  issued_date:      ISSUED_DATE
+  applied_date:     APPLICATION_DATE
+  address:          ADDRESS
+  zip:              ZIP
+  description:      DESCRIPTION
+  estimated_value:  TOTAL_VALUE
+  contractor:       CONTRACTOR_NAME
+  applicant:        APPLICANT_NAME
+  permit_type_desc: PERMIT_TYPE
+  status:           STATUS

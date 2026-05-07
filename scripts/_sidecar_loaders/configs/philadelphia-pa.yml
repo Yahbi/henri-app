@@ -1,0 +1,27 @@
+# Philadelphia, PA — building permits since 2016.
+# ArcGIS hosted feature service mirrored by Philadelphia Hub.
+# Volume: ~5M+ rows historical (large city, dense permit volume).
+
+loader: arcgis
+name: PHILADELPHIA-PA
+city: Philadelphia
+state: PA
+status: unverified
+
+url: https://services.arcgis.com/4Ko8f1mCWFLyY4NV/arcgis/rest/services/Building_Permits_in_Philadelphia_Since_2016/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: permitissuedate
+
+fields:
+  permit_no:        permitnumber
+  issued_date:      permitissuedate
+  applied_date:     applicationdate
+  address:          address
+  zip:              zip
+  description:      typeofwork
+  estimated_value:  approximatedcost
+  applicant:        applicantname
+  contractor:       contractorname
+  permit_type_desc: permittype
+  status:           status

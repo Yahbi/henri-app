@@ -1,0 +1,30 @@
+# Allegheny County, PA (Pittsburgh metro) — residential + commercial permits.
+# Two services exist: Permit_Points_* (point geometries) and
+# Permit_Parcels_* (parcel geometries). Use Points service for cleaner
+# permit-only data.
+#
+# This config covers residential. For commercial, copy and swap
+# Residential -> Commercial in the URL.
+
+loader: arcgis
+name: ALLEGHENY-COUNTY-PA
+city: Allegheny County
+state: PA
+status: unverified
+
+url: https://services1.arcgis.com/vdNDkVykv9vEWFX4/arcgis/rest/services/Permit_Points_Residential_Jan_2016/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: PERMIT_ISSUE_DATE
+
+fields:
+  permit_no:        PERMIT_NUMBER
+  issued_date:      PERMIT_ISSUE_DATE
+  address:          STREET_ADDRESS
+  zip:              ZIP
+  description:      WORK_DESCRIPTION
+  estimated_value:  TOTAL_PROJECT_VALUE
+  contractor:       CONTRACTOR_NAME
+  permit_type_desc: PERMIT_TYPE
+  work_class:       WORK_CLASS
+  status:           STATUS

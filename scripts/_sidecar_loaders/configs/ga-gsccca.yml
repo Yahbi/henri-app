@@ -1,0 +1,47 @@
+# Georgia GSCCCA Lien Index — STARTER (status: unverified).
+#
+# https://search.gsccca.org/lien/lienindex.asp
+#
+# Per Tier-6 research (research/tier4_owner_occupied_AND_tier6_lien_portals.md)
+# this is THE single best statewide mechanic's-lien data source in the US:
+#  - free, no auth required
+#  - statewide (all 159 GA counties via the Clerks' Authority)
+#  - dedicated lien-instrument filter (we want INSTRUMENT_TYPE='ML' for
+#    Mechanic's Lien specifically)
+#  - searchable by name + county + date range
+#
+# UNVERIFIED until first smoke-test on Hetzner because:
+#  - GSCCCA's lienindex.asp is an ASP form with __VIEWSTATE; the result-
+#    table selector + per-column index are best-guesses from screenshots
+#  - some search forms redirect to a license-agreement page on first visit
+#    (one-time accept stored in cookies). DynamicFetcher with
+#    cloudflare:false should handle the cookie automatically; if not,
+#    enable cloudflare:true.
+#
+# Smoke-test workflow:
+#   DEBUG_HTML_DUMP=1 python ~/scrapling_loaders/load_lien_recorder.py ga-gsccca
+#   (then inspect ~/lien-recorder-debug-GA-GSCCCA.html if zero rows)
+
+loader: lien_recorder
+name: GA-GSCCCA
+state: GA
+source_id: gsccca
+status: unverified
+
+base_url: https://search.gsccca.org
+search_path: /lien/lienindex.asp
+date_range_days: 14
+cloudflare: false                      # try false first; flip if blocked
+
+result_table_selector: '#tblResults'   # placeholder — verify on first run
+
+# Column indexes — best-guess from research/tier4...md.
+# Adjust these once the smoke-test prints the actual header row.
+fields:
+  recording_id:     0      # GSCCCA Document ID / book-page composite
+  recording_date:   1
+  debtor_name:      2      # property owner / GC defendant
+  claimant_name:    3      # contractor / supplier filing the lien
+  instrument_type:  4      # 'ML' for Mechanic's Lien
+  property_address: 5
+  lien_amount:      6
