@@ -83,37 +83,58 @@ export async function getLandingStats(): Promise<LandingStats> {
   // Use planned counts (no full-table scan) — fast even on the 1.4M
   // permits table. Supabase returns the planner's row estimate, which
   // is accurate to within ~5% and updates after each ANALYZE.
-  //
-  // Active states comes from the `get_active_states_30d` RPC (Postgres
-  // function — see migration 00081). The naive client-side approach
-  // (scan rows + dedupe in JS) under-counts because California alone
-  // has ~521k permits in the trailing-30d window — a 50k row limit
-  // never reaches the other states. The RPC runs DISTINCT on the
-  // server and returns ~35 rows.
-  const [permitsResult, leadsResult, activeStatesRpc] = await Promise.all([
+  const [permitsResult, leadsResult] = await Promise.all([
     supabase
       .from("permits")
       .select("*", { count: "planned", head: true }),
     supabase
       .from("leads")
       .select("*", { count: "planned", head: true }),
-    supabase.rpc("get_active_states_30d"),
   ]);
 
   const permitsCount = permitsResult.count ?? 0;
   const leadsCount = leadsResult.count ?? 0;
 
-  // Reduce the RPC payload to a typed UsState set — filters out any
-  // non-US codes (e.g. PR, GU, AS) the function may surface.
+  // Active states list. Two server-side aggregation paths were tried
+  // and failed:
+  //   (a) `created_at > NOW() - INTERVAL '30d'` — matches all 1.4M rows
+  //       because permits are re-touched on every ingest. Planner
+  //       picks a parallel seq scan, ~16s. Times out via PostgREST
+  //       (8s).
+  //   (b) `issued_date > NOW() - INTERVAL '30d'` — selective (~16k
+  //       rows) but still ~12s with `idx_permits_issued_date` because
+  //       the DISTINCT(state) sort dominates. Times out via PostgREST.
+  //   (c) `GROUP BY state HAVING COUNT(*) >= 100` — 65s (sequential
+  //       full scan; the index on (state, zip) doesn't help an
+  //       ungrouped count). Times out.
+  //
+  // The right long-term fix is a `landing_stats` cache table refreshed
+  // by the score cron (see TODO below). For now we ship a hand-curated
+  // list pulled from the live database (verified 2026-05-07): all 25
+  // US states with ≥100 permits in `public.permits`. Update this list
+  // monthly via:
+  //
+  //   SELECT UPPER(state), COUNT(*) FROM permits
+  //   WHERE state IS NOT NULL GROUP BY 1 HAVING COUNT(*) >= 100
+  //   ORDER BY 1;
+  //
+  // (Run via the Supabase Management API — the dashboard SQL editor
+  // has a higher timeout than PostgREST.)
+  //
+  // TODO(post-launch): create `landing_stats` table with columns
+  // (key text PK, value jsonb, updated_at). Have the score cron
+  // upsert {key: 'covered_states', value: jsonb_array_of_codes} once
+  // per run. `getLandingStats` then reads from this table — single
+  // row, sub-1ms. Migration: 00082_landing_stats_cache.sql.
+  const COVERED_STATES_2026_05_07: ReadonlyArray<UsState> = [
+    "AL", "AZ", "CA", "CT", "DC", "FL", "GA", "HI", "ID", "IL",
+    "IN", "KS", "KY", "LA", "MD", "NC", "NE", "NM", "NY", "OH",
+    "PA", "SD", "TX", "VA", "WA",
+  ];
   const validStates = new Set<UsState>(ALL_US_STATES);
-  const seen = new Set<UsState>();
-  for (const row of (activeStatesRpc.data as Array<{ state: string }> | null) ?? []) {
-    const s = String(row.state ?? "").toUpperCase().trim();
-    if (validStates.has(s as UsState)) {
-      seen.add(s as UsState);
-    }
-  }
-  const activeStates = Array.from(seen).sort();
+  const activeStates = COVERED_STATES_2026_05_07
+    .filter((s) => validStates.has(s))
+    .sort();
 
   return {
     permitsCount,
