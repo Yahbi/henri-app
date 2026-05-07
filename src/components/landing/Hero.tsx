@@ -4,35 +4,36 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
+import { CoverageMap } from "@/components/landing/CoverageMap";
+import type { UsState } from "@/lib/stats/landing";
 
-// Honest stats — sourced from live Supabase counts (audit 2026-05-03):
-//   permits.total                  = 1,416,065  (rounded to "1.4M+" for
-//                                                 headroom; bump when we
-//                                                 grow, never inflate.
-//                                                 Earlier "900k+" was
-//                                                 stale — true count
-//                                                 had drifted +500k since
-//                                                 the 2026-04-30 audit.)
-//   distinct US states with active ingest = 38   (permit_sources)
-//                                                 (claim "30+" to stay
-//                                                 conservative against
-//                                                 sample variance)
-//   refresh cadence                = daily (vercel.json /api/cron/scrape
-//                                            schedule "0 2 * * *" = 2 AM
-//                                            UTC daily). Earlier label
-//                                            "Refreshed every 30 min" was
-//                                            wrong — Vercel Hobby plan
-//                                            permits only daily cron.
-//                                            When the plan upgrades, bump
-//                                            cadence + cron schedule
-//                                            together.
-const stats = [
-  { label: "1.4M+ Permits Tracked", top: "12%", left: "8%", delay: "0s" },
-  { label: "30+ States Covered", top: "38%", left: "2%", delay: "0.2s" },
-  { label: "Refreshed daily", top: "64%", left: "6%", delay: "0.4s" },
-] as const;
+/**
+ * Hero block on the marketing landing page.
+ *
+ * Stats are NOT hardcoded any more — they're passed in from the page
+ * (which fetches via `getLandingStats()` in a 1h-revalidated server
+ * component). When permits cross 1.5M or active states cross 35,
+ * the labels update on the next page revalidation without any code
+ * change.
+ *
+ * Right column shows a live coverage tile map (CoverageMap) instead
+ * of the previous empty gradient circle. Tiles light up for states
+ * with new permits in the last 30 days.
+ */
 
-export function Hero() {
+interface HeroProps {
+  permitsLabel: string;
+  activeStatesLabel: string;
+  activeStates: readonly UsState[];
+}
+
+export function Hero({ permitsLabel, activeStatesLabel, activeStates }: HeroProps) {
+  const stats = [
+    { label: `${permitsLabel} Permits Tracked`, top: "8%", left: "2%", delay: "0s" },
+    { label: `${activeStatesLabel} States Covered`, top: "44%", left: "-2%", delay: "0.2s" },
+    { label: "Refreshed daily", top: "78%", left: "4%", delay: "0.4s" },
+  ] as const;
+
   return (
     <section className="relative min-h-screen flex items-center overflow-hidden bg-background">
       {/* Gradient mesh background */}
@@ -81,16 +82,18 @@ export function Hero() {
             </p>
           </div>
 
-          {/* Right: globe + floating badges */}
+          {/* Right: coverage map + floating stat badges */}
           <div className="relative flex items-center justify-center">
-            {/* Floating stat badges */}
+            {/* Floating stat badges, animated. Hidden on mobile to keep
+                the right column from collapsing into noise — the map
+                is the meaningful element on small screens. */}
             {stats.map((stat) => (
               <Badge
                 key={stat.label}
                 variant="secondary"
                 className={cn(
                   "absolute z-20 hidden select-none whitespace-nowrap px-4 py-2 text-sm font-medium shadow-lg backdrop-blur-sm lg:inline-flex",
-                  "animate-[float_3s_ease-in-out_infinite]"
+                  "animate-[float_3s_ease-in-out_infinite]",
                 )}
                 style={{
                   top: stat.top,
@@ -102,7 +105,7 @@ export function Hero() {
               </Badge>
             ))}
 
-            <div className="aspect-square w-full max-w-[400px] rounded-full bg-gradient-to-br from-primary/20 via-primary/5 to-transparent border border-primary/10" />
+            <CoverageMap activeStates={activeStates} />
           </div>
         </div>
       </div>

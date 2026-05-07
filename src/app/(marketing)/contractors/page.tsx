@@ -130,12 +130,15 @@ function ChevronDown({ className = "" }: { className?: string }) {
 // was overclaiming. See ~/.claude/plans/whats-the-14-days-purring-papert.md
 // for the full audit. Dormant code stays; user-facing claim removed.
 //
-// 2026-05-03 stat refresh: live Supabase counts now read 1,416,065
-// permits and 38 states with active ingest pipelines (231,110 leads,
-// of which ~21k are ≥50 score). Rounded to 1.4M+ for headroom — never
-// inflated, always under the true count. Bumping the state count from
-// 30+ → 30+ (we still want to under-promise on lead-coverage states,
-// which sits at 15; ingest is broader than scored-leads).
+// 2026-05-07 truthfulness pass: the marketing landing (/) now derives
+// its "1.4M+" and "30+" via `getLandingStats()` so the labels
+// auto-bump when the database crosses thresholds. This page stays
+// hardcoded for now because it's a 966-line client component and
+// retrofitting it as a server component is out of scope. Both labels
+// remain accurate at 2026-05-07 (1,414,624 permits → "1.4M+";
+// 35 states active in 30d → "30+"). When permits crosses 1.5M,
+// bump "1.4M+" → "1.5M+" here AND in the Hero / TerritoryMapPreview
+// constants of `getLandingStats()` (it already auto-handles those).
 const STATS = [
   { num: "1.4M+", label: "Live permits across major metro areas in 30+ US states" },
   { num: "Daily", label: "Permits refreshed every day (vercel.json: /api/cron/scrape)" },

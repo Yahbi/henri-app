@@ -9,12 +9,25 @@ interface FAQItem {
   answer: string;
 }
 
-const faqs: FAQItem[] = [
-  {
-    question: "What cities do you cover?",
-    answer:
-      "Henri's permit catalog spans major metropolitan areas in 30+ US states (38 states with active ingest pipelines as of the 2026-05-03 DB audit, totaling 1.4M+ permits). New jurisdictions are added as we onboard their data sources.",
-  },
+interface FAQProps {
+  permitsLabel: string;
+  activeStatesLabel: string;
+  /** Live count of active states for the parenthetical detail in the
+   * coverage answer. We display the actual number alongside the
+   * rounded-down headline label for honesty. */
+  activeStatesCount: number;
+}
+
+function buildFaqs({
+  permitsLabel,
+  activeStatesLabel,
+  activeStatesCount,
+}: FAQProps): FAQItem[] {
+  return [
+    {
+      question: "What cities do you cover?",
+      answer: `Henri's permit catalog spans major metropolitan areas in ${activeStatesLabel} US states (${activeStatesCount} states with new permits in the last 30 days, totaling ${permitsLabel} permits). New jurisdictions are added as we onboard their data sources.`,
+    },
   {
     question: "How fast do I get leads?",
     answer:
@@ -36,6 +49,7 @@ const faqs: FAQItem[] = [
       "No long-term contracts. You can cancel anytime and cancellation takes effect at the end of your current billing cycle. We offer a 24-hour free trial with credit card required.",
   },
 ];
+}
 
 function AccordionItem({
   item,
@@ -79,8 +93,9 @@ function AccordionItem({
   );
 }
 
-export function FAQ() {
+export function FAQ(props: FAQProps) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const faqs = buildFaqs(props);
 
   const toggle = useCallback((index: number) => {
     setOpenIndex((prev) => (prev === index ? null : index));

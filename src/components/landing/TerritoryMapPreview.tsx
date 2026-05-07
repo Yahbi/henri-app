@@ -96,15 +96,23 @@ const STATUS_STYLES: Record<TileStatus, {
    2026-04-30: dropped the "14-day · Exclusive window" stat. The lock
    infrastructure exists in DB but no UI path acquires a lock, so the
    claim was overclaiming. See plan file
-   ~/.claude/plans/whats-the-14-days-purring-papert.md. */
-const STATS = [
-  // 2026-05-03 stat refresh: 1,416,065 permits live → "1.4M+".
-  { icon: MapPin,      value: "1.4M+", label: "Permits tracked" },
-  { icon: ShieldCheck, value: "30+",   label: "States covered" },
-  { icon: Clock,       value: "Daily",  label: "Catalog refresh" },
-] as const;
+   ~/.claude/plans/whats-the-14-days-purring-papert.md.
 
-export function TerritoryMapPreview() {
+   2026-05-07: stat numbers come in as props from `getLandingStats()`
+   so they auto-adjust as the database grows. The earlier hardcoded
+   "1.4M+" / "30+" went stale within a week of writing. */
+
+interface TerritoryMapPreviewProps {
+  permitsLabel: string;
+  activeStatesLabel: string;
+}
+
+export function TerritoryMapPreview({ permitsLabel, activeStatesLabel }: TerritoryMapPreviewProps) {
+  const STATS = [
+    { icon: MapPin,      value: permitsLabel,       label: "Permits tracked" },
+    { icon: ShieldCheck, value: activeStatesLabel,  label: "States covered" },
+    { icon: Clock,       value: "Daily",            label: "Catalog refresh" },
+  ] as const;
   /* Progressive reveal — tiles fade in sequentially on scroll into view.
      Cheap effect, big visual payoff, no JS dep. */
   const sectionRef = useRef<HTMLDivElement>(null);
