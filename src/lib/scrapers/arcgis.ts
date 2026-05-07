@@ -76,10 +76,53 @@ async function fetchArcGISPage(
 }
 
 /** Normalise an ArcGIS field value — attributes keys may be UPPER or mixed case */
-function getField(attributes: Record<string, unknown>, fieldName: string): string | null {
+function getField(attributes: Record<string, unknown>, fieldName: string | null | undefined): string | null {
+  if (!fieldName) return null;
   // Try exact match first, then case-insensitive
   const val = attributes[fieldName] ?? attributes[fieldName.toLowerCase()] ?? attributes[fieldName.toUpperCase()];
   return val != null ? String(val) : null;
+}
+
+/**
+ * Fallback ID resolver — tries the configured `source.id_field` first;
+ * if that's null/missing or returns no value, walks a chain of common
+ * ArcGIS permit-ID column names in priority order. Required because
+ * 211,797 enabled rows in `permit_sources` have `id_field IS NULL`
+ * (auto-imported by activate-arcgis-sources without manual schema
+ * inspection). Without this fallback every row from those sources
+ * silently drops at the `if (!rawId) return null` guard below.
+ *
+ * The chain order favors permit-number columns over OBJECTID because
+ * permit numbers are stable across re-fetches; OBJECTID can re-number
+ * if the upstream re-publishes the layer. We also include OBJECTID at
+ * the end as a last-resort key (better dedupe key than nothing).
+ */
+const ID_FALLBACK_FIELDS = [
+  "PermitNumber", "PERMIT_NUMBER", "PERMITNUMBER",
+  "PermitNum", "PERMIT_NUM", "Permit_Number",
+  "PermitID", "PERMIT_ID", "Permit_ID",
+  "PermitNo", "PERMIT_NO", "Permit_No",
+  "CASE_NUMBER", "CaseNumber", "Case_Number",
+  "RecordID", "RECORD_ID", "RecordNumber", "RECORD_NUMBER",
+  "BLDG_PERMIT", "BUILDING_PERMIT", "BUILDING_PERMIT_NUMBER",
+  "ApplicationNumber", "APPLICATION_NUMBER", "APP_NUMBER",
+  "OBJECTID", "objectid",
+  "GlobalID", "GLOBALID",
+] as const;
+
+function resolveId(
+  attributes: Record<string, unknown>,
+  configuredField: string | null | undefined,
+): string | null {
+  // Configured field wins when it produces a value
+  const direct = configuredField ? getField(attributes, configuredField) : null;
+  if (direct) return direct;
+  // Fallback chain
+  for (const fieldName of ID_FALLBACK_FIELDS) {
+    const v = getField(attributes, fieldName);
+    if (v) return v;
+  }
+  return null;
 }
 
 export async function scrapeArcGISSource(
@@ -122,7 +165,7 @@ export async function scrapeArcGISSource(
       .map((feature): Record<string, unknown> | null => {
         try {
           const attr = feature.attributes;
-          const rawId = getField(attr, source.id_field);
+          const rawId = resolveId(attr, source.id_field);
           if (!rawId) return null;
 
           // ArcGIS feeds sometimes emit the same permit twice in one page
