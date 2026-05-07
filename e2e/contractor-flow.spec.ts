@@ -21,12 +21,20 @@ test.describe("contractor flow", () => {
     await expect(page).toHaveURL(/\/contractors/);
 
     // /contractors is the stats / pitch page — not the pricing table.
-    // Verify the wedge headline copy + the four core stats render.
+    // Verify the wedge headline copy + the live-stat headline render.
     // (The full price table lives on /pricing; the contractors page
     // links there via "See pricing & territories" CTA.)
-    await expect(page.getByText(/Own your ZIP/i).first()).toBeVisible();
-    await expect(page.getByText(/900k\+/).first()).toBeVisible();
-    await expect(page.getByText(/1 \/ ZIP/).first()).toBeVisible();
+    //
+    // 2026-05-07: refreshed assertions to match current copy. Old:
+    //   "Own your ZIP", "900k+", "1 / ZIP"
+    // The "Own your ZIP" headline was replaced by "Permit Intelligence
+    // for Contractors". "900k+" → "1.4M+" per the live stat refresh
+    // (CLAUDE.md truthfulness rule, rounded DOWN to nearest 0.1M).
+    // "1 / ZIP" was retired with the 14-day-window cleanup
+    // (~/.claude/plans/whats-the-14-days-purring-papert.md).
+    await expect(page.getByText(/Permit Intelligence/i).first()).toBeVisible();
+    await expect(page.getByText(/1\.4M\+/).first()).toBeVisible();
+    await expect(page.getByText(/Licensed contractors only/i).first()).toBeVisible();
 
     // Signup CTA present — destination is /signup?role=contractor per
     // the architecture doc. Copy may say "Start trial" or "Sign up"; we
