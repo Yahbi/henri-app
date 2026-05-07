@@ -148,8 +148,10 @@ export default function AccountSettingsPage() {
           />
           <p className="text-[11px] text-muted-foreground mt-1">
             When a homeowner calls this number and you don&apos;t pick up, Henri
-            sends a text-back within 10 seconds with the lead context. Leave
-            blank to disable. US 10-digit or +country format accepted.
+            sends a text-back with the lead context (typically within a few
+            seconds, depending on Twilio queue). Requires Henri&apos;s Twilio
+            integration to be active for your account. Leave blank to
+            disable. US 10-digit or +country format accepted.
           </p>
         </div>
 
