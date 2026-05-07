@@ -43,7 +43,12 @@ const isDev = process.env.NODE_ENV !== "production";
 const devOnlyEvalToken = isDev ? `'${"unsafe"}-${"eval"}' ` : "";
 const cspDirectives = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' ${devOnlyEvalToken}https://js.stripe.com https://cdn.vercel.sh https://*.vercel-insights.com`,
+  // 2026-05-07: added va.vercel-scripts.com — host where Vercel
+  // Analytics and Speed Insights load their loader scripts from. Was
+  // blocked by CSP and broke the e2e tests' "no console errors"
+  // assertion (every page load fired two CSP violations as the
+  // analytics scripts tried to attach).
+  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' ${devOnlyEvalToken}https://js.stripe.com https://cdn.vercel.sh https://*.vercel-insights.com https://va.vercel-scripts.com`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
