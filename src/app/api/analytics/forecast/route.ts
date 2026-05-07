@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { requireContractor } from "@/lib/auth/requireContractor";
 import { logger } from "@/lib/logger";
 
 /* Plan prices in dollars per month (source of truth: CLAUDE.md) */
@@ -56,14 +57,12 @@ export async function GET(_request: NextRequest) {
   try {
     const supabase = await createClient();
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    // CLAUDE.md: contractor-only API routes gate with requireContractor.
+    // Returns 401 if unauthed, 403 if a homeowner session somehow
+    // reaches here.
+    const auth = await requireContractor(supabase);
+    if (auth.response) return auth.response;
+    const { user } = auth;
 
     /* Fetch user profile for plan info */
     const { data: profile } = await supabase

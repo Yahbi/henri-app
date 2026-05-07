@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { requireContractor } from "@/lib/auth/requireContractor";
 import { logger } from "@/lib/logger";
 
 /* Ordered funnel stages (the happy path) */
@@ -36,14 +37,10 @@ export async function GET(_request: NextRequest) {
   try {
     const supabase = await createClient();
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    // CLAUDE.md: contractor-only API routes gate with requireContractor.
+    const auth = await requireContractor(supabase);
+    if (auth.response) return auth.response;
+    const { user } = auth;
 
     /* Fetch leads from the last 30 days */
     const thirtyDaysAgo = new Date();
