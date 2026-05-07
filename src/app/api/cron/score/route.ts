@@ -990,6 +990,17 @@ export async function GET(request: NextRequest) {
         const assignment = assignmentMap.get(key);
         if (!assignment) continue;
 
+        // Only notify on hot/warm leads. Earlier code fired a
+        // notification per inserted lead regardless of urgency, which
+        // accumulated 289k unread "new_lead" notifications for the
+        // founder account (mostly cool/cold) and made the
+        // notifications API take 3-5s per request as it paginated
+        // through the unread backlog. Cool (25-49) and cold (0-24)
+        // leads are background data — a contractor doesn't need a
+        // push notification for every score-cron tick. Hot (75+) and
+        // warm (50-74) keep the wedge promise of "speed-to-lead."
+        if (lead.urgency !== "hot" && lead.urgency !== "warm") continue;
+
         notificationInserts.push({
           user_id: lead.contractor_id,
           type: "new_lead",
@@ -1117,10 +1128,14 @@ export async function GET(request: NextRequest) {
             : 0,
       },
     };
+    // Pass the inner summary object — not `responseBody` which wraps
+    // it under `{success: true, summary: {...}}`. The earlier shape
+    // double-nested in cron_runs as `summary->'summary'->>'leadsCreated'`,
+    // breaking every probe that read `summary->>'leadsCreated'` directly.
     await logCronRun("score", t0, {
       pulled: scoredLeads.length,
       inserted: assignedCount,
-      summary: responseBody,
+      summary: responseBody.summary,
       trigger: detectTrigger(request),
     });
     return NextResponse.json(responseBody);
