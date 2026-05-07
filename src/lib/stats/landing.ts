@@ -83,32 +83,31 @@ export async function getLandingStats(): Promise<LandingStats> {
   // Use planned counts (no full-table scan) — fast even on the 1.4M
   // permits table. Supabase returns the planner's row estimate, which
   // is accurate to within ~5% and updates after each ANALYZE.
-  const [permitsResult, leadsResult, activeStatesResult] = await Promise.all([
+  //
+  // Active states comes from the `get_active_states_30d` RPC (Postgres
+  // function — see migration 00081). The naive client-side approach
+  // (scan rows + dedupe in JS) under-counts because California alone
+  // has ~521k permits in the trailing-30d window — a 50k row limit
+  // never reaches the other states. The RPC runs DISTINCT on the
+  // server and returns ~35 rows.
+  const [permitsResult, leadsResult, activeStatesRpc] = await Promise.all([
     supabase
       .from("permits")
       .select("*", { count: "planned", head: true }),
     supabase
       .from("leads")
       .select("*", { count: "planned", head: true }),
-    // The active-states query needs an exact distinct count, so use
-    // a raw RPC if available — otherwise scan the recently-active slice.
-    // Recent-30d window keeps the row count under 100k for cheap.
-    supabase
-      .from("permits")
-      .select("state")
-      .gt("created_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-      .not("state", "is", null)
-      .limit(50_000),
+    supabase.rpc("get_active_states_30d"),
   ]);
 
   const permitsCount = permitsResult.count ?? 0;
   const leadsCount = leadsResult.count ?? 0;
 
-  // Reduce the recent slice to a distinct set of US states. Filters
-  // out any non-US codes that may have crept into permit_sources.
+  // Reduce the RPC payload to a typed UsState set — filters out any
+  // non-US codes (e.g. PR, GU, AS) the function may surface.
   const validStates = new Set<UsState>(ALL_US_STATES);
   const seen = new Set<UsState>();
-  for (const row of activeStatesResult.data ?? []) {
+  for (const row of (activeStatesRpc.data as Array<{ state: string }> | null) ?? []) {
     const s = String(row.state ?? "").toUpperCase().trim();
     if (validStates.has(s as UsState)) {
       seen.add(s as UsState);
