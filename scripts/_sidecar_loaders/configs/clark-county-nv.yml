@@ -1,0 +1,39 @@
+# Clark County, NV — Accela ACA scrape (Phase 4).
+# THE highest-leverage permit jurisdiction in NV (~80-120k/yr).
+# Includes Strip megaprojects + booming residential solar.
+#
+# PHASE 4 STARTER. Selectors are based on Accela's dominant template.
+# First production run on Hetzner: set DEBUG_HTML_DUMP=1 to dump
+# post-search HTML for selector verification.
+#
+# Citizen URL: https://aca-prod.accela.com/clarkco/Cap/CapHome.aspx?module=Building
+
+loader: accela
+name: CLARK-COUNTY-NV
+city: Clark County
+state: NV
+status: unverified              # mark verified after first successful Hetzner run
+
+base_url: https://aca-prod.accela.com/clarkco
+search_path: /Cap/CapHome.aspx?module=Building
+module: Building
+date_range_days: 7              # daily cron, 7-day window for catch-up
+max_pages: 100                  # ~10 records/page → 1k records per run cap
+cloudflare: false               # accela-prod is not CF-fronted
+
+# Field IDs — Accela's dominant template. Override if HTML dump shows different.
+field_from: ctl00_PlaceHolderMain_generalSearchForm_txtGSStartDate
+field_to: ctl00_PlaceHolderMain_generalSearchForm_txtGSEndDate
+field_submit: ctl00_PlaceHolderMain_btnNewSearch
+
+result_table_selector: '#ctl00_PlaceHolderMain_dgvPermitList'
+next_page_selector: 'a.aca_next, a[id$="lnkNext"]'
+
+# Column position map (0-indexed). Verify against actual table.
+fields:
+  permit_no:    0
+  issued_date:  2
+  record_type:  3
+  description:  4
+  address:      5
+  status:       6

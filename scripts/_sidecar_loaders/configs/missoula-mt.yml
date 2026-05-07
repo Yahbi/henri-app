@@ -1,0 +1,29 @@
+# Missoula, MT — Accela ACA scrape (Phase 4). ~5k/yr.
+
+loader: accela
+name: MISSOULA-MT
+city: Missoula
+state: MT
+status: unverified
+
+base_url: https://aca-prod.accela.com/MISSOULA
+search_path: /Cap/CapHome.aspx?module=Building
+module: Building
+date_range_days: 7
+max_pages: 30
+cloudflare: false
+
+field_from: ctl00_PlaceHolderMain_generalSearchForm_txtGSStartDate
+field_to: ctl00_PlaceHolderMain_generalSearchForm_txtGSEndDate
+field_submit: ctl00_PlaceHolderMain_btnNewSearch
+
+result_table_selector: '#ctl00_PlaceHolderMain_dgvPermitList'
+next_page_selector: 'a.aca_next, a[id$="lnkNext"]'
+
+fields:
+  permit_no:    0
+  issued_date:  2
+  record_type:  3
+  description:  4
+  address:      5
+  status:       6

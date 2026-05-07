@@ -1,0 +1,32 @@
+# Portland, ME — eTRAKiT scrape (Phase 4). ~3-5k/yr.
+# Note: Portland's Permit Search is at portlandmaine.gov/1080/Permit-Search
+# but the underlying eTRAKiT subdomain may have shifted. Probe both:
+#   - https://etrakit.portlandmaine.gov/etrakit3/Search/permit.aspx
+#   - https://etrakit3.portlandmaine.gov/Search/permit.aspx
+
+loader: etrakit
+name: PORTLAND-ME
+city: Portland
+state: ME
+status: unverified
+
+base_url: https://etrakit.portlandmaine.gov/etrakit3
+search_path: /Search/permit.aspx
+date_range_days: 7
+max_pages: 30
+cloudflare: false
+
+field_from: cplMain_txtIssuedFrom
+field_to: cplMain_txtIssuedTo
+field_submit: cplMain_btnSearch
+
+result_table_selector: '#cplMain_grdPermits'
+next_page_selector: 'a[id$="lnkNext"]'
+
+fields:
+  permit_no:    0
+  issued_date:  1
+  record_type:  2
+  description:  3
+  address:      4
+  status:       5

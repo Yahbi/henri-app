@@ -1,0 +1,28 @@
+# Minneapolis, MN — CCS_Permits.
+# Verified 2026-05-06: 391,904 records, ~20-30k/year fresh.
+# Includes separate counts: Mechanical 85k, Plumbing 155k.
+# Best municipal dataset in MN.
+
+loader: arcgis
+name: MINNEAPOLIS-MN
+city: Minneapolis
+state: MN
+status: verified
+
+url: https://services.arcgis.com/afSMGVsC7QlRK1kZ/arcgis/rest/services/CCS_Permits/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: IssueDate
+
+fields:
+  permit_no:        PermitNumber
+  issued_date:      IssueDate
+  address:          StreetAddress
+  zip:              Zip
+  description:      WorkDesc
+  estimated_value:  EstimatedCost
+  applicant:        Applicant
+  contractor:       ContractorName
+  record_type:      PermitType
+  work_type:        WorkType
+  status:           Status

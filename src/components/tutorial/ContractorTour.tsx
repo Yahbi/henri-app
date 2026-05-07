@@ -124,6 +124,14 @@ export function ContractorTour() {
     if (!onDashboardish && !run) return;
 
     if (replayRequested) {
+      // Tour-startup state (run + stepIndex) is intentionally set
+      // synchronously here. The effect runs on profile/pathname/run
+      // change; once `run` flips true, the next iteration short-circuits
+      // via the `!run` guard below, so no infinite cascade. The
+      // react-hooks/set-state-in-effect rule is a heuristic — disabling
+      // for this one-shot bootstrap on mount, where derived state isn't
+      // appropriate (Joyride owns `run` as authoritative state).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStepIndex(0);
       setRun(true);
       return;

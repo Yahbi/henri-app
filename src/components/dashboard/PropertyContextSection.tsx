@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   Loader2,
   Home,
@@ -93,6 +94,13 @@ function panelLabel(estimate: "likely-undersized" | "likely-modernized" | "unkno
 }
 
 export function PropertyContextSection({ data, isLoading }: Props) {
+  // Hook declared at the top so it precedes every conditional early
+  // return below — `react-hooks/rules-of-hooks` requires the same hook
+  // call order on every render. `now` is captured once per mount and
+  // used by the `daysAgo` label helper for SWDI / lien timestamps.
+  // eslint-disable-next-line react-hooks/purity -- Date.now is captured exactly once per mount via useMemo with empty deps array; output is idempotent across re-renders. Rule is overcautious for this snapshot pattern.
+  const now = useMemo(() => Date.now(), []);
+
   if (isLoading) {
     return (
       <section
@@ -139,10 +147,8 @@ export function PropertyContextSection({ data, isLoading }: Props) {
     hasNeighbors || hasStorm || hasSwdi || hasLiens ||
     hasNri || hasNfip || hasDisasters;
   if (!anySignal) return null;
-
-  /** Days-ago label for SWDI / lien event timestamps (UTC). */
   const daysAgo = (iso: string): string => {
-    const ms = Date.now() - new Date(iso).getTime();
+    const ms = now - new Date(iso).getTime();
     if (!Number.isFinite(ms) || ms < 0) return "";
     const days = Math.round(ms / 86_400_000);
     if (days <= 0) return "today";

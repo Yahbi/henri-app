@@ -1,0 +1,32 @@
+# St. Paul, MN — Approved_Building_Permits.
+# Verified 2026-05-06: 317,968 records.
+# **Includes contractor name + address — gold for lead-gen.**
+# FOLDER_TYPE field separates Plumbing/Gasfitting/Inside Water Piping
+# from electrical/HVAC/etc. Note: separate Demolition feed exists at
+# Permit_Type_Demolition_Permit/FeatureServer/0 — add as second config
+# if demolition-specific scoring needs it (current loader picks up
+# demos from this main feed via FOLDER_TYPE).
+
+loader: arcgis
+name: ST-PAUL-MN
+city: St. Paul
+state: MN
+status: verified
+
+url: https://services1.arcgis.com/9meaaHE3uiba0zr8/arcgis/rest/services/Approved_Building_Permits/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: ISSUEDATE
+
+fields:
+  permit_no:        FOLDER_NUMBER
+  issued_date:      ISSUEDATE
+  address:          ADDRESS
+  zip:              ZIP
+  description:      FOLDERDESCRIPTION
+  estimated_value:  EST_VALUE_OF_WORK
+  applicant:        APPLICANT
+  contractor:       CONTRACTORNAME
+  record_type:      FOLDER_TYPE
+  work_type:        WORK_TYPE
+  status:           STATUS

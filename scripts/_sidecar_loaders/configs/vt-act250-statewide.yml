@@ -1,0 +1,41 @@
+# Vermont — Act 250 land-use permits (statewide).
+# Verified 2026-05-06: 8,272 records since 1970, ~150-200/yr.
+#
+# IMPORTANT SCOPE LIMIT: Act 250 only triggers on LARGE projects:
+#   - Subdivisions ≥10 lots
+#   - Commercial construction
+#   - Projects above 2,500 ft elevation
+#   - Other land-use thresholds
+# It captures NEW CONSTRUCTION and large additions ONLY.
+# It MISSES ~95% of residential remodel / HVAC / electrical / plumbing
+# / solar volume (those are issued by towns, which don't publish APIs
+# in VT). For Henri, this is a NEW-CONSTRUCTION-ONLY signal feed —
+# useful for builder/general-contractor leads but not for
+# trade-specific (electrical/plumbing/HVAC) lead gen.
+#
+# Per Henri scoring: tag the resulting permits with permit_type
+# 'new_construction' or 'commercial' so the orchestrator knows they
+# can't enrich trade signals.
+#
+# This is a MapServer (older Esri pattern), not FeatureServer, but
+# the query interface is identical and load_arcgis.py handles both.
+
+loader: arcgis
+name: VT-ACT250-STATEWIDE
+city: STATEWIDE
+state: VT
+status: verified
+
+url: https://anrmaps.vermont.gov/arcgis/rest/services/Open_Data/OPENDATA_ANR_ENVIRON_SP_NOCACHE_v2/MapServer/166/query
+limit: 200
+where: '1=1'
+order_field: AppNum
+
+fields:
+  permit_no:        AppNum
+  issued_date:      Status_Date
+  address:          ProjectTown
+  description:      Description
+  applicant:        ProjectName
+  record_type:      AppType
+  status:           Status

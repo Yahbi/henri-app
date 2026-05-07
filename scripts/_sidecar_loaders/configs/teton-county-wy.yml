@@ -1,0 +1,32 @@
+# Teton County, WY (Jackson Hole area) — SmartGov scrape (Phase 4).
+# Small volume but VERY high $-value (luxury second homes,
+# multi-million-$ permits). Highest priority WY jurisdiction.
+#
+# CONTRACTOR PRIORITY: a single Teton County permit can be worth
+# $5-50M in construction value. Score these to the top of the urgency
+# feed for any contractor with WY in their territory.
+#
+# PHASE 4 STARTER. SmartGov API path is reverse-engineered; verify
+# with browser Network tab on first deploy.
+
+loader: smartgov
+name: TETON-COUNTY-WY
+city: Teton County
+state: WY
+status: unverified
+
+base_url: https://co-teton-wy.smartgovcommunity.com
+api_path: /api/permitting/permitsearch
+spa_path: /PermittingPublic/Search
+date_range_days: 14
+limit: 200
+
+result_table_selector: '[data-testid="permit-results"]'
+
+fields:
+  permit_no:    0
+  issued_date:  1
+  record_type:  2
+  description:  3
+  address:      4
+  status:       5

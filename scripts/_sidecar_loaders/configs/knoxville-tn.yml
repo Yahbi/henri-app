@@ -1,0 +1,29 @@
+# Knoxville-Knox County, TN — Building Permits.
+# Verified 2026-05-06: 13,034 issued records.
+# Includes OWNER + CONTRACTOR + PARCELID — strong lead-gen payload.
+#
+# Companion Apps view at services2.arcgis.com/CyVvlIiUfRBmMQuu/...
+# /Building_Permits_Applications_view/FeatureServer/0 (95k apps) —
+# add as second config if pre-issuance signal is wanted.
+
+loader: arcgis
+name: KNOXVILLE-TN
+city: Knoxville
+state: TN
+status: verified
+
+url: https://services8.arcgis.com/Ty9G85JMF2cDHlRt/arcgis/rest/services/BuildingPermits/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: DATEISSUED
+
+fields:
+  permit_no:        PERMITNUMBER
+  issued_date:      DATEISSUED
+  address:          ADDRESS
+  description:      DESCRIPTION
+  estimated_value:  PERMITVALUE
+  applicant:        OWNER
+  contractor:       CONTRACTOR
+  record_type:      PERMITTYPE
+  work_type:        CLASSWORK

@@ -1,0 +1,27 @@
+# Henderson, NV — Tyler EnerGov SelfService scrape (Phase 4). ~15-20k/yr.
+# DIFFERENT loader from load_energov.py — Henderson runs the modern
+# SelfService UI, not the public Tyler Portico API.
+
+loader: energov_ss
+name: HENDERSON-NV
+city: Henderson
+state: NV
+status: unverified
+
+base_url: https://dsconline.cityofhenderson.com
+spa_path: /energov_prod/selfservice/#/search
+api_path: /energov_prod/selfservice/api/permit/search
+date_range_days: 7
+limit: 200
+
+fields:
+  permit_no:        PermitNumber
+  issued_date:      IssuedDate
+  address:          Address
+  zip:              Zip
+  description:      Description
+  estimated_value:  TotalValuation
+  applicant:        ApplicantName
+  contractor:       ContractorName
+  record_type:      PermitType
+  status:           Status

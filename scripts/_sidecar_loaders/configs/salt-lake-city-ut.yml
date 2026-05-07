@@ -1,0 +1,45 @@
+# Salt Lake City, UT — Building Permits via opendata.utah.gov.
+#
+# WARNING: HISTORICAL ONLY. The dataset is FROZEN at 2023-10-26.
+# SLC migrated off Socrata to Accela (`aca-prod.accela.com/SLCREF`)
+# in late 2023 and stopped publishing to opendata.utah.gov. The
+# 22,859 rows here are useful for:
+#   - Backfill (historical territory mapping for SLC contractors)
+#   - Property-history lookups (when scoring drawer needs prior-permit
+#     context for an SLC address)
+# But NEVER for fresh-lead generation. Henri's `permit_freshness`
+# scorer will correctly suppress these to low scores.
+#
+# To get fresh SLC data, write an Accela ACA scraper targeting
+# https://aca-prod.accela.com/SLCREF/Cap/CapHome.aspx?module=Building
+# (Phase 4 work, not Phase 1-3).
+#
+# Verified 2026-05-06: probe returned 200, sample row had
+# permitnum=BLD2023-10-XXX, issueddate=2023-10-26.
+
+loader: socrata
+name: SLC-HISTORICAL-UT
+city: Salt Lake City
+state: UT
+status: historical_only         # NEW marker — load_socrata.py treats
+                                # this as a one-shot backfill, not a
+                                # recurring cron target. Skip in --all
+                                # rotation; run manually once.
+
+url: https://opendata.utah.gov/resource/3eji-gn2j.json
+limit: 1000                     # bigger pull since it's a one-shot backfill
+order_field: issueddate
+
+fields:
+  permit_no:        permitnum
+  issued_date:      issueddate
+  address:          address
+  zip:              originalzip
+  description:      workdescription
+  estimated_value:  fee
+  applicant:        applicatname
+  contractor:       contractor
+  permit_class:     applicationtype
+  work_class:       worktype
+  permit_type_desc: applicationtype
+  status:           applicationstatus

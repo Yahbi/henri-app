@@ -1,0 +1,34 @@
+# Salt Lake City, UT — Accela ACA scrape (Phase 4).
+# Replaces the frozen Socrata feed (salt-lake-city-ut.yml, historical
+# only, last update 2023-10-26). After this scraper goes live, the
+# Socrata config can be retired.
+#
+# SLCREF = Salt Lake City REFerral system (Accela module).
+
+loader: accela
+name: SLC-ACCELA-UT
+city: Salt Lake City
+state: UT
+status: unverified
+
+base_url: https://aca-prod.accela.com/SLCREF
+search_path: /Cap/CapHome.aspx?module=Building
+module: Building
+date_range_days: 7
+max_pages: 50
+cloudflare: false
+
+field_from: ctl00_PlaceHolderMain_generalSearchForm_txtGSStartDate
+field_to: ctl00_PlaceHolderMain_generalSearchForm_txtGSEndDate
+field_submit: ctl00_PlaceHolderMain_btnNewSearch
+
+result_table_selector: '#ctl00_PlaceHolderMain_dgvPermitList'
+next_page_selector: 'a.aca_next, a[id$="lnkNext"]'
+
+fields:
+  permit_no:    0
+  issued_date:  2
+  record_type:  3
+  description:  4
+  address:      5
+  status:       6

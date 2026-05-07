@@ -133,7 +133,7 @@ gap without spending a dollar. All have free tiers wired into
 needed.
 
 | Vercel env var | Provider signup | Free quota | What it fills |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `HUNTER_API_KEY` | hunter.io/sign-up | 25 searches/mo | Email guess from contractor name |
 | `GOOGLE_PLACES_API_KEY` | console.cloud.google.com → Places API | $200/mo credit (~10k req) | Phone + business hours + website |
 | `OPENCORPORATES_API_KEY` | opencorporates.com/users/sign_up | 500/day | LLC principal lookup |
@@ -178,3 +178,101 @@ curl -X POST -H "Authorization: Bearer $CRON_SECRET" \
 
 The `voter_file_local` enricher in orchestrator.ts will start hitting
 the new tables immediately — no code change required.
+
+## 10. Phase 3 — ArcGIS REST loader (added 2026-05-06)
+
+`load_arcgis.py` mirrors the Socrata loader's shape but speaks the
+ArcGIS FeatureServer/MapServer query contract. Verified configs
+shipped: `detroit-mi`, `minneapolis-mn`, `st-paul-mn`, `nashua-nh`,
+`vt-act250-statewide`, `nashville-tn`, `knoxville-tn`, `bozeman-mt`.
+
+Smoke-test a single ArcGIS city:
+
+```bash
+python ~/scrapling_loaders/load_arcgis.py detroit-mi
+```
+
+Add to crontab (stagger from Socrata + EnerGov):
+
+```cron
+15 */4 * * * /home/henri/scrapling_loaders/run.sh load_arcgis.py --all-arcgis >> /home/henri/scrapling-loaders.log 2>&1
+```
+
+NJ DCA statewide is via the Socrata loader (one endpoint, 2.7M rows).
+For the initial backfill, run a date-filtered version manually so
+the default 1000-row pull doesn't truncate history.
+
+## 11. Phase 4 — stealth scrapers (added 2026-05-07)
+
+Phase 4 covers the platforms with no public REST: Accela ACA,
+Tyler eTRAKiT, SmartGov, Tyler EnerGov SelfService. These run via
+Camoufox + Scrapling DynamicFetcher and need an extra Hetzner step
+to install the browser:
+
+```bash
+source ~/scrapling-env/bin/activate
+python -m playwright install chromium firefox
+# Camoufox uses Firefox under the hood; Chromium is the fallback.
+```
+
+Each Phase 4 scraper has its own `--all-<platform>` mode:
+
+```bash
+python ~/scrapling_loaders/load_accela.py --all-accela
+python ~/scrapling_loaders/load_etrakit.py --all-etrakit
+python ~/scrapling_loaders/load_smartgov.py --all-smartgov
+python ~/scrapling_loaders/load_energov_ss.py --all-energov-ss
+```
+
+**ALL Phase 4 configs ship with `status: unverified`.** They will NOT
+fire under `--all-<platform>` until you explicitly mark them
+`status: verified` after a successful per-tenant smoke test.
+
+### Per-tenant smoke-test workflow
+
+For each new Phase 4 config:
+
+```bash
+# 1. Dry-run with HTML debug enabled
+DEBUG_HTML_DUMP=1 python ~/scrapling_loaders/load_accela.py clark-county-nv
+
+# 2. Inspect output:
+#    - Did the scraper return rows? (non-zero count)
+#    - Are columns aligned correctly? (check raw_json in DB)
+#    - If form-fill failed, ~/accela-debug-CLARK-COUNTY-NV.html
+#      shows the post-search HTML — fix the YAML's `field_*`
+#      selectors to match.
+
+# 3. Once verified, edit the YAML: status: unverified -> status: verified
+# 4. Re-run without DEBUG_HTML_DUMP — it should now run silently.
+# 5. Add to the --all-<platform> rotation by virtue of status:verified.
+```
+
+### Cron schedule for Phase 4 (after verification)
+
+Phase 4 scrapers are SLOW (2-5 min per tenant via headless browser).
+DON'T fire them all at the same `:15` minute mark — stagger:
+
+```cron
+# Phase 4: stealth scrapers (run in dedicated daily windows)
+0  3  * * * /home/henri/scrapling_loaders/run.sh load_accela.py     --all-accela     >> /home/henri/scrapling-loaders.log 2>&1
+30 3  * * * /home/henri/scrapling_loaders/run.sh load_etrakit.py    --all-etrakit    >> /home/henri/scrapling-loaders.log 2>&1
+0  4  * * * /home/henri/scrapling_loaders/run.sh load_smartgov.py   --all-smartgov   >> /home/henri/scrapling-loaders.log 2>&1
+30 4  * * * /home/henri/scrapling_loaders/run.sh load_energov_ss.py --all-energov-ss >> /home/henri/scrapling-loaders.log 2>&1
+```
+
+Each window is 30 minutes apart so even if a scraper hangs on
+Camoufox startup, it won't block the next one.
+
+### Phase 4 inventory
+
+| Loader | Tenants | Configs |
+|---|---|---|
+| `load_accela.py` | NV (Clark, LV, Reno, Washoe, NLV, Sparks), UT (SLC), MT (Missoula), OK (OKC) | 9 |
+| `load_etrakit.py` | ME (Portland) | 1 |
+| `load_smartgov.py` | WY (Teton/Jackson) | 1 |
+| `load_energov_ss.py` | NV (Henderson) | 1 |
+
+OpenGov ViewPoint is intentionally NOT scraped. See
+`docs/permit-catalog/opengov-viewpoint-partnership-2026-05-07.md` —
+that's a partnership path, not a scraping path.

@@ -103,7 +103,6 @@ export default function DataHealthPage() {
     if (needy.length === 0) return;
     if (!confirm(`Trigger ${needy.length} cron${needy.length === 1 ? "" : "s"} sequentially? This may take ~10 min.`)) return;
     for (const path of needy) {
-      // eslint-disable-next-line no-await-in-loop -- intentional sequential firing to avoid hammering upstream APIs.
       await triggerCron(path);
     }
   };

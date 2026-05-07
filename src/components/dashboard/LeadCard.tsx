@@ -175,7 +175,7 @@ interface LeadCardProps {
   disambiguate?: boolean;
 }
 
-export function LeadCard({ lead, active, onClick, exclusivity, disambiguate }: LeadCardProps) {
+export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, disambiguate }: LeadCardProps) {
   const score = lead.score;
   const badge = tradeBadgeStyle(lead.trade);
   const dot = urgencyDot(lead.permitAge);

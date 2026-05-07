@@ -1,0 +1,31 @@
+# Nashua, NH — Building_Permits_June_2025.
+# Verified 2026-05-06: 8,792 records (~2.2k/yr).
+# BEST NH endpoint — strongly typed PermitType separating
+# "Commercial Electrical Only" (788), "Residential Mechanical Only" (3,446),
+# Demolition (29). Description text contains plumbing/solar mentions.
+#
+# CAVEAT: layer name `Building_Permits_June_2025` may rotate as the
+# city updates. If a future cron run starts 404'ing, hit the
+# FeatureServer root to find the new layer name:
+#   https://services1.arcgis.com/WwJAqA4K2ienzdKW/arcgis/rest/services?f=json
+
+loader: arcgis
+name: NASHUA-NH
+city: Nashua
+state: NH
+status: verified
+
+url: https://services1.arcgis.com/WwJAqA4K2ienzdKW/arcgis/rest/services/Building_Permits_June_2025/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: NAS_IssueStatusDate
+
+fields:
+  permit_no:        ProjectNumber
+  issued_date:      NAS_IssueStatusDate
+  address:          SpecificLocation
+  description:      Description
+  applicant:        ProjectName
+  record_type:      PermitType
+  work_type:        ImprovementTypeDesc
+  status:           Status

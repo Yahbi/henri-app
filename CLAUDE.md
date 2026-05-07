@@ -763,3 +763,95 @@ Run modes:
 0c. Run NJ DCA backfill manually with date-filtered configs to walk 60 months of history.
 0d. Run SLC historical once: `python load_socrata.py salt-lake-city-ut`.
 0e. Verify with `npx tsx scripts/verify-coverage.ts` — confirm per-state row counts grew and Bozeman contractor email/phone landed in raw_json.
+
+## Phase 4 stealth scrapers (2026-05-07)
+
+Closed the Phase 4 backlog from the 2026-05-06 research doc. Built four new platform adapters to attack the dead-end states from the 16-state research (NV, OK, ME, WY) plus the SLC migration. All run on the existing Hetzner CCX13 box via Camoufox + Scrapling DynamicFetcher; no new infrastructure spend.
+
+**New loaders shipped (4 total)**:
+- `scripts/_sidecar_loaders/load_accela.py` — Accela ACA generic scraper. ASP.NET WebForms with __VIEWSTATE pagination. Handles 9 tenants in NV/UT/MT/OK with one Python file + 9 YAML configs. Highest-leverage of the four (Clark County alone is ~80-120k/yr).
+- `scripts/_sidecar_loaders/load_etrakit.py` — Tyler eTRAKiT scraper. Older ASP.NET pattern; smaller deployment but unblocks ME entirely.
+- `scripts/_sidecar_loaders/load_smartgov.py` — SmartGov scraper. Modern Angular SPA with both API + SPA-fallback paths.
+- `scripts/_sidecar_loaders/load_energov_ss.py` — Tyler EnerGov SelfService scraper. Distinct from `load_energov.py` (which targets the public Tyler Portico API); SelfService is the modern citizen UI with an undocumented internal JSON API that requires Camoufox session cookies.
+
+**12 new YAML configs (all status: unverified pending Hetzner smoke-test)**:
+
+| Config | Loader | State | Estimated annual volume |
+|---|---|---|---:|
+| `clark-county-nv` | accela | NV | 80-120k (highest leverage in NV) |
+| `las-vegas-nv` | accela | NV | 30-40k |
+| `reno-nv` | accela | NV | 12-18k |
+| `washoe-county-nv` | accela | NV | (unincorporated Reno+Sparks) |
+| `north-las-vegas-nv` | accela | NV | 10-15k |
+| `sparks-nv` | accela | NV | small |
+| `slc-accela-ut` | accela | UT | replaces frozen Socrata |
+| `missoula-mt` | accela | MT | ~5k |
+| `oklahoma-city-ok` | accela | OK | ~25-35k (Incapsula-walled, cloudflare:true set) |
+| `portland-me` | etrakit | ME | ~3-5k |
+| `teton-county-wy` | smartgov | WY | small but very high $-value (luxury) |
+| `henderson-nv` | energov_ss | NV | 15-20k |
+
+**Total Phase 4 incremental annual volume**: ~180-275k permits/yr across 12 jurisdictions, mostly NV.
+
+**Critical: status: unverified discipline**: every Phase 4 config ships with `status: unverified`. The new loaders' `--all-<platform>` modes filter to `status: verified` only — so the cron will NOT fire any of these until the operator explicitly marks them verified after a successful per-tenant smoke-test on the Hetzner box. This prevents the cron from generating noise on selectors that need adjustment.
+
+**Per-tenant smoke-test workflow** (full runbook in `UPLOAD.md` §11):
+```bash
+DEBUG_HTML_DUMP=1 python ~/scrapling_loaders/load_accela.py clark-county-nv
+# Inspect ~/accela-debug-CLARK-COUNTY-NV.html if form-fill failed.
+# Adjust YAML field_* selectors to match.
+# Once successful, edit YAML: status: unverified -> status: verified
+```
+
+**Phase 4 cron schedule** (added to `UPLOAD.md` §11):
+- 03:00 UTC — Accela `--all-accela` (longest, ~5 min × 9 tenants = ~45 min)
+- 03:30 UTC — eTRAKiT `--all-etrakit`
+- 04:00 UTC — SmartGov `--all-smartgov`
+- 04:30 UTC — EnerGov SelfService `--all-energov-ss`
+
+Daily cadence (not 4-hourly like Socrata/ArcGIS) because headless-browser scrapers are slow and tenant-rate-limit-sensitive. Daily is enough — none of these jurisdictions issue more than ~500 permits/day.
+
+**Hetzner box prep**: Phase 4 needs Playwright browser binaries installed in the venv:
+```bash
+source ~/scrapling-env/bin/activate
+python -m playwright install chromium firefox
+```
+
+**OpenGov ViewPoint Cloud — explicitly NOT scraped**. Documented separately at `docs/permit-catalog/opengov-viewpoint-partnership-2026-05-07.md`. Three reasons:
+1. Auth0-gated GraphQL with per-tenant client IDs and behavioral anti-automation. Cost-to-bypass is multi-week per tenant and unreliable.
+2. ViewPoint's ToS explicitly prohibits automated bulk extraction. Unlike Accela/Tyler/SmartGov where the citizen portal is government-mandated public-records access (legal-defense argument under state open-records law), ViewPoint's ToS supersedes the municipal records baseline because data lives on ViewPoint-owned infrastructure. ToS-breach exposure for Henri AND derivative liability for the contractor customer.
+3. Partnership path is well-documented (B2B data-licensing program at OpenGov, ~$500-2000/mo, includes real-time webhooks that would IMPROVE Henri's speed-to-lead wedge).
+
+**Coverage delta if ViewPoint partnership is delayed past launch**: RI loses ~25-35k permits/yr (entire state); VT loses ~10-15k/yr (everything outside Act 250); WY loses ~3k/yr (Cheyenne post-June-2025 migration). Partnership push should be the very next data-investment dollar after first MRR lands (target $745/mo from 5 Founder-tier contractors).
+
+**Honest status** of the 16 stale states after Phase 4 ships:
+
+| State | Phase 1-3 (verified API) | Phase 4 (scraper, unverified) | Still uncovered |
+|---|---|---|---|
+| NJ | DCA statewide (2.7M) | — | — |
+| MI | Detroit | — | other cities |
+| MN | Minneapolis + St. Paul | — | other cities |
+| TN | Nashville + Knoxville | — | Memphis (mid-migration) |
+| MT | Bozeman | Missoula | Billings, Great Falls, Helena |
+| NH | Nashua | — | Manchester (Cloudpermit) |
+| VT | Act 250 statewide | — | Burlington (Tyler EnerGov no-API), all ViewPoint towns |
+| UT | SLC (historical) | SLC Accela (live) | Salt Lake Co, Provo, all others |
+| NV | — | Clark Co, LV, Reno, Washoe, NLV, Sparks, Henderson | Carson City |
+| OK | — | OKC (Incapsula) | Tulsa, Norman, Edmond, Broken Arrow |
+| ME | — | Portland | Cloudpermit towns |
+| WY | — | Jackson/Teton | Casper, Laramie (still stopgap), Cheyenne (ViewPoint) |
+| RI | — | — (ViewPoint partnership only) | ENTIRE STATE |
+| MS | — | — | ENTIRE STATE (vendor SaaS only) |
+| ND | — | — | ENTIRE STATE (no portals) |
+| WV | — | — | ENTIRE STATE (no portals) |
+
+**API + scrape coverage of the 16 stale states**: 12 of 16 have at least one path. 4 (RI, MS, ND, WV) remain genuinely uncovered without paid commercial sources.
+
+**Files added/modified this session**:
+- `scripts/_sidecar_loaders/load_accela.py` (new, ~280 LOC)
+- `scripts/_sidecar_loaders/load_etrakit.py` (new, ~210 LOC)
+- `scripts/_sidecar_loaders/load_smartgov.py` (new, ~240 LOC)
+- `scripts/_sidecar_loaders/load_energov_ss.py` (new, ~220 LOC)
+- 12 new configs in `scripts/_sidecar_loaders/configs/`
+- `scripts/_sidecar_loaders/UPLOAD.md` — added §10 (ArcGIS, was missed) and §11 (Phase 4)
+- `docs/permit-catalog/opengov-viewpoint-partnership-2026-05-07.md` (new)

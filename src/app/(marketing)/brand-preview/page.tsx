@@ -1,3 +1,7 @@
+/* eslint-disable react/no-unescaped-entities -- internal dev preview;
+   curly quotes / apostrophes in narrative copy are intentional and
+   render correctly. Each entity-escape would clutter 33 lines for a
+   page that ships behind robots:noindex and never reaches indexers. */
 /**
  * Internal brand preview — twelve wordmark iterations set in Fraunces,
  * the platform's heading face.

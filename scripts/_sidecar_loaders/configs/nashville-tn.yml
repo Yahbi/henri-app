@@ -1,0 +1,30 @@
+# Nashville-Davidson, TN — Building Permits Issued.
+# Verified 2026-05-06: 29,197 issued records, ~10k/yr.
+# Type domain includes Residential New, Addition, Rehab, Commercial New,
+# Demolition, Storm Damage. Trade permits (E/P/M) issued separately
+# but NOT exposed in this dataset — top-level building only.
+#
+# Companion: Building_Permit_Applications_Feature_Layer_view (apps,
+# not just issued). If Henri wants pre-issuance leads, add as second
+# config; for now this issued-only feed is cleaner.
+
+loader: arcgis
+name: NASHVILLE-TN
+city: Nashville
+state: TN
+status: verified
+
+url: https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/Building_Permits_Issued_2/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: Date_Issued
+
+fields:
+  permit_no:        Permit__
+  issued_date:      Date_Issued
+  address:          Address
+  description:      Purpose
+  estimated_value:  Const_Cost
+  applicant:        Contact
+  record_type:      Permit_Type_Description
+  work_type:        Permit_Subtype_Description

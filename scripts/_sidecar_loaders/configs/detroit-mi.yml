@@ -1,0 +1,33 @@
+# Detroit, MI — Building Permits Applications.
+# Verified 2026-05-06: 95,035 records on the live FeatureServer.
+# BSEED is the issuing agency. Old Socrata domain (data.detroitmi.gov)
+# is decommissioned — use ArcGIS REST.
+#
+# Trade coverage is excellent: PermitType field separates
+# "Electrical", "Mechanical", "Plumbing", "Building", and
+# "Demolition". ConstructionType + WorkType give finer-grained
+# remodel-vs-new resolution.
+
+loader: arcgis
+name: DETROIT-MI
+city: Detroit
+state: MI
+status: verified
+
+url: https://services2.arcgis.com/CyVvlIiUfRBmMQuu/arcgis/rest/services/Building_Permits_Applications_view/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: IssueDate
+
+fields:
+  permit_no:        PermitNumber
+  issued_date:      IssueDate
+  address:          StreetAddress
+  zip:              Zip
+  description:      WorkDesc
+  estimated_value:  EstimatedCost
+  applicant:        Applicant
+  contractor:       ContractorName
+  record_type:      PermitType
+  work_type:        WorkType
+  status:           Status

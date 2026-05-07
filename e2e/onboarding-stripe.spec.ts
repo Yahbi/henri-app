@@ -53,10 +53,13 @@ const BASE = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 const TEST_EMAIL =
   process.env.E2E_TEST_EMAIL ??
   `henri-e2e+${Date.now()}@example.com`;
-const LICENSE_STATE = process.env.E2E_LICENSE_STATE ?? "TX";
-const LICENSE_NUMBER = process.env.E2E_LICENSE_NUMBER ?? "";
+// Reserved for the unimplemented happy-path branch (license + ZIP-claim
+// steps). Currently unused — the smoke spec only covers signup → plan
+// → Stripe checkout. Prefixed with `_` to satisfy the unused-var rule.
+const _LICENSE_STATE = process.env.E2E_LICENSE_STATE ?? "TX";
+const _LICENSE_NUMBER = process.env.E2E_LICENSE_NUMBER ?? "";
 const STRIPE_PK = process.env.E2E_STRIPE_PUBLISHABLE_KEY ?? "";
-const TEST_ZIP = process.env.E2E_TEST_ZIP ?? "78701";
+const _TEST_ZIP = process.env.E2E_TEST_ZIP ?? "78701";
 const TEARDOWN_TOKEN = process.env.E2E_TEARDOWN_TOKEN ?? "";
 
 // Capture every network error / console error so a single page-load 500

@@ -1,0 +1,53 @@
+# NJ DCA statewide construction permit aggregator — THE prize of the
+# 16-state research effort. One endpoint covers the entire state.
+#
+# Why this matters:
+#   N.J.A.C. 5:23-4.5(d) legally requires every NJ municipality to
+#   report monthly construction permit data to the state Dept. of
+#   Community Affairs (DCA). DCA publishes the aggregated feed on
+#   data.nj.gov as a Socrata resource.
+#
+# Coverage as of 2026-05 audit:
+#   - 2,744,640 total permits (60-month rolling window)
+#   - ~600-700k/year statewide
+#   - permittypedesc breakdown: Alteration 2.4M, New 115k, Demolition 114k, Addition 66k
+#   - Verified municipal counts: Toms River 35,957, Edison 33,685,
+#     Jersey City 21,942, Newark 21,003, Paterson 9,545, Elizabeth 8,699
+#
+# Schema highlights for trade attribution:
+#   - buildfee / plumbfee / electfee / firefee / elevfee — separate
+#     fee fields per trade. A nonzero electfee on a record means the
+#     electrical sub-permit was bundled into this construction permit.
+#     Use these to derive trade coverage WITHOUT relying solely on
+#     permittypedesc (which is too coarse).
+#   - block / lot — NJ tax-parcel identifiers, useful for cross-ref
+#     against MOD-IV property data
+#   - construction_cost, square_feet, use_group, census_codes
+#
+# Coverage caveat: DCA notes "data collected from most municipalities"
+# (not all). After ingest, run a coverage spot-check against a known
+# missing town to size the gap.
+
+loader: socrata
+name: NJ-DCA-STATEWIDE
+city: STATEWIDE
+state: NJ
+status: verified              # 2026-05-06 — confirmed 200 OK with records
+
+url: https://data.nj.gov/resource/w9se-dmra.json
+limit: 1000                   # bigger limit since this is statewide
+order_field: permitdate
+
+fields:
+  permit_no:        permitnumber
+  issued_date:      permitdate
+  address:          address
+  zip:              zip
+  description:      permittypedesc
+  estimated_value:  constructioncost
+  applicant:        ownername
+  contractor:       contractor
+  permit_class:     usegroup
+  work_class:       workdesc
+  permit_type_desc: permittypedesc
+  status:           status
