@@ -48,6 +48,34 @@
 /scripts/.import-state.json
 # Operational logs from one-shot ops scripts (drain, enrich loop).
 /scripts/_score_drain.log
+# Recurring health-probe JSONL log (timestamped Supabase endpoint
+# checks). Contains environment URLs + cron summaries — operational
+# data, not secret, but shouldn't be in source control.
+/scripts/_health_probe.log
+
+# Login screenshots and other ad-hoc images saved at the repo root.
+# Could expose credentials or session state captured during a
+# screen-grab. Always reject, force the user to opt-in if a specific
+# image needs to be tracked.
+/*.png
+/*.jpg
+/*.jpeg
+/*.heic
+
+# Generated migration bundle — `pnpm migrate-bundle` writes the
+# concatenated SQL to this path so it can be pasted into the
+# Supabase SQL editor when the CLI auth is unavailable. Regeneratable
+# from `supabase/migrations/`; not source.
+/supabase/_pending-bundle.sql
+
+# Local Claude Code plugin development tree. Distributed via a
+# separate marketplace repo, not via the Henri app source.
+/my-plugin/
+
+# Internal preview routes that exist only on feature branches and
+# should never reach main. The page comment says "Delete before
+# merging to main" — pattern-match the directory name.
+/src/app/preview/
 
 # Claude Code session state (auto-generated lock + watch state).
 /.claude/scheduled_tasks.lock

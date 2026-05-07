@@ -1,7 +1,0 @@
-{
-  "name": "henri-toolkit",
-  "description": "Henri-specific Claude Code skills: audit, wedge-verify, godmode-preview, apply-migrations, truthfulness-scan. Project skills bundled as a portable plugin.",
-  "version": "1.0.0",
-  "author": "Henri.",
-  "homepage": "https://henri.app"
-}
