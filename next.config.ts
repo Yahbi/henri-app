@@ -63,7 +63,15 @@ const cspDirectives = [
   // connect-src is the gating directive (img-src 'https:' is permissive
   // enough for the <img> fallback path). Without these the satellite
   // basemap rendered blank — exactly the symptom the user reported.
-  "connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://api.openai.com https://nominatim.openstreetmap.org https://api.mapbox.com https://*.cartocdn.com https://*.vercel-insights.com https://*.ingest.us.sentry.io https://*.ingest.sentry.io https://server.arcgisonline.com https://*.arcgis.com https://tiles.openfreemap.org https://api.maptiler.com https://*.tile.openstreetmap.org https://tile.openstreetmap.org",
+  //
+  // 2026-05-07: added mesonet.agron.iastate.edu (Iowa State University
+  // NEXRAD radar tile cache). The dashboard map's NOAA NEXRAD overlay
+  // (src/components/map/NOAARadarLayer.tsx) pulls every tile of live
+  // radar from there. The dev console was firing 38 identical
+  // AJAXError "Failed to fetch" errors per pan/zoom because every
+  // visible NEXRAD tile was CSP-blocked. Single host added fixes all
+  // 38 in one shot.
+  "connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://api.openai.com https://nominatim.openstreetmap.org https://api.mapbox.com https://*.cartocdn.com https://*.vercel-insights.com https://*.ingest.us.sentry.io https://*.ingest.sentry.io https://server.arcgisonline.com https://*.arcgis.com https://tiles.openfreemap.org https://api.maptiler.com https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://mesonet.agron.iastate.edu",
   "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
   "frame-ancestors 'none'",
   "form-action 'self' https://checkout.stripe.com",
