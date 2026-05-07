@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { isGodModeEmail } from "@/lib/auth/god-mode";
@@ -60,11 +61,17 @@ async function fetchLeads(
 ): Promise<Lead[]> {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  // Unauthenticated: return empty. Middleware redirects to /login for any
-  // dashboard route, so this branch should not actually render. Deliberately
-  // NOT falling back to mock/demo/Socrata — the authenticated app always
-  // shows the user's own Supabase data, never placeholder content.
-  if (!user) return [];
+  // Unauthenticated: throw so React Query treats it as an error state and
+  // does not cache an empty result. Middleware redirects to /login for any
+  // dashboard route, so this branch normally fires only during the brief
+  // window where the page has rendered but the Supabase JS client hasn't
+  // finished hydrating its session from cookies. The `useLeads` hook
+  // listens to onAuthStateChange and invalidates the query as soon as
+  // the session arrives — so this throw is followed by an immediate
+  // automatic refetch with a real user. The earlier `return []` cached
+  // an empty array for 60s (staleTime) and produced the "No leads yet"
+  // empty state even when the contractor owned 100k+ leads.
+  if (!user) throw new Error("session-not-ready");
 
   // God-mode (founder/dev allowlist) bypasses the contractor_id filter.
   // Subscription tiers (Founder 3 ZIPs / Starter 5 / Pro 12 / Enterprise
@@ -223,6 +230,27 @@ async function updateLeadStatus(leadId: string, update: LeadStatusUpdate): Promi
 export function useLeads(params?: LeadQueryParams) {
   const queryClient = useQueryClient();
   const queryKey = [LEADS_KEY, params] as const;
+
+  // Auto-invalidate the leads query when the Supabase auth state
+  // changes. This handles the cold-start race where the page renders
+  // (and useLeads fires) before the JS client has hydrated its
+  // session from cookies — without this, fetchLeads throws
+  // "session-not-ready", React Query enters the error state, and
+  // the user sees "No leads yet" forever. With this listener, the
+  // very next SIGNED_IN / TOKEN_REFRESHED event invalidates the cache
+  // and the query refetches with a real user.
+  useEffect(() => {
+    const supabase = createClient();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event: string) => {
+        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") {
+          queryClient.invalidateQueries({ queryKey: [LEADS_KEY] });
+        }
+      },
+    );
+    return () => subscription.unsubscribe();
+  }, [queryClient]);
+
   return useQuery({
     queryKey,
     // Move 2 — pass `progressive` so multi-page god-mode pulls write each
@@ -236,6 +264,14 @@ export function useLeads(params?: LeadQueryParams) {
     // and background polls were causing dashboard lag across multiple open
     // tabs. Users can refresh via React Query's refetch() on mount.
     refetchOnWindowFocus: false, // Avoid excessive refetches on tab switch
+    // Retry the "session-not-ready" throw with a small delay — covers the
+    // tight race between page mount and Supabase JS client cookie
+    // hydration. Real network errors fall through to the default retry.
+    retry: (failureCount, error) => {
+      if (error?.message === "session-not-ready") return failureCount < 3;
+      return failureCount < 1;
+    },
+    retryDelay: (failureCount) => Math.min(500 * 2 ** failureCount, 2000),
   });
 }
 
