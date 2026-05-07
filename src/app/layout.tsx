@@ -31,7 +31,7 @@ export const metadata: Metadata = {
     template: "%s | Henri.",
   },
   description:
-    "Henri connects homeowners with verified, licensed contractors the moment a building permit is filed. Claim your territory, get real-time leads, and win more jobs with AI-powered lead scoring.",
+    "Henri turns daily building-permit filings into AI-scored, contact-enriched leads for licensed contractors. Claim your territory, work permit-specific leads, and reach homeowners with permit-specific outreach — no per-lead fees, no shared marketplace queue.",
   metadataBase: new URL(APP_URL),
   keywords: [
     "contractor leads",
@@ -47,7 +47,7 @@ export const metadata: Metadata = {
     siteName: "Henri.",
     title: "Henri. | AI-Powered Contractor Marketplace",
     description:
-      "Connecting homeowners with verified contractors. Claim your territory and get notified the moment a permit is filed in your ZIP.",
+      "Permit intelligence for licensed contractors. Daily building-permit catalog, AI-scored leads, permit-specific outreach. No per-lead fees.",
     url: APP_URL,
     images: [
       {
@@ -62,7 +62,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Henri. | AI-Powered Contractor Marketplace",
     description:
-      "Connecting homeowners with verified contractors. Claim your territory and get notified the moment a permit is filed in your ZIP.",
+      "Permit intelligence for licensed contractors. Daily building-permit catalog, AI-scored leads, permit-specific outreach. No per-lead fees.",
     images: ["/opengraph-image"],
   },
   robots: {

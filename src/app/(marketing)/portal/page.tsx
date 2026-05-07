@@ -69,7 +69,7 @@ const HOW_IT_FEELS = [
   {
     scenario: "Verified, licensed pros",
     description:
-      "Every contractor on Henri holds an active license we verify daily. If a license lapses, they're removed immediately.",
+      "Every contractor on Henri holds an active state contractor license. We re-check licenses daily against the state board, and if one lapses we pause lead delivery for that contractor until they renew.",
   },
 ] as const;
 
@@ -84,7 +84,7 @@ const FAQS = [
   },
   {
     q: "How are contractors vetted?",
-    a: "Every contractor on Henri holds a valid, active contractor license that we verify daily. They must carry liability insurance and meet our quality standards. If a license lapses, they are immediately removed from the platform.",
+    a: "Every contractor on Henri holds a valid, active state contractor license, which we re-check daily against the state license board. Contractors attest to active liability insurance at sign-up. If a license lapses, we pause lead delivery for that contractor until they renew, and you'll be re-matched if needed.",
   },
   {
     q: "What if I don't like the contractor I'm matched with?",

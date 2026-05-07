@@ -63,7 +63,7 @@ const TRADE_PROPOSALS: Record<string, (desc: string) => TradeProposal> = {
   roofing: (desc) => ({
     headline: "Roof project — high-conversion opportunity",
     insight: desc.includes("replacement")
-      ? "Full roof replacement permits have a 35% close rate when contacted within 72 hours. Property owner is actively sourcing bids."
+      ? "Full roof replacement permits show concentrated buying intent — the homeowner is past the comparison phase and actively sourcing bids. Reach out within 72 hours while attention is highest."
       : "Roof repair permits often expand in scope once inspection reveals additional damage. Offer a free inspection to uncover the full opportunity.",
     actions: [
       "Call within 24 hours to schedule a free estimate",

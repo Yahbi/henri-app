@@ -45,7 +45,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -118,13 +118,29 @@ def coerce_int(v: Any) -> Optional[int]:
 
 # ── core ──────────────────────────────────────────────────────────────
 def load_configs(target: str) -> List[Dict[str, Any]]:
-    """Resolve `target` (slug or '--all') into a list of config dicts."""
+    """Resolve `target` (slug or '--all') into a list of config dicts.
+
+    `--all` mode applies two filters:
+      1. Only Socrata configs (loader: socrata or unset legacy default)
+         — energov / arcgis / ckan configs are excluded so each loader
+         only sees its own kind.
+      2. Only `status: verified` configs. `unverified` and
+         `historical_only` markers are skipped to keep the cron from
+         hammering frozen or unprobed endpoints. Run those manually
+         by slug if you want them.
+    """
     if not CONFIG_DIR.exists():
         raise FileNotFoundError(f"Config dir missing: {CONFIG_DIR}")
     if target == "--all":
         files = sorted(CONFIG_DIR.glob("*.yml")) + sorted(CONFIG_DIR.glob("*.yaml"))
-    else:
-        files = list(CONFIG_DIR.glob(f"{target}.yml")) + list(CONFIG_DIR.glob(f"{target}.yaml"))
+        configs = [yaml.safe_load(f.read_text(encoding="utf-8")) for f in files]
+        return [
+            c for c in configs
+            if c
+            and (c.get("loader") in (None, "socrata"))
+            and (c.get("status") in (None, "verified"))
+        ]
+    files = list(CONFIG_DIR.glob(f"{target}.yml")) + list(CONFIG_DIR.glob(f"{target}.yaml"))
     if not files:
         raise FileNotFoundError(f"No config matched '{target}' in {CONFIG_DIR}")
     return [yaml.safe_load(f.read_text(encoding="utf-8")) for f in files]

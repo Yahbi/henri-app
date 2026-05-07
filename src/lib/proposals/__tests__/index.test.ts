@@ -24,7 +24,7 @@ describe("generateProposal", () => {
       permitDescription: "ROOF REPLACEMENT",
     });
     expect(p.headline).toMatch(/Roof project/i);
-    expect(p.insight).toMatch(/35% close rate/);
+    expect(p.insight).toMatch(/concentrated buying intent/);
     expect(p.actions).toContain("Call within 24 hours to schedule a free estimate");
     expect(p.urgency).toBe("high");
     expect(p.window).toMatch(/48 hours/);

@@ -516,7 +516,7 @@ export default function ContractorsPage() {
               </Link>
             </div>
             <div className="flex flex-wrap items-center gap-5">
-              {["No setup fee", "Cancel anytime", "24-hour free trial", "CSLB verified only"].map(
+              {["No setup fee", "Cancel anytime", "24-hour free trial", "Licensed contractors only"].map(
                 (item) => (
                   <div
                     key={item}
@@ -535,7 +535,7 @@ export default function ContractorsPage() {
             {/* Glow */}
             <div className="pointer-events-none absolute -right-[60px] -top-[60px] h-[200px] w-[200px] rounded-full bg-primary/[0.18] blur-2xl" />
             <p className="relative mb-3.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-              Live leads &mdash; ZIP 90278 &middot; Redondo Beach
+              Example view &mdash; ZIP 90278 &middot; Redondo Beach
             </p>
             <div className="relative mb-3.5 flex flex-col gap-2">
               {/* Lead 1 */}
@@ -582,7 +582,7 @@ export default function ContractorsPage() {
                     1058 N Pacific Ave
                   </div>
                   <div className="text-[11px] text-muted-foreground">
-                    ADU + Roof &middot; Owner M. Chen &middot; 31 min ago
+                    ADU + Roof &middot; Owner-occupied &middot; 31 min ago
                   </div>
                 </div>
                 <span className="shrink-0 rounded bg-yellow-600/15 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-700 dark:text-yellow-500">

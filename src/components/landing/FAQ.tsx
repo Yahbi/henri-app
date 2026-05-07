@@ -28,27 +28,27 @@ function buildFaqs({
       question: "What cities do you cover?",
       answer: `Henri's permit catalog spans major metropolitan areas in ${activeStatesLabel} US states (${activeStatesCount} states with new permits in the last 30 days, totaling ${permitsLabel} permits). New jurisdictions are added as we onboard their data sources.`,
     },
-  {
-    question: "How fast do I get leads?",
-    answer:
-      "The permit catalog refreshes daily (vercel.json /api/cron/scrape, 2 AM UTC). New permits filed during a given day appear in the dashboard the next refresh — typically within 24 hours of the source jurisdiction publishing them.",
-  },
-  {
-    question: "Can I change my territories?",
-    answer:
-      "Territory changes take effect at the start of your next billing cycle, provided the requested ZIP is available.",
-  },
-  {
-    question: "What trades do you support?",
-    answer:
-      "We support roofing, HVAC, solar, electrical, plumbing, addition, ADU, windows, painting, landscaping, general remodel, and foundation.",
-  },
-  {
-    question: "Is there a contract?",
-    answer:
-      "No long-term contracts. You can cancel anytime and cancellation takes effect at the end of your current billing cycle. We offer a 24-hour free trial with credit card required.",
-  },
-];
+    {
+      question: "How fast do I get leads?",
+      answer:
+        "The permit catalog refreshes daily (vercel.json /api/cron/scrape, 2 AM UTC). New permits filed during a given day appear in the dashboard the next refresh — typically within 24 hours of the source jurisdiction publishing them.",
+    },
+    {
+      question: "Can I change my territories?",
+      answer:
+        "Territory changes take effect at the start of your next billing cycle, provided the requested ZIP is available.",
+    },
+    {
+      question: "What trades do you support?",
+      answer:
+        "We support roofing, HVAC, solar, electrical, plumbing, addition, ADU, windows, painting, landscaping, general remodel, and foundation.",
+    },
+    {
+      question: "Is there a contract?",
+      answer:
+        "No long-term contracts. You can cancel anytime and cancellation takes effect at the end of your current billing cycle. We offer a 24-hour free trial with credit card required.",
+    },
+  ];
 }
 
 function AccordionItem({

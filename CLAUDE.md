@@ -684,3 +684,82 @@ Audit aligned the work to two tiers of launch blockers and rejected anything tha
 4. SCP `_sidecar_loaders` → Hetzner per `UPLOAD.md`. Smoke-test Austin. Probe + verify the other 9 Socrata cities (only Austin carries the `# Verified working` marker — budget ~10 min/city).
 5. Download NC + OH voter files in background; ingest while doing the Stripe E2E pass.
 6. Run `pnpm exec playwright test e2e/onboarding-stripe.spec.ts` against staging.
+
+## 16-stale-state research + Phase 3 ArcGIS loader (2026-05-06)
+
+Filled the data gap for the 16 states listed in CLAUDE.md as "configured but stale" (ME, MI, MN, MS, MT, NV, NH, NJ, ND, OK, RI, TN, UT, VT, WV, WY). Methodology: 4 parallel research subagents, each covering 3-5 states with live HTTP probing of every reported URL. Full report at [docs/permit-catalog/16-stale-states-2026-05-06.md](docs/permit-catalog/16-stale-states-2026-05-06.md).
+
+**Outcome**: 8 of 16 states now have at least one verified live API endpoint; the other 8 are confirmed scrape-or-skip territory (Phase 4 backlog).
+
+**The single highest-value finding — NJ DCA statewide aggregator**:
+- `https://data.nj.gov/resource/w9se-dmra.json` (Socrata)
+- 2,744,640 permits, 60-month rolling window, ~600-700k/yr.
+- N.J.A.C. 5:23-4.5(d) legally requires every NJ municipality to report monthly. One endpoint covers the entire state.
+- Trade fee fields: `buildfee`, `plumbfee`, `electfee`, `firefee`, `elevfee` per record — direct trade attribution.
+- Config: `nj-dca-statewide.yml`. Replaces all per-city NJ scraping (Newark, Jersey City, Paterson, Elizabeth, Edison are all included in DCA).
+
+**The single highest-quality finding — Bozeman MT**:
+- `https://gisweb.bozeman.net/arcgis/rest/services/Internal/Building_Permits/MapServer/1/query` (ArcGIS MapServer)
+- ~720 active records / ~1.5-2k/yr — small volume but the only US dataset found that publishes `CONTRACTOR_EMAIL` AND `CONTRACTOR_PHONE_1` in the public REST response. Direct fix for Henri's 1%-phone-fill ceiling within MT territory.
+- Config: `bozeman-mt.yml`. The contact fields land in `raw_json`; a follow-up `bozeman_contact_extractor` pass should mine them out.
+
+**New configs shipped (10 total)**:
+| Slug | State | Platform | Records |
+|---|---|---|---:|
+| `nj-dca-statewide` | NJ | Socrata | 2.7M |
+| `detroit-mi` | MI | ArcGIS | 95k |
+| `minneapolis-mn` | MN | ArcGIS | 392k |
+| `st-paul-mn` | MN | ArcGIS | 318k (with contractor names) |
+| `nashua-nh` | NH | ArcGIS | 8.8k |
+| `vt-act250-statewide` | VT | ArcGIS MapServer | 8.3k (new construction only) |
+| `salt-lake-city-ut` | UT | Socrata | 22.9k (HISTORICAL — frozen 2023-10-26) |
+| `nashville-tn` | TN | ArcGIS | 29.2k |
+| `knoxville-tn` | TN | ArcGIS | 13k + 95k apps |
+| `bozeman-mt` | MT | ArcGIS MapServer | 720 active (~2k/yr, w/ contact info) |
+
+**New loader: `scripts/_sidecar_loaders/load_arcgis.py`** — Phase 3 of nationwide coverage. Generic ArcGIS REST loader, mirrors `load_socrata.py` shape (YAML in, normalized rows upserted). Handles both FeatureServer and MapServer (same query syntax). Auto-converts ArcGIS epoch-millis timestamps to ISO dates. ArcGIS server pagination via `resultOffset`/`resultRecordCount`; surfaces `exceededTransferLimit` warnings.
+
+Run modes:
+```cron
+15 */4 * * * /home/henri/scrapling_loaders/run.sh load_arcgis.py --all-arcgis >> /home/henri/scrapling-loaders.log 2>&1
+```
+(Stagger: Socrata `:30`, EnerGov `:00`, ArcGIS `:15` past the hour.)
+
+**`load_socrata.py` --all filter tightened**: now filters to `loader: socrata` AND `status: verified`. Excludes `unverified` and `historical_only` configs from the cron rotation, so the SLC historical feed doesn't fire daily and unprobed cities don't 404 the cron logs. Run those manually by slug when needed.
+
+**Confirmed dead-end states (no API; Phase 4 scrape territory or skip)**:
+- **ME**: Portland uses Tyler eTRAKiT HTML-only; smaller towns Cloudpermit (auth-gated).
+- **MS**: ENTIRE STATE walled. Jackson CKAN portal has no permits. Gulfport BS&A SaaS. Southaven/Hattiesburg/Biloxi Tyler EnerGov or no portal. Skip MS or use HUD county aggregate as proxy.
+- **OK**: Oklahoma City has Incapsula bot wall on `gis.okc.gov` (might yield to Camoufox + 1hr spike). Tulsa hub has only zoning ordinances. Norman/Edmond/Broken Arrow login-walled.
+- **NV**: Las Vegas Open Data ArcGIS frozen 2020 OR field-stripped to ObjectID. Clark County (the highest-leverage jurisdiction in the state, ~80-120k/yr) is Accela-only. Henderson is EnerGov internal API. **NV is all-in on Accela — Phase 4 work**.
+- **ND**: No state aggregator. Fargo/Bismarck/Grand Forks all HTML/PDF/eSuite. Skip.
+- **RI**: ENTIRELY OAuth-walled. Providence + Warwick + Cranston + Pawtucket all on OpenGov ViewPoint with Auth0 GraphQL. RIGIS state hub has 382 datasets, ZERO permit datasets. Skip or pursue OpenGov data partnership.
+- **WV**: Charleston/Huntington no portals. Morgantown Cityworks. Skip entirely.
+- **WY**: Cheyenne went all-OpenGov-ViewPoint June 2025. Casper civiclive. Jackson/Teton SmartGov (high-$ luxury market — Phase 4 candidate). Existing Henri "Cheyenne stopgap" entry is justified — no better source exists.
+
+**Phase 4 scrape backlog (post-launch, when revenue funds it)**:
+1. Clark County NV Accela (`aca-prod.accela.com/clarkco`) — ~80-120k/yr including Strip + residential solar
+2. Las Vegas NV Accela (`aca-prod.accela.com/lasvegas`)
+3. OKC Incapsula bypass + Accela
+4. SLC Accela (`aca-prod.accela.com/SLCREF`) — replaces frozen Socrata
+5. Henderson NV Tyler EnerGov SelfService
+6. Reno + Washoe Accela
+7. Jackson/Teton WY SmartGov
+8. Cheyenne WY OpenGov (data partnership easier than scraping)
+9. Portland ME Tyler eTRAKiT
+10. Memphis TN — re-check 30-60 days (mid-migration off Socrata)
+
+**Verification artifact: `scripts/verify-coverage.ts`** — post-ingestion verifier. Run after each cron pass to confirm per-state counts grew, ZIP fill increased, no regressions. Outputs `docs/studies/verify-coverage-YYYY-MM-DD.md` and exit 1 on failures (CI-friendly). Includes a snapshot diff vs. previous run that catches any state losing all permits between runs.
+
+**Known scope limits** (set expectations honestly):
+- "All states" — 8 of 16 stale states have no public permit API at all. Henri's reachable ceiling via APIs alone is ~42-46 states, not 50. The remaining 4-8 states require Phase 4 scrapers or paid commercial sources (BuildZoom / ConstructConnect / ATTOM).
+- "All cities" — the US has ~19,500 incorporated municipalities. Only ~500-800 publish public permit APIs. Long-tail rural cities issue permits via paper applications stored in courthouse filing cabinets — physically inaccessible to any automation. Henri's reachable ceiling is the top ~800 cities by population, NOT all cities.
+- "All ZIPs" — ~41,000 ZIPs total. ZIP fill within COVERED jurisdictions can reach >95% via geocoding the existing permit addresses. ZIP fill across all 41k is bounded by the city ceiling above.
+
+**Pre-launch action sequence (additive to the 2026-05-05 sequence)**:
+0. SCP updated `_sidecar_loaders/` to Hetzner (load_arcgis.py + 10 new YAMLs + patched load_socrata.py).
+0a. Smoke-test each new config: `python load_arcgis.py detroit-mi`, `python load_socrata.py nj-dca-statewide`, etc.
+0b. Add a separate ArcGIS cron line: `15 */4 * * * load_arcgis.py --all-arcgis`.
+0c. Run NJ DCA backfill manually with date-filtered configs to walk 60 months of history.
+0d. Run SLC historical once: `python load_socrata.py salt-lake-city-ut`.
+0e. Verify with `npx tsx scripts/verify-coverage.ts` — confirm per-state row counts grew and Bozeman contractor email/phone landed in raw_json.
