@@ -1,30 +1,46 @@
-# Las Vegas, NV — Accela ACA scrape (Phase 4).
-# ~30-40k/yr. Replaces the field-stripped CLV ArcGIS Open Data feed.
+# Las Vegas, NV — Building Permits via ArcGIS FeatureServer.
+# Verified 2026-05-07: 2,007,545 total records, 65,866 issued in 2026
+# alone, latest editing timestamp 2026-04-26 (~9 days old at probe).
+#
+# Replaces the prior `accela` Phase-4 scrape config that was
+# `status: unverified`. The City of Las Vegas runs both Accela ACA
+# and a public AGOL view — the FeatureServer view is the live mirror
+# of the live Accela database, exposed read-only without auth.
+#
+# Note: a SECOND Las Vegas FeatureServer at
+#   mapdata.lasvegasnevada.gov/clvgis/.../BuildingPermits/MapServer/0
+# has the same schema but is FROZEN at Jul-2020. Don't use it. The
+# `CLV_BLDG_GIS_gdb_view` referenced below is the live mirror.
+#
+# Caveats:
+#   1. ISSUE_DT is stored as DD-MMM-YY strings (e.g. "01-JAN-26") not
+#      real dates. Server-side ORDER BY won't sort chronologically.
+#      Workaround: page on OBJECTID + filter on `ISSUE_YR` integer
+#      string for year-based slicing. load_arcgis.py date-parser can
+#      handle the parsing post-fetch.
+#   2. No owner-name field — only APPLICANT. Contact completeness on
+#      LV permits will be lower than Henderson. Cross-ref against the
+#      Clark County assessor / parcel tables (geocommons.lasvegasnevada.gov)
+#      to pick up owner_name in a follow-up enricher pass.
 
-loader: accela
+loader: arcgis
 name: LAS-VEGAS-NV
 city: Las Vegas
 state: NV
-status: unverified
+status: verified
 
-base_url: https://aca-prod.accela.com/lasvegas
-search_path: /Cap/CapHome.aspx?module=Building
-module: Building
-date_range_days: 7
-max_pages: 100
-cloudflare: false
-
-field_from: ctl00_PlaceHolderMain_generalSearchForm_txtGSStartDate
-field_to: ctl00_PlaceHolderMain_generalSearchForm_txtGSEndDate
-field_submit: ctl00_PlaceHolderMain_btnNewSearch
-
-result_table_selector: '#ctl00_PlaceHolderMain_dgvPermitList'
-next_page_selector: 'a.aca_next, a[id$="lnkNext"]'
+url: https://services1.arcgis.com/F1v0ufATbBQScMtY/arcgis/rest/services/CLV_BLDG_GIS_gdb_view/FeatureServer/0/query
+limit: 1000
+where: "ISSUE_YR='2026' OR ISSUE_YR='2025'"
+order_field: OBJECTID
 
 fields:
-  permit_no:    0
-  issued_date:  2
-  record_type:  3
-  description:  4
-  address:      5
-  status:       6
+  permit_no:        APNO
+  issued_date:      ISSUE_DT       # parse "DD-MMM-YY" string post-fetch
+  address:          PROPERTY
+  description:      APDESC
+  estimated_value:  VALUATION
+  applicant:        APPLICANT
+  permit_type_desc: APTYPE
+  work_type:        WORKTYPE
+  status:           STAT

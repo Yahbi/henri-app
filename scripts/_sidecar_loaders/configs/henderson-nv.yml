@@ -1,27 +1,53 @@
-# Henderson, NV — Tyler EnerGov SelfService scrape (Phase 4). ~15-20k/yr.
-# DIFFERENT loader from load_energov.py — Henderson runs the modern
-# SelfService UI, not the public Tyler Portico API.
+# Henderson, NV — DSC (Building) Permits via Socrata.
+# Verified 2026-05-07: 264,274 total records, latest applydate 2026-04-30
+# (~5 days old at probe time). Endpoint refreshes daily.
+#
+# Replaces the prior `energov_ss` Phase-4 scrape config that was
+# `status: unverified`. Henderson runs Socrata in addition to its
+# EnerGov SelfService UI — the Socrata feed is publicly readable
+# without auth, so prefer it.
+#
+# **JACKPOT** (Bozeman-tier contact data): this dataset publishes
+# `professionalphone` + `professionalstatelicnbr` + `ownername` +
+# `owneraddress` in the public response. Henri's #1 score-cap blocker
+# is contact completeness (1% phone, 39% owner_name fleet-wide). For
+# Henderson leads, all four populate near-100%. Score the leads
+# accordingly — they should pop to the top of the urgency feed for
+# any contractor with NV in their territory.
+#
+# Henderson is the second-largest city in NV (pop ~320k, affluent
+# Las Vegas suburb). High remodel / ADU / HVAC volume.
+#
+# Mirror endpoint at performance.cityofhenderson.com/resource/fpc9-568j.json
+# works identically (same Socrata dataset, alternate hostname).
 
-loader: energov_ss
+loader: socrata
 name: HENDERSON-NV
 city: Henderson
 state: NV
-status: unverified
+status: verified
 
-base_url: https://dsconline.cityofhenderson.com
-spa_path: /energov_prod/selfservice/#/search
-api_path: /energov_prod/selfservice/api/permit/search
-date_range_days: 7
-limit: 200
+url: https://opendata.cityofhenderson.com/resource/fpc9-568j.json
+limit: 1000
+order_field: applydate
 
 fields:
-  permit_no:        PermitNumber
-  issued_date:      IssuedDate
-  address:          Address
-  zip:              Zip
-  description:      Description
-  estimated_value:  TotalValuation
-  applicant:        ApplicantName
-  contractor:       ContractorName
-  record_type:      PermitType
-  status:           Status
+  permit_no:        permitnumber
+  issued_date:      applydate
+  address:          locationdescription
+  description:      permitdescription
+  estimated_value:  valuationtotal
+  applicant:        ownername
+  contractor:       professionalname
+  permit_type_desc: permittype
+  work_class:       workclass
+  status:           permitstatus
+
+# Reminder: load_socrata.py only normalizes the canonical Henri schema
+# fields. The contact-completeness gold lands in raw_json:
+#   raw_json->>'professionalphone'         — phone of the licensed pro
+#   raw_json->>'professionalstatelicnbr'   — NV state license number
+#   raw_json->>'owneraddress'              — owner mailing address
+#   raw_json->>'parcelnumber'              — Clark County APN
+# A follow-up enricher pass can mine them via description-miner.ts or
+# a dedicated nv_contact_extractor.
