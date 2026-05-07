@@ -36,7 +36,7 @@ export interface LandingStats {
   /** "1.4M+" / "1.5M+" — rounded DOWN to nearest 0.1M. */
   permitsLabel: string;
   /** Distinct US states with at least one new permit in the last 30 days. */
-  activeStates: UsState[];
+  activeStates: ReadonlyArray<UsState>;
   /** "30+" / "35+" — rounded DOWN to nearest 5. */
   activeStatesLabel: string;
   /** Lead count (live). */
@@ -73,11 +73,45 @@ export function formatStatesLabel(n: number): string {
 }
 
 /**
+ * Fallback returned when Supabase env vars aren't set (CI/build-time
+ * static prerender without secrets). Mirrors the shape `getLandingStats`
+ * normally returns and uses the same hand-curated `COVERED_STATES`
+ * list used by the live path.
+ *
+ * Production builds DO have the env vars, so the live fetch runs and
+ * the cached HTML reflects real numbers. This branch keeps `pnpm build`
+ * green when secrets aren't available.
+ */
+const FALLBACK_PERMITS = 1_400_000;
+const FALLBACK_LEADS = 260_000;
+const FALLBACK_COVERED_STATES: ReadonlyArray<UsState> = [
+  "AL", "AZ", "CA", "CT", "DC", "FL", "GA", "HI", "ID", "IL",
+  "IN", "KS", "KY", "LA", "MD", "NC", "NE", "NM", "NY", "OH",
+  "PA", "SD", "TX", "VA", "WA",
+];
+
+/**
  * Single Supabase round trip via parallel CountPlanned queries.
  * Returns the data needed by every landing-page component that
  * displays "X.YM+ permits" or "X+ states covered."
+ *
+ * Graceful when Supabase env vars are missing — returns the fallback
+ * constants so a CI build without secrets still completes prerender.
  */
 export async function getLandingStats(): Promise<LandingStats> {
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.SUPABASE_SERVICE_ROLE_KEY
+  ) {
+    return {
+      permitsCount: FALLBACK_PERMITS,
+      permitsLabel: formatPermitsLabel(FALLBACK_PERMITS),
+      activeStates: FALLBACK_COVERED_STATES,
+      activeStatesLabel: formatStatesLabel(FALLBACK_COVERED_STATES.length),
+      leadsCount: FALLBACK_LEADS,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
   const supabase = createAdminClient();
 
   // Use planned counts (no full-table scan) — fast even on the 1.4M
