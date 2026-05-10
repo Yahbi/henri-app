@@ -1,5 +1,4 @@
 {
-  "_comment": "Module 6 (2026-05-09) — most crons paused per founder direction. The 36 prior schedules were removed. Two pre-intent crons re-enabled in Phase AA-3 (2026-05-09 late evening) because the parcel-synthesis + ZIP-aggregate-refresh path is dead without them; both run weekly + are bounded. CRON SCHEDULE NOTES (cannot live as `_comment` inside each cron entry — Vercel schema rejects it as 'additional property'): (1) refresh-zip-aggregates runs at Sun 03:00 UTC, BEFORE synthesize-pre-intent at 04:00 UTC, so any consumer reads fresh aggregates. (2) synthesize-pre-intent walks parcels_sidecar per claimed ZIP; bounded by GLOBAL_INSERT_CAP_PER_RUN=2000 + PER_CONTRACTOR_PER_ZIP_CAP=50; uses the (state_code, situs_zip) compound index via ZIP_PREFIX_TO_STATES.",
   "crons": [
     {
       "path": "/api/cron/refresh-zip-aggregates",
