@@ -999,3 +999,84 @@ Closed the SCHEMA + LOADER gap that the discovery scripts left open. The 2026-05
 **Net effect**: 4 of the 7 dead-permit states (UT, WV, OK, ME) get meaningful Phase 5 substitute coverage. NH + RI + MS remain genuinely thin and require either Phase 4 scrapers or commercial data partnerships (BuildZoom / ATTOM / Regrid premium tiers).
 
 **Critical follow-up**: extend `src/lib/enrichment/regrid-parcel.ts` to read from `parcels_sidecar` as a fall-through when Regrid returns null AND state ∈ {UT, WV, OK, ME}. Without that read-side wiring, the data lands but never reaches the lead-gen pipeline. Match the existing Wave-2.C pattern of `lib/enrichment/<source>.ts` modules called from `orchestrator.ts`.
+
+## Sprint Z + Phase AA + AA-2 + AA-3 (2026-05-09 → 2026-05-10)
+
+Five full work blocks covering the wedge gap inventory in `~/.claude/plans/whats-the-14-days-purring-papert.md`. Detailed retrospectives there; this section is the navigation map for where things live in the codebase.
+
+**Modules + tables (migrations 00085-00096):**
+
+| # | Migration | What it ships |
+|---|---|---|
+| 00085 | parcels_sidecar | `parcel_sources` registry + `parcels_sidecar` data table (UT/WV/OK/ME/MS/NH/RI ~5M parcel rows pending Hetzner fill) |
+| 00086 | lien_sources | UT SCR + 6 UCC search portals |
+| 00087 | intent_columns | `leads.opportunity_stage` + `leads.reason_codes` + same on `homeowner_intakes` (Module 1) |
+| 00088 | territory_tier_caps | `claim_territory` RPC enforces 3/5/12/20 caps server-side |
+| 00089 | homeowner_consent | `homeowner_intakes.consent_given_at` + `consent_text_version` |
+| 00090 | saved_hidden_alerts_calibration | `saved_leads`, `hidden_leads`, `score_trade_weights`, `score_stage_modifiers`, `alert_rules` |
+| 00091 | stage_outreach_templates | 5 stage-specific seed templates (Module 12) |
+| 00092 | stage_history | `stage_history` table + `record_stage_history()` trigger |
+| 00093 | zip_pre_intent_aggregates | Pre-computed per-ZIP aggregate (was matview, converted to regular table after 8s timeout); `refresh_zip_pre_intent_aggregates()` SECURITY DEFINER helper |
+| 00094 | leads_source_column | `leads.source` (default 'permit') + `leads.parcel_sidecar_uid` + 2 partial indexes |
+| 00095 | check_constraints_aa3 | CHECK on `leads.source` (4 values), `alert_rules.kind` (4 kinds), `stage_history.changed_by_kind` (6 kinds) |
+| 00096 | stage_history_backfill | One-shot INSERT — synthesise initial history row for every pre-trigger lead |
+
+**New code modules:**
+
+| Path | Purpose |
+|---|---|
+| `src/lib/intent/` | classify.ts, derive.ts, reason-codes.ts (69 codes), types.ts, stage-colors.ts (single-source palette) |
+| `src/lib/alerts/` | types.ts, evaluate.ts (matchers per kind), dispatch.ts (Resend + sendLeadSMS) + 17 unit tests |
+| `src/lib/scoring/__tests__/calibration.test.ts` | 9 tests covering trade weights + stage modifier + cap behaviour |
+| `src/lib/outreach/hygiene.ts` | checkOutreachAllowed gate (consent + quiet-hours + suppression) |
+| `src/lib/auth/trade-gating.ts` | resolveTradeGate per-tier trade-visibility |
+| `src/lib/territory/plan-caps.ts` | tier → ZIP cap mapping used by 00088 RPC |
+| `src/lib/enrichment/parcels-sidecar.ts` | read-side fall-through enricher |
+| `src/components/dashboard/IntentChip.tsx` | stage chip + "for Xd" duration |
+| `src/components/dashboard/LeadActionButtons.tsx` | Save + Hide actions in drawer |
+| `src/components/analytics/StageHistogram.tsx` | reusable on intel + storm |
+| `src/components/map/TerritoryStatusChip.tsx` | exclusivity primacy on map |
+| `src/hooks/useSavedLeads.ts` + `useHiddenLeads.ts` | per-contractor sets for filter pills |
+
+**New API routes (6):**
+- `src/app/api/alerts/rules/route.ts` — Module 14 alert_rules CRUD (GET/POST/PATCH/DELETE)
+- `src/app/api/cron/synthesize-pre-intent/route.ts` — parcel-synthesis cron (Sun 04:00 UTC)
+- `src/app/api/cron/refresh-zip-aggregates/route.ts` — refresh `zip_pre_intent_aggregates` (Sun 03:00 UTC)
+- `src/app/api/leads/[id]/save/route.ts` — saved_leads upsert
+- `src/app/api/leads/[id]/hide/route.ts` — hidden_leads upsert
+- `src/app/api/territories/status/route.ts` — territory + watcher buckets
+
+**Renamed surface (Next 16 Turbopack route conflict fix):**
+- `/dashboard/settings/notifications` → `/dashboard/settings/alerts` because the existing `(dashboard)/settings/notifications` (per-channel toggles) collapsed with the new alert_rules page inside the same route group. The pre-existing notifications page at `/settings/notifications` is unaffected.
+
+**Vercel cron schedule (most still paused per Module 6):**
+- `0 3 * * 0` `/api/cron/refresh-zip-aggregates` — Sunday 03:00 UTC
+- `0 4 * * 0` `/api/cron/synthesize-pre-intent` — Sunday 04:00 UTC
+- All other 36 historical schedules remain disabled. Manual trigger via `/api/admin/data-health/trigger` still works for any disabled cron.
+
+**Operator runbooks (`scripts/`):**
+
+| Script | Purpose |
+|---|---|
+| `_apply-migration-NN.mjs` (one per recent migration) | Idempotent re-apply via Mgmt API |
+| `_apply-migrations-95-96.mjs` | Statement-by-statement application that survives the 8s timeout |
+| `_backfill-intent.mjs` | Stamps `opportunity_stage` + `reason_codes` on every existing lead. Keyset-paginated (`--start-after-id=<uuid>` resumes from a known cursor). |
+| `_populate-zip-aggregates-volume.mjs` | Chunked INSERT into `zip_pre_intent_aggregates` per ZIP-prefix (avoids the timeout that broke matview REFRESH) |
+| `_populate-matview-chunked.mjs` | Adds the FILTER+ILIKE columns (adu_90d, remodel_180d) once volume rows exist |
+| `_refresh-zip-aggregates.mjs` | Calls `refresh_zip_pre_intent_aggregates()` via Mgmt API + retries |
+| `_check-mv.mjs`, `_probe-db-health.mjs`, `_verify-all-migrations.mjs`, `_verify-aborted-only.mjs` | Health probes for the operator |
+
+**Operational state today (2026-05-10):**
+
+| What | Status |
+|---|---|
+| Schema 00085-00096 | ✅ All 12 migrations applied + verified (26+ schema checks pass) |
+| Backfill `opportunity_stage` | ⚠️ ~95k of 270k leads stamped. Resume with `--start-after-id` after Supabase project restart |
+| `zip_pre_intent_aggregates` row count | ⚠️ 0 rows (Mgmt API timeouts blocked initial population). Run `_populate-zip-aggregates-volume.mjs` after restart |
+| `stage_history` row count | ✅ Backfilled by 00096 to match every stamped lead |
+| `parcels_sidecar` row count | ⚠️ Awaiting Hetzner sidecar fill of UT/WV/OK/ME loaders |
+| Service-role JWT rotation | ⚠️ STILL PENDING (leaked 2026-05-04 in chat) |
+| Sentry DSN, Twilio account, free-tier API keys | ⚠️ Pending operational provisioning |
+| Supabase Pro upgrade | ⚠️ Due 2026-05-26; today's saturation is a preview of the Free-tier ceiling |
+
+**Where to start the next session:** read `~/.claude/plans/whats-the-14-days-purring-papert.md` from the top — Phase Z gap inventory + AA + AA-2 + AA-3 retrospectives are all there. The most leveraged unblock is a Supabase project restart from the dashboard (drops orphaned queries, lets `_populate-zip-aggregates-volume.mjs` finish, lets the backfill resume past 95k).
