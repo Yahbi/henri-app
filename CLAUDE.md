@@ -855,3 +855,147 @@ python -m playwright install chromium firefox
 - 12 new configs in `scripts/_sidecar_loaders/configs/`
 - `scripts/_sidecar_loaders/UPLOAD.md` — added §10 (ArcGIS, was missed) and §11 (Phase 4)
 - `docs/permit-catalog/opengov-viewpoint-partnership-2026-05-07.md` (new)
+
+## Audit + discovery tooling (2026-05-08)
+
+Two operational tasks — auditing the existing 12k+ `permit_sources` rows for missing field mappings, and discovering new endpoints for the 18 underserved states — both require unattended-runtime tools, NOT in-chat HTTP work. The right shape: scripts that run on dev machine or Hetzner overnight, output CSVs, then companion scripts bulk-apply the CSV to Supabase. Built four new scripts + a starter candidate list.
+
+**`scripts/_audit-field-mappings.ts`** — pulls every `permit_sources` row WHERE `enabled=true AND field_mapping_status='verified' AND discovered_via='production_grade_2026-04-29'`, probes each endpoint for a sample row (5 RPS with 200-400ms jitter, 5s timeout), runs heuristic chains to recommend `id_field / type_field / status_field / addr_field / date_field / value_field / desc_field / lat_field / lng_field`, and emits a CSV with one of these recommendations per row: `KEEP_AS_IS / UPDATE / DEAD_404 / DEAD_5XX / EMPTY / AUTH_REQUIRED / STALE_>90d`. Checkpoints every 500 rows. Resumable via `--resume`. Output: `docs/studies/henri_field_mappings_YYYY-MM-DD.csv`.
+
+**`scripts/_apply-field-mappings.mjs`** — companion. Reads the CSV, issues bulk UPDATEs for `recommendation=UPDATE` rows. Other recommendations are reported but NOT auto-applied unless `--apply-disables` is passed (which flips `enabled=false` on dead/empty rows). Always supports `--dry-run`.
+
+**`scripts/_discover-missing-permits.ts`** — reads a JSON candidate list (`scripts/_permit_candidates.json`), probes each URL for fresh permit data, applies rejection rules (4xx/5xx/captcha/auth/stale-90d/tiny-100), and emits a CSV with `verdict ∈ {ACCEPT, AUTH_REQUIRED, REJECT_*}` plus extracted field-presence flags (`has_owner_name / has_phone / has_email / has_lat_lng`). Output: `docs/studies/henri_missing_permits_YYYY-MM-DD.csv`.
+
+**`scripts/_ingest-missing-permits.mjs`** — companion. Reads the CSV, upserts ACCEPT rows into `permit_sources` with `discovered_via='discovery_2026-05-08'`. With `--include-backlog`, also inserts AUTH_REQUIRED rows as `enabled=false` for the Phase 4 scrape backlog.
+
+**`scripts/_permit_candidates.json`** — starter list, ~40 entries spanning the 18 underserved states (AK, HI, ID, KS, MS, ND, NE, RI, SD, WV, WY, ME, NM, OK, UT, VT, NH, MT, NV gaps). Hand-seeded from the 2026-05-06 + 2026-05-07 research findings + URL-pattern extrapolation for truly-empty states. **EVERY entry needs probing — many are educated-guess URLs.** Append more as research finds them.
+
+**For the 7 dead-permit states (ME, MS, NH, OK, RI, UT, WV)**: candidate list seeds the **parcel/recorder layer** instead of permits (per the user's directive). Henri's wedge can absorb parcel data via the existing `parcels` enricher (`src/lib/enrichment/regrid-parcel.ts`); a state-level parcel ArcGIS layer covers the entire state in one endpoint, matching the NJ-DCA pattern.
+
+### Runbook (typical session)
+
+```bash
+# A. Field-mapping audit of the 12k existing rows
+npx tsx scripts/_audit-field-mappings.ts --limit=500     # smoke test first
+npx tsx scripts/_audit-field-mappings.ts                 # full run (~60min wall)
+node scripts/_apply-field-mappings.mjs docs/studies/henri_field_mappings_2026-05-08.csv --dry-run
+node scripts/_apply-field-mappings.mjs docs/studies/henri_field_mappings_2026-05-08.csv
+node scripts/_apply-field-mappings.mjs <csv> --apply-disables    # optional, flip dead rows off
+
+# B. Discovery of new endpoints in the 18 underserved states
+# Append more candidates to scripts/_permit_candidates.json first if research permits
+npx tsx scripts/_discover-missing-permits.ts
+node scripts/_ingest-missing-permits.mjs docs/studies/henri_missing_permits_2026-05-08.csv --dry-run
+node scripts/_ingest-missing-permits.mjs docs/studies/henri_missing_permits_2026-05-08.csv --include-backlog
+```
+
+### Scope honesty
+
+- **The audit script is correct but unverified-at-scale**. The heuristic chains cover the dominant ArcGIS + Socrata key patterns. Edge cases (custom CKAN deployments, idiosyncratic municipal endpoints) will land in `EMPTY` or `UPDATE` with sparse mappings. Spot-check the first 50 CSV rows manually before bulk-applying.
+- **The candidate list is starter-quality, not exhaustive**. ~50% of entries are URL-pattern guesses (`opendata.<city>.gov/datasets/building-permits/api`) that need to be probed before they're trusted. The discovery script's `verdict` column does that work — if it returns `REJECT_404` for half the candidates, that's expected; the ACCEPT rows are the real yield. Iterate by appending candidates from probe failures with corrected URLs.
+- **OpenGov ViewPoint stays out of scope** per the 2026-05-07 partnership doc. The discovery script will mark ViewPoint URLs `AUTH_REQUIRED` and `--include-backlog` is the right way to track them (not `--apply-disables`).
+
+### Agent-3 expansion: parcel / lien / license-roster substitutes (2026-05-08 PM)
+
+Three parallel research agents expanded `_permit_candidates.json` with live-probed findings for:
+1. **AK / HI / ID** (Agent 1) — 2 ACCEPT_PLANNING_ONLY (Boise pipeline trackers), 1 STALE-but-valuable Honolulu Socrata schema, 7 Phase-4 backlog entries (Honolulu DPP highest-priority).
+2. **KS / NE / SD** (Agent 2) — 3 ACCEPT (Sedgwick Co KS, **Butler Co KS gold-tier with electrician/plumber/HVAC phones**, Lincoln NE), 4 Phase-4 backlog (Overland Park EnerGov, Omaha + Rapid City + OKC Accela).
+3. **ME / MS / NH / OK / RI / UT / WV** (Agent 3) — parcel/assessor/lien/license_roster substitutes for the 7 dead-permit states. Standout finds:
+   - **UT State Construction Registry (SCR)** — every UT job >$5k files preliminary notice within 20 days. Returns project_address + owner + GC + sub + license. Search-only HTML, but described by the agent as "the GOLD STANDARD construction lead-gen data source nationally."
+   - **WV ParcelSummary table** — 1.5M records with `Owner1`, `Owner2`, `NewOwner` (recent-transfer flag — strongest construction-leading-indicator), `DeedBook`, full assessor data. Closes WV in one endpoint.
+   - **WV Site Address Points** — 1.05M records including `Res_Name + Res_Phone` (rare in 911 datasets — direct phone-fill source).
+   - **UT LIR Parcels** — assessor companion with OWN_NAME / LAST_SALE_DT / BUILT_YR / BLDG_SQFT.
+   - **UT DOPL** — downloadable monthly CSV of ALL active licenses (only state with bulk download).
+   - **OK Canadian County** — 84k parcels, fresh 2026-04-30, displayField=owners_name.
+
+**New `data_layer` field on candidates** marks the kind of data the endpoint serves:
+- `permit` (default) — current behavior, inserts into `permit_sources` enabled=true
+- `planning_pipeline` — Boise-style pre-permit signals; Phase 1 lead source for builders/GCs
+- `parcel` / `assessor` — owner + sale + building characteristics for property-history enrichment
+- `lien` — UCC + mechanic's-lien filings (UT SCR is the standout)
+- `license_roster` — contractor license boards (UT DOPL has bulk CSV; rest are search-only)
+
+**Script changes**:
+- `_discover-missing-permits.ts` — CSV header now includes `data_layer` column. Default 'permit' if absent. `_skip: true` candidates filtered out (block-comment placeholders).
+- `_ingest-missing-permits.mjs` — partitions ACCEPT and AUTH_REQUIRED buckets by `data_layer`. Permit entries flow through the existing path. Non-permit entries (parcel/assessor/lien/license_roster/planning_pipeline) are skipped by default; pass `--include-non-permit` to stage them in `permit_sources` with `enabled=false` and `discovered_via='non_permit_layer_<layer>_2026-05-08'` for a follow-up migration to dedicated tables (`parcel_sources`, `lien_sources`, etc.) when those exist.
+
+**Known schema gap**: Henri's DB doesn't yet have separate tables for parcel/lien/license_roster sources. The `--include-non-permit` flag is a hold-pattern that captures the discovery in `permit_sources` (disabled) so the metadata isn't lost. A future migration will move these rows to proper tables and route them to:
+- `parcel`/`assessor` → existing `regrid-parcel.ts` enricher (already in orchestrator.ts) — extend to read these new sources
+- `license_roster` → `contractor-license.ts` enricher (already exists) — extend with bulk-roster ingest cron
+- `lien` → new `lien_sources` table + `liens-courtlistener` cron pattern (mirrors the existing 00069 migration sidecar)
+- `planning_pipeline` → score booster (low-urgency lead, scored as future-construction signal)
+
+**Coverage delta after this session** (theoretical, pre-Hetzner-deploy):
+
+| State | Before | After (verified ACCEPT) | Phase 4 backlog | Substitute layer |
+|---|---|---|---|---|
+| KS | 0 | Sedgwick Co + Butler Co (gold-tier phones) | Overland Park, Topeka | — |
+| NE | 0 | Lincoln (Accela mirror) | Omaha Accela | — |
+| SD | Sioux Falls only | Sioux Falls only | Rapid City Tyler EnerGov | — |
+| AK | 0 | 0 | Anchorage MOA, Juneau CBJ | — |
+| HI | 0 | Honolulu historical (frozen) | Honolulu DPP, Hawaii Co, Maui Co | — |
+| ID | 0 | Boise planning trackers (pre-permit) | Boise Citizen Portal, Meridian | — |
+| ME | 0 | 0 | Portland eTRAKiT | Maine parcels + PFR roster |
+| MS | 0 | 0 | (none viable for permits) | Harrison Co parcels (borderline), MSBCL roster |
+| NH | Nashua only | Nashua only | Manchester | NH parcels (stale), VGSI assessor, OPLC roster |
+| OK | Tulsa stopgap | Tulsa stopgap | OKC Incapsula | Canadian Co parcels, CIB roster |
+| RI | 0 | 0 | (ViewPoint partnership only) | RI CRB roster (strongest source), Providence VGSI |
+| UT | SLC frozen | SLC frozen | SLC Accela | UT statewide parcels, LIR assessor, **SCR (gold), DOPL bulk CSV** |
+| VT | Act 250 only | Act 250 only | (ViewPoint towns) | — |
+| WV | 0 | 0 | (none viable for permits) | **WV ParcelSummary (1.5M, gold), Site Addresses (Res_Phone)** |
+| WY | Cheyenne stopgap | Cheyenne stopgap | Jackson SmartGov | — |
+| MT | Bozeman | Bozeman | Missoula Accela | — |
+| NV | Henderson Socrata + Las Vegas ArcGIS | same | Clark Co + LV Accela + Henderson EnerGov + Reno + Sparks + NLV + Carson City | — |
+| NJ | DCA statewide (2.7M) | DCA statewide (2.7M) | — | — |
+
+**Honest verdict on the 18 underserved states**: 8 of 18 now have at least one verified ACCEPT-grade endpoint (KS, NE, SD partial, ID partial, NJ already, NV already, MT already, NH partial). The remaining 10 are dependent on Phase 4 scrapers OR substitute layers (parcel/lien/license). The substitute-layer strategy turns dead-permit-states into LIVE data via the parcel + license_roster + lien substitutes — this is the path forward for ME / MS / RI / UT / WV / OK / NH where direct permit APIs are structurally unavailable.
+
+## Phase 5 substitute-layer ingest (2026-05-08 PM)
+
+Closed the SCHEMA + LOADER gap that the discovery scripts left open. The 2026-05-08 AM session produced a candidate list with substitute-layer endpoints for 7 dead-permit states; the existing `--include-non-permit` flag staged them in `permit_sources` (enabled=false) as a hold pattern. Phase 5 ships proper tables + a real loader so those substitutes can flow into Henri's pipeline.
+
+**New migrations**:
+- `00085_parcels_sidecar.sql` — creates `parcel_sources` registry + `parcels_sidecar` data table. Mirrors the `contractor_license_sources` (00073) + `liens_county_recorder` (00084) pattern. Service-role-write only, RLS-enabled-no-policies. Seeds 7 verified ArcGIS endpoints (UT statewide + UT LIR + WV ParcelSummary + WV Site Addresses + OK Canadian County + ME parcels + MS Harrison Co), all `enabled=false` until per-source smoke-test on Hetzner verifies field_map correctness.
+- `00086_lien_sources_ut_scr.sql` — creates `lien_sources` registry. Seeds the **UT State Construction Registry** (gold-standard preliminary-notice feed nationally — every $5k+ UT job files within 20 days, returns project + owner + GC + sub + license + amount) plus 6 UCC search portals (UT, ME, MS, NH, OK, RI, WV). All `phase4_scrape: true` since they need ASP.NET ViewState scrapers. ALSO appends 4 net-new contractor_license_sources (NH OPLC, RI CRB, MS State Board, WV DoL) — RI CRB is the strongest of the four (registers ALL residential contractors, returns phone).
+
+**New table — `public.parcels_sidecar`** distinct from Henri's existing Regrid-sourced `public.parcels`:
+- Captures STATE-SPECIFIC signals Regrid sometimes misses: `recent_transfer_at` (derived from WV's NewOwner field), `resident_phone` (rare — WV Site Addresses has it), full assessor breakdown.
+- Read-path strategy: orchestrator should fall through to `parcels_sidecar` when Regrid returns null AND state ∈ {ME, MS, NH, OK, RI, UT, WV}. NOT yet wired in `regrid-parcel.ts` — follow-up task.
+
+**New loader — `scripts/_sidecar_loaders/load_parcels_arcgis.py`**:
+- Diverges from the Phase 1-3 YAML-config pattern. Reads enabled rows from `parcel_sources` Supabase table directly. The DB is the source of truth — operators can enable/disable sources via SQL without a redeploy.
+- Stdlib + Supabase REST only. No new Hetzner dependencies.
+- Pagination via ArcGIS `resultOffset` (capped at `--max-pages` × `--page-size`, default 25 × 2000 = 50k rows per run).
+- Updates `parcel_sources.last_run_at` + `last_count` for cron observability.
+- Smoke-test workflow: `DEBUG_HTML_DUMP=1 python load_parcels_arcgis.py UT-LIR-PARCELS --max-pages=3` to verify field_map before flipping `enabled=true`.
+
+**Cron schedule** (added to UPLOAD.md §12): weekly Sunday 05:00 UTC. Parcel data refreshes quarterly upstream — daily is overkill, weekly catches up cleanly.
+
+**What ships and what doesn't**:
+
+| Phase 5 component | Status |
+|---|---|
+| Migration 00085 (parcel_sources + parcels_sidecar) | Ready to apply |
+| Migration 00086 (lien_sources + UT SCR + 4 net-new rosters) | Ready to apply |
+| `load_parcels_arcgis.py` (Phase 5 loader) | Ready to deploy |
+| Per-source field_map verification | Operator work on Hetzner (~15 min/source × 7 = ~2 hours) |
+| Read-side enricher integration (orchestrator.ts → parcels_sidecar) | NOT shipped — follow-up task |
+| UT SCR scraper (gold-tier preliminary-notice feed) | NOT shipped — Phase 4 ASP.NET ViewState work, ~1 week |
+| License-roster scrapers for NH/RI/MS/WV | NOT shipped — Phase 4 HTML-search scrapers |
+| MS-only path (Harrison Co borderline-stale) | Marginal value; deprioritize |
+
+**Coverage delta after Phase 5 + verification**:
+
+| State | Before today | After 00085 + smoke-test |
+|---|---|---|
+| UT | SLC frozen Socrata only | UT-LIR (1.58M parcels w/ owner + last_sale + built_yr) |
+| WV | 0 | WV-PARCEL-SUMMARY (1.5M, NewOwner flag) + WV-SITE-ADDRESSES (1.05M w/ Res_Phone) |
+| OK | Tulsa stopgap | + Canadian Co (84k fresh parcels w/ owner) |
+| ME | 0 | ME parcels (716k geometry, ADB join TBD) |
+| MS | 0 | Harrison Co only (borderline) |
+| NH | Nashua only | (Phase 5 doesn't add NH parcels — stale state aggregator. NH gap stays open.) |
+| RI | 0 | (Phase 5 doesn't add RI parcels — no statewide aggregator exists. RI gap stays open.) |
+
+**Net effect**: 4 of the 7 dead-permit states (UT, WV, OK, ME) get meaningful Phase 5 substitute coverage. NH + RI + MS remain genuinely thin and require either Phase 4 scrapers or commercial data partnerships (BuildZoom / ATTOM / Regrid premium tiers).
+
+**Critical follow-up**: extend `src/lib/enrichment/regrid-parcel.ts` to read from `parcels_sidecar` as a fall-through when Regrid returns null AND state ∈ {UT, WV, OK, ME}. Without that read-side wiring, the data lands but never reaches the lead-gen pipeline. Match the existing Wave-2.C pattern of `lib/enrichment/<source>.ts` modules called from `orchestrator.ts`.

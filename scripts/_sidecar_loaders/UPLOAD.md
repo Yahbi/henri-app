@@ -267,7 +267,7 @@ Camoufox startup, it won't block the next one.
 ### Phase 4 inventory
 
 | Loader | Tenants | Configs |
-|---|---|---|
+| --- | --- | --- |
 | `load_accela.py` | NV (Clark, LV, Reno, Washoe, NLV, Sparks), UT (SLC), MT (Missoula), OK (OKC) | 9 |
 | `load_etrakit.py` | ME (Portland) | 1 |
 | `load_smartgov.py` | WY (Teton/Jackson) | 1 |
@@ -276,3 +276,92 @@ Camoufox startup, it won't block the next one.
 OpenGov ViewPoint is intentionally NOT scraped. See
 `docs/permit-catalog/opengov-viewpoint-partnership-2026-05-07.md` —
 that's a partnership path, not a scraping path.
+
+## 12. Phase 5 — substitute-layer ingest (parcels) for the 7 dead-permit states (added 2026-05-08)
+
+Phase 5 closes the gap for the 7 states with no public construction-permit
+APIs (ME / MS / NH / OK / RI / UT / WV). Strategy: substitute parcel +
+assessor + recent-transfer signals for the missing permits.
+
+### Migrations to apply first
+
+```sql
+-- via Supabase SQL editor, in order:
+-- supabase/migrations/00085_parcels_sidecar.sql      — parcel_sources + parcels_sidecar
+-- supabase/migrations/00086_lien_sources_ut_scr.sql  — lien_sources + UT SCR + 4 net-new rosters
+```
+
+00085 creates a `parcel_sources` registry (mirrors `contractor_license_sources`
+shape) + `parcels_sidecar` data table. Seeds 7 verified ArcGIS endpoints,
+all `enabled=false`. 00086 creates `lien_sources` registry + seeds UT SCR
+(the gold-standard preliminary-notice feed nationally) + UCC search portals.
+
+### Deploy the loader to Hetzner
+
+```powershell
+scp -i $HOME\.ssh\henri_sidecar `
+  "C:\Users\yabis\Desktop\Henri App\scripts\_sidecar_loaders\load_parcels_arcgis.py" `
+  henri@5.78.152.250:~/scrapling_loaders/
+```
+
+No new dependencies — uses only stdlib + the Supabase REST API.
+
+### Per-source smoke-test (one source at a time)
+
+```bash
+# Activate the existing scrapling-env (already on the box).
+source ~/scrapling-env/bin/activate
+set -a && source ~/.henri-sidecar.env && set +a
+
+# Smoke-test one source (UT-LIR is the highest-yield).
+DEBUG_HTML_DUMP=1 python ~/scrapling_loaders/load_parcels_arcgis.py UT-LIR-PARCELS \
+  --max-pages=3
+```
+
+Inspect:
+- Did `parcels_sidecar` receive rows? `SELECT COUNT(*) FROM parcels_sidecar WHERE state_code='UT';`
+- Are owner_name / situs_addr / total_appraisal populated? If not, the
+  field_map in parcel_sources needs adjustment — fields like `OWN_NAME`
+  vs `Own_Name` vs `OWNER_NAME` vary per ArcGIS tenant.
+- Adjust the field_map directly in the DB:
+  ```sql
+  UPDATE parcel_sources
+    SET field_map = field_map || '{"owner_name":"OWNER_NAME"}'::jsonb
+    WHERE source_key = 'UT-LIR-PARCELS';
+  ```
+- Once the field_map yields populated rows, flip enabled=true:
+  ```sql
+  UPDATE parcel_sources SET enabled = true WHERE source_key = 'UT-LIR-PARCELS';
+  ```
+
+### Cron schedule (after verification)
+
+Parcel data refreshes quarterly upstream. Daily cron is overkill — weekly
+is sufficient. Stagger from existing Phase 1-4 windows:
+
+```cron
+# Weekly parcel-sidecar refresh (Sunday 05:00 UTC)
+0 5 * * 0 /home/henri/scrapling_loaders/run.sh load_parcels_arcgis.py --all-enabled --max-pages=50 >> /home/henri/scrapling-loaders.log 2>&1
+```
+
+### Phase 5 source inventory
+
+After 00085 + 00086 land + per-source verification:
+
+| source_key | State | Layer | ~Records | Notes |
+| --- | --- | --- | ---: | --- |
+| UT-STATEWIDE-PARCELS | UT | parcel | 1.58M | Geometry only — pair with UT-LIR |
+| UT-LIR-PARCELS | UT | assessor | 1.58M | OWNER + LAST_SALE + BUILT_YR — primary UT |
+| WV-PARCEL-SUMMARY | WV | assessor | 1.5M | NewOwner flag — strongest leading indicator |
+| WV-SITE-ADDRESSES | WV | parcel | 1.05M | Has Res_Phone — direct phone-fill |
+| OK-CANADIAN-COUNTY | OK | assessor | 84k | Fresh 2026-04-30, owners_name displayField |
+| ME-PARCELS-ORGANIZED-TOWNS | ME | parcel | 716k | Geometry only — needs ADB-table join (TBD) |
+| MS-HARRISON-COUNTY | MS | parcel | 108k | Borderline 140-day stale |
+
+### Phase 5 NOT shipped (deferred)
+
+- **UT SCR (preliminary notices) loader** — the gold-standard endpoint
+  is in `lien_sources` (00086) but its `phase4_scrape: true` flag
+  means it needs a custom ASP.NET ViewState scraper. Targets `liens_county_recorder` (00084) once written.
+- **License-roster scrapers for NH/RI/MS/WV** — added to `contractor_license_sources` (00086) but `enabled=false`. Each needs an HTML-search scraper. RI CRB is the highest-priority of the four (registers ALL residential contractors, returns phone).
+- **Read-side enricher integration** — Henri's orchestrator doesn't yet read from `parcels_sidecar`. Follow-up: extend `regrid-parcel.ts` to fall through to `parcels_sidecar` when Regrid returns null AND state ∈ {ME, MS, NH, OK, RI, UT, WV}.

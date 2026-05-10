@@ -137,6 +137,14 @@ function mapLead(lead: Lead): LeadData {
     permitContractorName: lead.permits?.contractor_name ?? undefined,
 
     rawValue: lead.permit_value ?? lead.pipeline_value ?? undefined,
+
+    // Module 1 (2026-05-09) — intent classification fields.
+    opportunityStage: lead.opportunity_stage ?? null,
+    reasonCodes: lead.reason_codes ?? null,
+    tradeTags: lead.trade_tags ?? null,
+    // Phase AA-3 — provenance. Drives the "Pre-intent signal" badge
+    // on LeadCard for parcel_synthesis leads.
+    source: lead.source ?? null,
   };
 }
 

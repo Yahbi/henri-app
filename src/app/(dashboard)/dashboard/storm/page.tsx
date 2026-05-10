@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Copy, Check, Zap, AlertTriangle } from "lucide-react";
 import { useStorm } from "@/hooks/useStorm";
+import { useLeads } from "@/hooks/useLeads";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExpandableBanner } from "@/components/ui/expandable-banner";
 import { Card } from "@/components/ui/card";
+import { StageHistogram } from "@/components/analytics/StageHistogram";
 
 /* ─── Helpers ─── */
 function mapNwsSeverity(severity: string): "Severe" | "Moderate" | "Minor" {
@@ -142,6 +144,25 @@ export default function StormPage() {
   }, [stormMode]);
 
   const { alerts, territories, isLoading } = useStorm();
+
+  // Phase AA — pull the contractor's leads so we can break them down by
+  // stage on the storm page. Restoration trades benefit from seeing
+  // "how many of my permit-stage leads are filed-with-no-contractor"
+  // alongside the active weather alerts. `isLoading` from useStorm is
+  // independent of `useLeads` — render the histogram with its own
+  // loading state.
+  const { data: leadsForStage, isLoading: leadsLoading } = useLeads();
+
+  // Restoration-trade subset — the stages that matter most for
+  // storm-driven outreach (permit stages where the homeowner is still
+  // hiring + maintenance windows on completed projects). Pure
+  // in-memory filter; the histogram component already counts/sorts.
+  const restorationLeads = useMemo(() => {
+    return (leadsForStage ?? []).filter((l) => {
+      const t = (l.trade ?? "").toLowerCase();
+      return t.includes("roof") || t.includes("siding") || t.includes("exterior") || t.includes("gutter") || t === "roofing";
+    });
+  }, [leadsForStage]);
 
   const mappedAlerts = alerts.map((alert) => ({
     id: alert.id,
@@ -347,6 +368,22 @@ export default function StormPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Phase AA — Stage breakdown for restoration-trade leads. Lets the
+          contractor see where their roofing / exterior / siding pipeline
+          actually sits (permit-filed-no-contractor vs. project-moving vs.
+          maintenance) alongside the current storm alerts. Falls back to
+          all leads if the restoration filter returns empty (e.g. for a
+          GC who handles everything). */}
+      <div>
+        <h2 className="text-lg font-heading font-normal text-foreground mb-3">
+          {restorationLeads.length > 0 ? "Restoration-trade pipeline by stage" : "Pipeline by stage"}
+        </h2>
+        <StageHistogram
+          leads={restorationLeads.length > 0 ? restorationLeads : leadsForStage}
+          isLoading={leadsLoading}
+        />
       </div>
 
       {/* Historical Timeline */}

@@ -134,6 +134,11 @@ interface ContextResponse {
   /** Wave 2.B — up to 5 most-recent FEMA disaster declarations
    *  affecting the lead's state (last 3 years). */
   recent_disasters: RecentDisaster[];
+  /** Module 7 — ISO timestamp when the lead entered its CURRENT stage.
+   *  Sourced from `stage_history` (migration 00092). Null when the
+   *  trigger hasn't fired yet (legacy rows pre-migration) or the lead
+   *  has no `opportunity_stage` value at all. */
+  stage_entered_at: string | null;
 }
 
 /** Approx miles between two lat/lng pairs via haversine. */
@@ -556,6 +561,26 @@ export async function GET(
       }
     }
 
+    // Module 7 — fetch the most-recent stage_history row for this lead
+    // so the IntentChip can show "for 12d". Best-effort — when the
+    // table doesn't exist (pre-migration 00092) or the lead has no
+    // history rows yet, falls through to null.
+    let stageEnteredAt: string | null = null;
+    try {
+      const { data: history } = await supabase
+        .from("stage_history")
+        .select("changed_at")
+        .eq("lead_id", id)
+        .order("changed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (history && typeof history.changed_at === "string") {
+        stageEnteredAt = history.changed_at;
+      }
+    } catch {
+      // graceful-degrade — table missing, RLS denial, etc.
+    }
+
     const body: ContextResponse = {
       derived,
       adjacent_count_90d,
@@ -565,6 +590,7 @@ export async function GET(
       nri_risk: nriRisk,
       nfip_history: nfipHistory,
       recent_disasters: recentDisasters,
+      stage_entered_at: stageEnteredAt,
     };
 
     return NextResponse.json(body, {

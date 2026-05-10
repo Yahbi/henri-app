@@ -62,6 +62,16 @@
 /*.jpeg
 /*.heic
 
+# Audit / research output artifacts dropped at repo root by one-off
+# scripts (field-mapping discovery CSVs, audit logs). Kept locally
+# for reference but too large + often-regenerated to track in git.
+/*.csv
+/*.log
+
+# Local Claude scheduled-task lockfile — changes per session. Not
+# meaningful to other clones.
+/.claude/scheduled_tasks.lock
+
 # Generated migration bundle — `pnpm migrate-bundle` writes the
 # concatenated SQL to this path so it can be pasted into the
 # Supabase SQL editor when the CLI auth is unavailable. Regeneratable

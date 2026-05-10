@@ -18,6 +18,8 @@ import { PermitAnomalyPanel } from "./PermitAnomaly";
 import { LeadSummaryPanel } from "./LeadSummary";
 import { usePredictions } from "@/hooks/usePredictions";
 import { ApplicantBadge } from "./ApplicantBadge";
+import { IntentChip, IntentChipReasonsList } from "./IntentChip";
+import { LeadActionButtons } from "./LeadActionButtons";
 import { DrawerResizeHandle } from "./DrawerResizeHandle";
 import { LeadDrawerScoreColumn, type UrgencyBadge } from "./LeadDrawerScoreColumn";
 import { LeadDrawerHomeownerColumn } from "./LeadDrawerHomeownerColumn";
@@ -145,6 +147,9 @@ export function LeadDetailDrawer({
       aria-modal="true"
       aria-labelledby="lead-drawer-title"
     >
+      {/* Module 11 (2026-05-09) — Save / Hide actions next to close. */}
+      <LeadActionButtons leadId={lead.id} />
+
       {/* Close button */}
       <button
         onClick={onClose}
@@ -189,7 +194,7 @@ export function LeadDetailDrawer({
             )}
 
             {/* Applicant badge — Phase 1.3 DIY-vs-pro classifier. */}
-            <div className="mt-2">
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
               <ApplicantBadge
                 permit={{
                   applicant_name:
@@ -204,8 +209,27 @@ export function LeadDetailDrawer({
                 }}
                 lead={{ cascade_count: lead.cascadeCount ?? null }}
               />
+              {/* Module 1 (2026-05-09) — intent stage chip. Hover for the
+                  top reason codes. Renders only when classifier has stamped
+                  the row; nothing shown for pre-backfill rows.
+                  Module 7 — passes stage_entered_at so the chip can
+                  show "for 12d" duration in the lead's current stage. */}
+              <IntentChip
+                stage={lead.opportunityStage}
+                reasonCodes={lead.reasonCodes}
+                stageEnteredAt={contextData?.stage_entered_at ?? null}
+              />
             </div>
           </div>
+
+          {/* Module 1 (2026-05-09) — top-3 reason codes in plain English.
+              Sits between the chip + applicant row and the scope-of-work
+              block so the contractor sees the "why this matters today"
+              context up top. Hidden when there are no reason codes
+              (pre-backfill or uncategorised rows). */}
+          {lead.reasonCodes && lead.reasonCodes.length > 0 && (
+            <IntentChipReasonsList reasonCodes={lead.reasonCodes} topN={3} />
+          )}
 
           {/* Permit Description — read from joined permit row or on-demand. */}
           {(lead.permitDescription ?? fetchedPermit?.description) && (

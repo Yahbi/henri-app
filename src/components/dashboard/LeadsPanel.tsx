@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Search, EyeOff, Bookmark } from "lucide-react";
 import { LeadCard, type LeadData } from "./LeadCard";
 import { useExclusivity } from "@/hooks/useExclusivity";
 import { useCapacityPrefs } from "@/hooks/useCapacityPrefs";
+import { useHiddenLeads } from "@/hooks/useHiddenLeads";
+import { useSavedLeads } from "@/hooks/useSavedLeads";
 import { applyCapacityFilter, hasActivePrefs } from "@/lib/capacity/types";
 import { CapacityFilterBar } from "./CapacityFilterBar";
 
@@ -17,7 +19,24 @@ const CARD_HEIGHT = 112;
 /** Extra rows rendered above/below the viewport as a scroll buffer. */
 const OVERSCAN = 8;
 
-type FilterType = "all" | "hot" | "warm" | "cool" | "cascade" | "homeowner";
+type FilterType =
+  | "all"
+  | "hot"
+  | "warm"
+  | "cool"
+  | "cascade"
+  | "homeowner"
+  // Phase AA — saved-leads filter. Mirrors the show-hidden toggle but
+  // as a positive filter (i.e. show ONLY leads in saved_leads).
+  | "saved"
+  // Module 1 (2026-05-09) — intent-stage filter values. Drive the
+  // `opportunityStage` filter on the LeadsPanel. Each maps 1:1 to the
+  // 11 allowed `opportunity_stage` values from src/lib/intent/reason-codes.ts.
+  | "stage_pre_intent"
+  | "stage_permit_no_contractor"
+  | "stage_stalled_expired"
+  | "stage_maintenance"
+  | "stage_subcontractor";
 type SortType = "score" | "newest" | "value";
 
 interface LeadsPanelProps {
@@ -43,6 +62,15 @@ const FILTERS: { value: FilterType; label: string; dot?: string }[] = [
   { value: "cool",      label: "Cool (<50)",         dot: "var(--cool)" },
   { value: "cascade",   label: "Cascade only" },
   { value: "homeowner", label: "Homeowner requests" },
+  { value: "saved",     label: "Saved" },
+  // Module 1 (2026-05-09) — opportunity-stage filters. Live alongside
+  // the existing urgency/cascade filters. Each one maps to one or more
+  // values of `opportunity_stage` written by the intent classifier.
+  { value: "stage_pre_intent",          label: "Pre-intent" },
+  { value: "stage_permit_no_contractor", label: "Permit, no contractor" },
+  { value: "stage_stalled_expired",      label: "Stalled / expired" },
+  { value: "stage_maintenance",          label: "Maintenance opportunities" },
+  { value: "stage_subcontractor",        label: "Subcontractor opportunity" },
 ];
 
 /* Sort options — fed to the custom popover. Was a native <select>
@@ -77,12 +105,25 @@ export function LeadsPanel({
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [search, setSearch] = useState("");
+  // Module 8 — show-hidden toggle. Defaults to false so hidden leads
+  // disappear from the panel; the contractor can flip it on to audit
+  // what they've hidden.
+  const [showHidden, setShowHidden] = useState(false);
 
   // Phase 0a: fetch exclusivity locks for every rendered lead. Returns
   // an empty map when migration 00031 isn't applied — no visual change
   // in that case (badges simply don't render).
   const leadIdsForLocks = useMemo(() => leads.map((l) => l.id), [leads]);
   const { locks } = useExclusivity(leadIdsForLocks);
+
+  // Module 8 — hidden_leads ids for the current contractor. Empty set
+  // when migration 00090 isn't applied or no leads have been hidden.
+  const { hiddenIds } = useHiddenLeads();
+
+  // Phase AA — saved_leads ids. Used both by the "Saved" filter case
+  // below (positive filter: show ONLY saved) AND for the optional
+  // bookmark indicator on the lead card row.
+  const { savedIds } = useSavedLeads();
 
   // Phase 0a: capacity filter (wedge #7). Pulls preferences from the
   // Settings → Capacity page and hides leads outside the contractor's
@@ -92,7 +133,12 @@ export function LeadsPanel({
 
   // All remaining hooks MUST run before the collapsed early-return.
   const filtered = useMemo(() => {
-    let result = [...leads];
+    // Module 8 — strip hidden leads up front unless the user has
+    // toggled "Show hidden" on. This runs BEFORE every other filter so
+    // capacity counters reflect the post-hide universe.
+    let result = showHidden
+      ? [...leads]
+      : leads.filter((l) => !hiddenIds.has(l.id));
 
     // Text search across address, owner name, and description
     if (search.trim()) {
@@ -111,6 +157,32 @@ export function LeadsPanel({
       case "cool": result = result.filter((l) => l.score < 50); break;
       case "cascade": result = result.filter((l) => l.cascade); break;
       case "homeowner": result = result.filter((l) => l.isHomeowner); break;
+      // Phase AA — saved-leads filter. Positive filter — shows ONLY
+      // leads in saved_leads. Pairs with the Save button in the
+      // drawer (LeadActionButtons → /api/leads/[id]/save).
+      case "saved": result = result.filter((l) => savedIds.has(l.id)); break;
+      // Module 1 (2026-05-09) — intent-stage filter cases. Each matches
+      // one or more of the 11 `opportunity_stage` values written by the
+      // classifier. The "subcontractor" filter looks at reason codes
+      // because the stage is `permit_filed_with_contractor` or
+      // `project_moving` either of which can imply a sub opportunity.
+      case "stage_pre_intent":
+        result = result.filter((l) => l.opportunityStage === "pre_intent");
+        break;
+      case "stage_permit_no_contractor":
+        result = result.filter((l) => l.opportunityStage === "permit_filed_no_contractor");
+        break;
+      case "stage_stalled_expired":
+        result = result.filter((l) =>
+          l.opportunityStage === "stalled" || l.opportunityStage === "expired");
+        break;
+      case "stage_maintenance":
+        result = result.filter((l) => l.opportunityStage === "maintenance_upsell");
+        break;
+      case "stage_subcontractor":
+        result = result.filter((l) =>
+          (l.reasonCodes ?? []).includes("subcontractor_opportunity"));
+        break;
     }
 
     switch (sort) {
@@ -124,7 +196,20 @@ export function LeadsPanel({
     }
 
     return result;
-  }, [leads, filter, sort, search]);
+  }, [leads, filter, sort, search, hiddenIds, showHidden, savedIds]);
+
+  // Module 8 — count of leads currently being hidden (for the toggle pill).
+  const hiddenCount = useMemo(
+    () => leads.filter((l) => hiddenIds.has(l.id)).length,
+    [leads, hiddenIds],
+  );
+
+  // Phase AA — count of saved leads in the current `leads` set
+  // (used by the "Saved (N)" pill below the filter dropdown).
+  const savedCount = useMemo(
+    () => leads.filter((l) => savedIds.has(l.id)).length,
+    [leads, savedIds],
+  );
 
   // Phase 0a — apply capacity filter AFTER urgency/trade/sort so the
   // "N filtered out" count is computed against what the contractor would
@@ -282,6 +367,48 @@ export function LeadsPanel({
             )}
           </div>
 
+          {/* Module 8 — show-hidden toggle. Renders only when the
+              contractor has actually hidden ≥1 lead (otherwise it's
+              dead UI). Click to flip; pill colour follows on/off. */}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowHidden((v) => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                showHidden
+                  ? "border-primary/40 bg-primary-10 text-primary"
+                  : "border-border bg-transparent text-muted-foreground hover:bg-accent"
+              }`}
+              title={showHidden ? "Hide them again" : `Show ${hiddenCount} hidden lead${hiddenCount === 1 ? "" : "s"}`}
+              aria-pressed={showHidden}
+            >
+              <EyeOff className="h-3 w-3" />
+              {showHidden ? `Hiding revealed (${hiddenCount})` : `${hiddenCount} hidden`}
+            </button>
+          )}
+
+          {/* Phase AA — saved-leads quick filter. Renders only when
+              the contractor has actually saved ≥1 lead. Click flips
+              between "all leads" and "saved only". Mirrors the
+              Hide-toggle visual language so the two complete the
+              save/hide pair in one toolbar slot each. */}
+          {savedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilter((f) => (f === "saved" ? "all" : "saved"))}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                filter === "saved"
+                  ? "border-primary/40 bg-primary-10 text-primary"
+                  : "border-border bg-transparent text-muted-foreground hover:bg-accent"
+              }`}
+              title={filter === "saved" ? "Show all leads again" : `Show only ${savedCount} saved lead${savedCount === 1 ? "" : "s"}`}
+              aria-pressed={filter === "saved"}
+            >
+              <Bookmark className="h-3 w-3" />
+              {filter === "saved" ? `Saved only (${savedCount})` : `${savedCount} saved`}
+            </button>
+          )}
+
           {/* Sort — custom popover (NOT a native select) so the open panel
            * inherits theme tokens. Native <option> elements render with
            * the OS color scheme, which produced white-on-white text in
@@ -341,6 +468,7 @@ export function LeadsPanel({
         }
         locks={locks}
         collidingAddresses={collidingAddresses}
+        savedIds={savedIds}
       />
     </aside>
   );
@@ -362,9 +490,13 @@ interface VirtualListProps {
    *  render a trade + permit-UUID disambiguation suffix. See the
    *  address-collision memo in the parent. */
   collidingAddresses: Set<string>;
+  /** Phase AA — set of lead ids the contractor has saved. Drives the
+   *  inline bookmark indicator on each card. Empty set when migration
+   *  00090 isn't applied or no rows saved (no visual change). */
+  savedIds: Set<string>;
 }
 
-function VirtualizedLeadList({ leads, activeLead, onSelectLead, emptyMessage, locks, collidingAddresses }: VirtualListProps) {
+function VirtualizedLeadList({ leads, activeLead, onSelectLead, emptyMessage, locks, collidingAddresses, savedIds }: VirtualListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(0);
@@ -428,6 +560,7 @@ function VirtualizedLeadList({ leads, activeLead, onSelectLead, emptyMessage, lo
               onClick={() => handleClick(lead)}
               exclusivity={locks[lead.id]}
               disambiguate={collidingAddresses.has(lead.fullAddress || lead.addr)}
+              isSaved={savedIds.has(lead.id)}
             />
           </div>
         ))}

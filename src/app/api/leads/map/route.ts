@@ -18,6 +18,7 @@ import { hasSupabase } from "@/lib/env";
 import { isGodModeEmail, GOD_MODE_MAP_LIMIT } from "@/lib/auth/god-mode";
 import { fetchAllTerritoryZips } from "@/lib/territories/fetch-all";
 import { requireContractor } from "@/lib/auth/requireContractor";
+import { resolveTradeGate } from "@/lib/auth/trade-gating";
 
 export const runtime = "nodejs";
 
@@ -40,9 +41,26 @@ export async function GET(request: NextRequest) {
 
     /* ── Parse query params ────────────────────────────────────────────── */
     const { searchParams } = new URL(request.url);
-    const tradeFilter = searchParams.get("trade");
+    const requestedTrade = searchParams.get("trade");
     const statusFilter = searchParams.get("status");
     const daysBack = parseInt(searchParams.get("days") ?? "90", 10);
+
+    /* ── Module 19 (2026-05-09) — trade-gating per plan tier.
+     *  founder/starter/pro → leads matching profile.trade
+     *  enterprise          → all trades (the "GC tier")
+     *  god-mode            → all trades (bypass)
+     *  When the requested ?trade= is more restrictive than the gate
+     *  (e.g. founder profile.trade=plumbing and ?trade=plumbing) we use
+     *  the requested value. When it's broader ("all" or another trade)
+     *  we silently snap it back to the gate to enforce the plan limit. */
+    const tradeGate = await resolveTradeGate(supabase, user);
+    // Effective filter: respect the gate, but allow the UI to narrow further
+    // to a single trade when the contractor sees all trades. Founder-tier
+    // contractors who try to ?trade=hvac when their gate says plumbing still
+    // get the gate's plumbing filter.
+    const tradeFilter: string | null = tradeGate.seesAllTrades
+      ? (requestedTrade && requestedTrade !== "all" ? requestedTrade : null)
+      : tradeGate.tradeFilter;
     // Plan-gated default.
     //   god-mode (dev/owner allowlist): no cap — paginate until Supabase
     //     returns an empty page or a statement timeout aborts a later page
@@ -71,7 +89,13 @@ export async function GET(request: NextRequest) {
      * silently truncated and dropped ~80% of downstream leads from the map. */
     const userZips = await fetchAllTerritoryZips(supabase, user.id);
 
-    if (userZips.length === 0) {
+    // 2026-05-09 — guard relaxed for god-mode. The early-return blanked the
+    // map for any contractor (including the founder allowlist) whose
+    // territories table was empty. God-mode already bypasses the
+    // contractor_id filter below; gating it on territories was over-strict
+    // and made the new intent-classification UI un-demoable. Subscribers
+    // still hit the early-return so the map respects their claimed scope.
+    if (userZips.length === 0 && !godMode) {
       return NextResponse.json(emptyCollection(), {
         headers: { "Cache-Control": "private, max-age=60" },
       });
@@ -115,6 +139,10 @@ export async function GET(request: NextRequest) {
       mailing_address: string | null;
       latitude: number | null;
       longitude: number | null;
+      // Module 1 (2026-05-09) — intent classification.
+      opportunity_stage: string | null;
+      reason_codes: string[] | null;
+      trade_tags: string[] | null;
       permits: unknown;
     };
     const leads: LeadsRow[] = [];
@@ -132,6 +160,7 @@ export async function GET(request: NextRequest) {
           year_built, home_sqft, lot_sqft,
           assessed_value, property_value, owner_since, owner_occupied,
           mailing_address,
+          opportunity_stage, reason_codes, trade_tags,
           latitude, longitude,
           permits!inner (
             address, city, state, zip,
@@ -280,6 +309,12 @@ export async function GET(request: NextRequest) {
           owner_since: row.owner_since ?? null,
           owner_occupied: row.owner_occupied ?? null,
           mailing_address: row.mailing_address ?? null,
+          // Module 1 (2026-05-09) — intent classification surfaces.
+          // Powers the stage-color recolor toggle, the 5 preset filters,
+          // and the popup chip.
+          opportunity_stage: row.opportunity_stage ?? null,
+          reason_codes: row.reason_codes ?? [],
+          trade_tags: row.trade_tags ?? [],
         },
       });
     }
@@ -336,9 +371,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const collection: GeoJSON.FeatureCollection = {
+    /* Module 19 — surface trade-gating decision in the response so the UI
+     * can render an "Upgrade to GC tier to see all trades" banner. The
+     * extra `_meta` field is non-standard GeoJSON but ignored by every
+     * MapLibre source we use. */
+    const collection: GeoJSON.FeatureCollection & { _meta?: unknown } = {
       type: "FeatureCollection",
       features,
+      _meta: {
+        seesAllTrades: tradeGate.seesAllTrades,
+        gatedTrade: tradeGate.tradeFilter,
+        plan: tradeGate.plan,
+        profileTrade: tradeGate.profileTrade,
+      },
     };
 
     return NextResponse.json(collection, {

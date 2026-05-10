@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { Plus, Loader2, CalendarDays } from "lucide-react";
 import { useLeads, useUpdateLeadStatus } from "@/hooks/useLeads";
+import { STAGE_LABEL_MAP } from "@/lib/intent/stage-colors";
 import { formatCurrency } from "@/types/lead";
 import type { Lead, LeadStatus } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,6 +38,10 @@ interface KanbanLead {
   yearBuilt?: number;
   homeSqft?: string | number;
   assessedValue?: number;
+  /* Module 23 (2026-05-09) — intent classification surfaces on the
+   * kanban card. Tints the card's left border + adds a stage chip
+   * alongside the trade chip. */
+  opportunityStage?: string | null;
 }
 
 interface KanbanColumnDef {
@@ -125,6 +131,7 @@ function mapLeadToKanban(lead: Lead): KanbanLead {
     yearBuilt: lead.year_built ?? undefined,
     homeSqft: lead.home_sqft ?? undefined,
     assessedValue: lead.assessed_value ?? undefined,
+    opportunityStage: lead.opportunity_stage ?? null,
   };
 }
 
@@ -165,6 +172,10 @@ function urgencyDotColor(days: number | undefined): string {
   return "#9CA3AF";
 }
 
+// Module 23 — stage palette resolver. Imported once at module scope so
+// the KanbanCard component can short-circuit when a lead has no stage.
+import { paletteFor } from "@/lib/intent/stage-colors";
+
 function KanbanCard({
   lead,
   onDragStart,
@@ -186,6 +197,10 @@ function KanbanCard({
 }) {
   const badge = lead.trade ? tradeBadgeColors(lead.trade) : null;
   const urgencyColor = urgencyDotColor(lead.permitAgeDays);
+  // Module 23 — stage palette for the kanban card. Tint the left border +
+  // emit a stage chip in row 2 alongside the trade pill. Falls through
+  // gracefully when the lead hasn't been classified yet.
+  const stagePalette = paletteFor(lead.opportunityStage);
 
   // Tooltip shown on card hover (native `title` attr, no library). Surfaces
   // the enrichment data so reps can triage without opening the drawer.
@@ -209,6 +224,14 @@ function KanbanCard({
         e.dataTransfer.effectAllowed = "move";
         onDragStart(e, lead);
       }}
+      style={
+        // Module 23 — left-stripe tint matching the stage palette. We
+        // override the existing border-left color via inline style so a
+        // missing palette doesn't strip the default border-l-border class.
+        stagePalette
+          ? { borderLeftWidth: "3px", borderLeftColor: stagePalette.color }
+          : undefined
+      }
       className={cn(
         "bg-card border border-border rounded-xl p-3 transition-shadow",
         isUpdating ? "opacity-50 cursor-not-allowed" : "cursor-grab active:cursor-grabbing hover:shadow-md",
@@ -251,10 +274,30 @@ function KanbanCard({
         </div>
       </div>
 
-      {/* Row 2: Trade badge + permit number + exclusivity countdown */}
+      {/* Row 2: Stage chip + trade badge + permit number + exclusivity */}
       <div className="flex items-center gap-1.5 mt-2 flex-wrap">
         <ExclusivityBadge summary={exclusivity} size="xs" />
         <WatchersBadge bucket={exclusivity?.watchers_bucket} size="xs" />
+        {/* Module 23 — intent stage chip. Same palette as drawer chip,
+            map pin, and LeadCard left-border. Renders only when the
+            classifier has stamped the row (no chip = pre-backfill). */}
+        {stagePalette && (
+          <span
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium leading-tight"
+            style={{
+              backgroundColor: `${stagePalette.color}1A`,
+              color: stagePalette.color,
+              border: `1px solid ${stagePalette.color}66`,
+            }}
+            title={stagePalette.label}
+          >
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: stagePalette.color }}
+            />
+            {stagePalette.label}
+          </span>
+        )}
         {badge && lead.trade && (
           <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium capitalize", badge.bg, badge.text)}>
             {lead.trade}
@@ -343,12 +386,39 @@ export function KanbanBoard() {
     [leads],
   );
 
+  // Module 8 — `?stage=` URL filter. Restricts the kanban to leads
+  // whose opportunity_stage matches; "all" / missing param = show
+  // everything. The dropdown writes the URL via router.replace so
+  // the value survives reload + share-able links.
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const stageFilter = searchParams.get("stage") ?? "all";
+
+  const setStageFilter = useCallback(
+    (next: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "all") {
+        params.delete("stage");
+      } else {
+        params.set("stage", next);
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname);
+    },
+    [router, pathname, searchParams],
+  );
+
   // Group leads into columns
   const pipeline = useMemo<Record<string, KanbanLead[]>>(() => {
     const groups: Record<string, KanbanLead[]> = {
       new: [], contacted: [], quoted: [], proposal: [], won: [], lost: [], archived: [],
     };
-    for (const lead of leads ?? []) {
+    const filtered = (leads ?? []).filter((l) => {
+      if (stageFilter === "all") return true;
+      return l.opportunity_stage === stageFilter;
+    });
+    for (const lead of filtered) {
       const mapped = mapLeadToKanban(lead);
       if (groups[mapped.status]) {
         groups[mapped.status].push(mapped);
@@ -357,7 +427,7 @@ export function KanbanBoard() {
       }
     }
     return groups;
-  }, [leads]);
+  }, [leads, stageFilter]);
 
   const handleDragStart = useCallback((e: React.DragEvent, lead: KanbanLead, fromCol: string) => {
     setDraggedLead({ lead, fromCol });
@@ -448,13 +518,30 @@ export function KanbanBoard() {
             <span className="text-primary">{formatCurrency(Math.round(weightedTotal))}</span> weighted value
           </h1>
         </div>
-        <button
-          onClick={() => setAddDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:opacity-90 transition-opacity"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add lead
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Module 8 — stage filter (URL-driven) */}
+          <label className="text-xs text-muted-foreground" htmlFor="kanban-stage-filter">
+            Stage
+          </label>
+          <select
+            id="kanban-stage-filter"
+            value={stageFilter}
+            onChange={(e) => setStageFilter(e.target.value)}
+            className="text-sm rounded-lg border border-border bg-card px-2 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            <option value="all">All stages</option>
+            {Object.entries(STAGE_LABEL_MAP).map(([slug, label]) => (
+              <option key={slug} value={slug}>{label}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => setAddDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add lead
+          </button>
+        </div>
       </div>
 
       {/* Columns */}
@@ -465,6 +552,22 @@ export function KanbanBoard() {
             : COLUMNS.map((col) => {
                 const colLeads = pipeline[col.id] ?? [];
                 const colTotal = colLeads.reduce((s, l) => s + l.rawValue, 0);
+                // Module 25 (2026-05-09) — stage mix per column. Aggregate
+                // the column's leads by opportunity_stage and surface the
+                // top 3 as colored dots in the column header so the
+                // contractor can see their funnel composition without
+                // expanding cards.
+                const stageMix = (() => {
+                  const map = new Map<string, number>();
+                  for (const l of colLeads) {
+                    if (!l.opportunityStage) continue;
+                    map.set(l.opportunityStage, (map.get(l.opportunityStage) ?? 0) + 1);
+                  }
+                  return Array.from(map.entries())
+                    .map(([stage, n]) => ({ stage, n, palette: paletteFor(stage) }))
+                    .filter((s) => s.palette !== null)
+                    .sort((a, b) => b.n - a.n);
+                })();
                 return (
                   <div
                     key={col.id}
@@ -484,6 +587,30 @@ export function KanbanBoard() {
                         <span>&middot;</span>
                         <span>{winProbs[col.id]} win prob</span>
                       </div>
+                      {/* Module 25 — stage-mix dots row. Renders only when
+                          ≥1 lead in the column has been classified. */}
+                      {stageMix.length > 0 && (
+                        <div className="flex items-center gap-1.5 mt-1.5" aria-label="Stage mix">
+                          {stageMix.slice(0, 3).map((s) => (
+                            s.palette && (
+                              <span
+                                key={s.stage}
+                                className="inline-flex items-center gap-1 text-[10px] text-fg-subtle"
+                                title={`${s.palette.label}: ${s.n}`}
+                              >
+                                <span
+                                  className="inline-block w-1.5 h-1.5 rounded-full"
+                                  style={{ background: s.palette.color }}
+                                />
+                                <span>{s.n}</span>
+                              </span>
+                            )
+                          ))}
+                          {stageMix.length > 3 && (
+                            <span className="text-[10px] text-fg-subtle/70">+{stageMix.length - 3}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Cards */}

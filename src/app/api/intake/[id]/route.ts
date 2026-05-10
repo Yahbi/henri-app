@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
 
@@ -108,6 +109,116 @@ export async function GET(
     return NextResponse.json(body);
   } catch (error) {
     logger.error("Intake detail GET error", { error: error instanceof Error ? error.message : String(error) });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  PATCH /api/intake/[id]                                                    */
+/*                                                                            */
+/*  Homeowner-side opt-out / withdraw flow. The only mutation we accept here  */
+/*  is { action: "withdraw" } which:                                          */
+/*    - sets `status='withdrawn'`                                             */
+/*    - clears `consent_given_at` (so the outreach hygiene gate refuses any   */
+/*      future SMS / email targeting this intake)                             */
+/*                                                                            */
+/*  Pairs with Module 4 of the Phase Z sprint (consent capture +              */
+/*  withdrawal). The hygiene check in `src/lib/outreach/hygiene.ts` already   */
+/*  refuses sends when `consent_given_at IS NULL`, so flipping the column     */
+/*  back to null is sufficient — no separate suppression list needed.         */
+/* -------------------------------------------------------------------------- */
+
+const PatchSchema = z.object({
+  action: z.literal("withdraw"),
+});
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id: intakeId } = await params;
+    if (!intakeId) {
+      return NextResponse.json({ error: "Intake ID is required" }, { status: 400 });
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = PatchSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", detail: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Re-fetch the intake to verify ownership before mutating.
+    const { data: intake, error: intakeErr } = await supabase
+      .from("homeowner_intakes")
+      .select("id, status, contact_email")
+      .eq("id", intakeId)
+      .single();
+
+    if (intakeErr || !intake) {
+      return NextResponse.json({ error: "Intake not found" }, { status: 404 });
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role, email")
+      .eq("id", user.id)
+      .single();
+
+    const isHomeowner =
+      profile?.role === "homeowner" && profile?.email === intake.contact_email;
+
+    if (!isHomeowner) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    if (intake.status === "withdrawn") {
+      // Idempotent — re-withdrawing is a no-op success.
+      return NextResponse.json({ success: true, status: "withdrawn", already: true });
+    }
+
+    const { error: updateErr } = await supabase
+      .from("homeowner_intakes")
+      .update({
+        status: "withdrawn",
+        consent_given_at: null,
+      })
+      .eq("id", intakeId);
+
+    if (updateErr) {
+      logger.error("Intake withdraw update failed", {
+        intakeId,
+        error: updateErr.message,
+      });
+      return NextResponse.json(
+        { error: "Failed to withdraw intake" },
+        { status: 500 },
+      );
+    }
+
+    logger.info("Intake withdrawn by homeowner", {
+      intakeId,
+      previousStatus: intake.status,
+    });
+
+    return NextResponse.json({ success: true, status: "withdrawn" });
+  } catch (error) {
+    logger.error("Intake detail PATCH error", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

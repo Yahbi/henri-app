@@ -1,3 +1,5 @@
+import { queryParcelsSidecar } from "./parcels-sidecar";
+
 /* ── Free property enrichment via verified public parcel endpoints ───────
  *
  * Each lookup below has been directly probed against the live service
@@ -1233,6 +1235,14 @@ export async function enrichFromCounty(
       if (hit) return hit;
     }
   }
+
+  // Sidecar fallthrough for the 7 dead-permit states (ME/MS/NH/OK/RI/UT/WV).
+  // Populated by Hetzner load_parcels_arcgis.py from the parcel_sources
+  // registry created in migration 00085. Returns null until Hetzner fills
+  // the table — at which point this captures owner_name + assessed_value
+  // + recent_transfer for those states whose permits APIs are dead.
+  const sidecarHit = await queryParcelsSidecar(state, address);
+  if (sidecarHit) return sidecarHit;
 
   // Fallback — OpenStreetMap gives us year_built + building levels for
   // some fraction of buildings everywhere in the US.

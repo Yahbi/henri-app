@@ -114,6 +114,32 @@ export interface Lead {
   is_homeowner_intake?: boolean;
   created_at: string;
   updated_at: string;
+
+  /* Intent classification (migration 00087, Module 1).
+   * `opportunity_stage` is one of 11 allowed values defined in
+   * src/lib/intent/reason-codes.ts. `reason_codes` carries up to ~10
+   * codes from the 69-code library; the drawer surfaces the top 3 in
+   * the chip tooltip. `trade_tags` is the richer trade taxonomy (22
+   * values per founder prompt) that supplements the 10-value
+   * `trade` field above. All three are NULLable for graceful degrade
+   * on rows the classifier couldn't categorise. */
+  opportunity_stage?: string | null;
+  reason_codes?: string[] | null;
+  trade_tags?: string[] | null;
+
+  /* Phase AA-3 — provenance.
+   * 'permit'           — created from a permits row by the score cron (default).
+   * 'parcel_synthesis' — synthesised from parcels_sidecar by the
+   *                      synthesize-pre-intent cron when ≥3 pre-intent
+   *                      reason codes fired without a permit.
+   * 'event_trigger'    — created from a code_violation / disaster /
+   *                      REO event lookup (future).
+   * 'manual'           — contractor manually added via AddLeadDialog. */
+  source?: string | null;
+  /* Phase AA-3 — when source='parcel_synthesis', points to the
+   * parcels_sidecar row that drove the synthesis. NULL for permit-
+   * derived leads. */
+  parcel_sidecar_uid?: string | null;
 }
 
 /* ── Filter / sort params for API calls ── */

@@ -1,0 +1,775 @@
+[
+  {
+    "_comment": "STARTER candidate list for _discover-missing-permits.ts. Hand-seeded from the 2026-05-06 + 2026-05-07 research + reasonable URL-pattern extrapolation for the truly-empty states. EVERY entry needs probing — ~50% are educated-guess URLs. Append more as research finds them. Schema: state, jurisdiction, jurisdiction_type, platform, endpoint_url, evidence_url (optional), terms_url (optional), notes (optional).",
+    "_skip": true
+  },
+
+  {
+    "state": "AK",
+    "jurisdiction": "Anchorage",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://services.arcgis.com/PtjjXPkTAPmxg6Tr/arcgis/rest/services/Building_Permits/FeatureServer/0/query",
+    "evidence_url": "https://data.muni.org/",
+    "notes": "Anchorage's GIS department publishes via data.muni.org ArcGIS Hub. Layer name guessed; probe to confirm."
+  },
+  {
+    "state": "AK",
+    "jurisdiction": "Fairbanks North Star Borough",
+    "jurisdiction_type": "county",
+    "platform": "arcgis",
+    "endpoint_url": "https://hub.fnsb.gov/datasets/building-permits/api",
+    "evidence_url": "https://hub.fnsb.gov/"
+  },
+
+  {
+    "state": "HI",
+    "jurisdiction": "Honolulu (City+County)",
+    "jurisdiction_type": "city",
+    "platform": "socrata",
+    "endpoint_url": "https://data.honolulu.gov/resource/eg5a-aci8.json",
+    "evidence_url": "https://data.honolulu.gov/Permitting/Building-Permits-Issued/eg5a-aci8",
+    "notes": "Honolulu has had a long-running Socrata feed. ID is plausible but verify."
+  },
+  {
+    "state": "HI",
+    "jurisdiction": "Hawaii (state)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://geoportal.hawaii.gov/datasets/building-permits/api",
+    "evidence_url": "https://geoportal.hawaii.gov/",
+    "notes": "Hawaii state geoportal — speculative endpoint. State-level permits unlikely."
+  },
+
+  {
+    "state": "ID",
+    "jurisdiction": "Boise",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.cityofboise.org/datasets/building-permits/api",
+    "evidence_url": "https://opendata.cityofboise.org/"
+  },
+  {
+    "state": "ID",
+    "jurisdiction": "Meridian",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.meridiancity.org/datasets/building-permits/api",
+    "evidence_url": "https://opendata.meridiancity.org/"
+  },
+  {
+    "state": "ID",
+    "jurisdiction": "Idaho Falls",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://hub.idahofallsidaho.gov/datasets/building-permits/api"
+  },
+
+  {
+    "state": "KS",
+    "jurisdiction": "Wichita",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.wichita.gov/datasets/building-permits/api"
+  },
+  {
+    "state": "KS",
+    "jurisdiction": "Overland Park",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://data.opkansas.org/datasets/building-permits/api"
+  },
+  {
+    "state": "KS",
+    "jurisdiction": "Olathe",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.olatheks.org/datasets/building-permits/api"
+  },
+  {
+    "state": "KS",
+    "jurisdiction": "Topeka",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.topeka.org/datasets/building-permits/api"
+  },
+
+  {
+    "state": "MS",
+    "jurisdiction": "Mississippi (state parcel)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.gis.ms.gov/datasets/parcels/api",
+    "notes": "DEAD-PERMIT STATE — research parcels/recorders instead."
+  },
+
+  {
+    "state": "ND",
+    "jurisdiction": "North Dakota (state parcel)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services.arcgis.com/dPlsK3xsZqkNDIwc/arcgis/rest/services/ND_Statewide_Parcels/FeatureServer/0/query",
+    "notes": "ND has a state-aggregated parcel layer via NDGIS Hub; speculative URL."
+  },
+
+  {
+    "state": "NE",
+    "jurisdiction": "Omaha",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata-cityofomaha.opendata.arcgis.com/datasets/building-permits/api"
+  },
+  {
+    "state": "NE",
+    "jurisdiction": "Lincoln",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.lincoln.ne.gov/datasets/building-permits/api"
+  },
+  {
+    "state": "NE",
+    "jurisdiction": "Bellevue",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://gisdata.bellevue.net/datasets/building-permits/api"
+  },
+
+  {
+    "state": "RI",
+    "jurisdiction": "Rhode Island (state parcels via RIGIS)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services1.arcgis.com/dyfHaB57VdULRoVF/arcgis/rest/services/E911_Sites/FeatureServer/0/query",
+    "evidence_url": "https://www.rigis.org/",
+    "notes": "DEAD-PERMIT STATE — every RI permit portal is OAuth-walled ViewPoint. Research statewide parcel/E911-site/assessor layers via RIGIS."
+  },
+
+  {
+    "state": "SD",
+    "jurisdiction": "Rapid City",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.rcgov.org/datasets/building-permits/api"
+  },
+  {
+    "state": "SD",
+    "jurisdiction": "Aberdeen",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://hub.aberdeen.sd.us/datasets/building-permits/api"
+  },
+
+  {
+    "state": "WV",
+    "jurisdiction": "West Virginia (state parcels)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services.arcgis.com/HRPe58oUyo8HOMdT/arcgis/rest/services/WV_Statewide_Tax_Parcels/FeatureServer/0/query",
+    "evidence_url": "https://data.wv.gov/",
+    "notes": "DEAD-PERMIT STATE — WV has a state parcel layer via WVGIS. Probe at the parcel layer instead."
+  },
+
+  {
+    "state": "WY",
+    "jurisdiction": "Wyoming (statewide parcel hub)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://data.geospatialhub.org/datasets/parcels/api",
+    "evidence_url": "https://data.geospatialhub.org/"
+  },
+  {
+    "state": "WY",
+    "jurisdiction": "Laramie",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://hub.laramie.gov/datasets/building-permits/api"
+  },
+  {
+    "state": "WY",
+    "jurisdiction": "Gillette / Campbell County",
+    "jurisdiction_type": "county",
+    "platform": "arcgis",
+    "endpoint_url": "https://hub.ccgov.net/datasets/building-permits/api"
+  },
+
+  {
+    "state": "ME",
+    "jurisdiction": "Maine (state parcels)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://gis.maine.gov/server/rest/services/parcels/MapServer/0/query",
+    "evidence_url": "https://www.maine.gov/geolib/",
+    "notes": "DEAD-PERMIT STATE — research parcels via Maine GeoLib."
+  },
+  {
+    "state": "ME",
+    "jurisdiction": "Bangor",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.bangormaine.gov/datasets/building-permits/api"
+  },
+  {
+    "state": "ME",
+    "jurisdiction": "Lewiston",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.lewistonmaine.gov/datasets/building-permits/api"
+  },
+
+  {
+    "state": "NM",
+    "jurisdiction": "Las Cruces",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://maps.las-cruces.org/server/rest/services/Open_Data/Building_Permits/FeatureServer/0/query"
+  },
+  {
+    "state": "NM",
+    "jurisdiction": "Rio Rancho",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.rrnm.gov/datasets/building-permits/api"
+  },
+  {
+    "state": "NM",
+    "jurisdiction": "Farmington",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://hub.fmtn.org/datasets/building-permits/api"
+  },
+
+  {
+    "state": "OK",
+    "jurisdiction": "Oklahoma (state parcels via OK ABLE Commission)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services1.arcgis.com/T67XvyEv7C9zSbAr/arcgis/rest/services/Statewide_Parcels/FeatureServer/0/query",
+    "notes": "DEAD-PERMIT STATE — research parcel layer."
+  },
+  {
+    "state": "OK",
+    "jurisdiction": "Norman",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://data-normanok.opendata.arcgis.com/datasets/building-permits/api",
+    "notes": "Confirmed empty in 2026-05-06 research; re-probe in case dataset added."
+  },
+
+  {
+    "state": "UT",
+    "jurisdiction": "Utah (state parcels via SGID)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services1.arcgis.com/99lidPhWCzftIe9K/arcgis/rest/services/UtahStatewideParcels/FeatureServer/0/query",
+    "evidence_url": "https://opendata.gis.utah.gov/",
+    "notes": "UGRC SGID has a verified statewide parcel layer."
+  },
+  {
+    "state": "UT",
+    "jurisdiction": "Provo",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.provo.org/datasets/building-permits/api"
+  },
+  {
+    "state": "UT",
+    "jurisdiction": "St. George",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.sgcity.org/datasets/building-permits/api"
+  },
+  {
+    "state": "UT",
+    "jurisdiction": "West Valley City",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://gisportal.wvc-ut.gov/server/rest/services/Open_Data/Building_Permits/FeatureServer/0/query"
+  },
+  {
+    "state": "UT",
+    "jurisdiction": "Ogden",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://maps.ogdencity.com/server/rest/services/Open_Data/Building_Permits/FeatureServer/0/query"
+  },
+
+  {
+    "state": "VT",
+    "jurisdiction": "Vermont (state parcels via VCGI)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://maps.vcgi.vermont.gov/arcgis/rest/services/EGC_services/OPENDATA_VCGI_CADASTRAL_SP_NOCACHE_v1/FeatureServer/0/query",
+    "evidence_url": "https://geodata.vermont.gov/",
+    "notes": "VCGI publishes statewide cadastral data; ArcGIS REST verified pattern."
+  },
+
+  {
+    "state": "NH",
+    "jurisdiction": "New Hampshire (state parcels)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services1.arcgis.com/dlbVCcINguHpsYsT/arcgis/rest/services/NH_Statewide_Parcels/FeatureServer/0/query",
+    "notes": "DEAD-PERMIT STATE outside Nashua — research parcels via NH GRANIT."
+  },
+  {
+    "state": "NH",
+    "jurisdiction": "Manchester",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://hub.manchesternh.gov/datasets/building-permits/api"
+  },
+
+  {
+    "state": "MT",
+    "jurisdiction": "Billings",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://city-of-billings-map-library-billings.hub.arcgis.com/datasets/building-permits/api"
+  },
+  {
+    "state": "MT",
+    "jurisdiction": "Great Falls",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://hub.greatfallsmt.net/datasets/building-permits/api"
+  },
+  {
+    "state": "MT",
+    "jurisdiction": "Helena",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://hub.helenamt.gov/datasets/building-permits/api"
+  },
+
+  {
+    "state": "NV",
+    "jurisdiction": "Carson City",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://data-carsoncity.opendata.arcgis.com/datasets/building-permits/api"
+  },
+
+  {
+    "_block_comment": "Agent-2 verified additions for KS/NE/SD (2026-05-08).",
+    "_skip": true
+  },
+  {
+    "state": "KS",
+    "jurisdiction": "Sedgwick County (Wichita area)",
+    "jurisdiction_type": "county",
+    "platform": "arcgis",
+    "endpoint_url": "https://services3.arcgis.com/PRyeAMTgQS8gkd0F/arcgis/rest/services/Permit_Status_2024/FeatureServer/0/query",
+    "evidence_url": "https://www.arcgis.com/home/item.html?id=9b42a2b528cb434bb2aa6178178f6922",
+    "terms_url": "https://www.sedgwickcounty.org/gis/",
+    "notes": "VERIFIED 2026-05-08: HTTP 200, 4,817 records, last edit 2026-05-07. Fields: PlatSubID, PermitStatus, PermitUse (NEW BUILDING/ADDITION/INTERIOR REMODEL/MANUFACTURED HOME/SWIMMING POOL/CARPORT), PermitType. Covers Wichita + Sedgwick County municipalities. NO owner/contractor/phone (parcel-tied only). Use this instead of Wichita-direct (Wichita has no own feed)."
+  },
+  {
+    "state": "KS",
+    "jurisdiction": "Butler County (El Dorado, Andover, Augusta — east of Wichita)",
+    "jurisdiction_type": "county",
+    "platform": "arcgis",
+    "endpoint_url": "https://services5.arcgis.com/SU4Aj97XUNDcwkDb/arcgis/rest/services/Permits_Premium/FeatureServer/3/query",
+    "evidence_url": "https://www.arcgis.com/home/item.html?id=5f61ec36e418473d9ce793c051885978",
+    "terms_url": "https://www.bucoks.com/",
+    "notes": "GOLD-TIER VERIFIED 2026-05-08: HTTP 200, 521 records on Building_Permit table (FeatureServer/3), last edit 2026-05-07. Fields include landowner, jobsite_address, mail_address/city/state/zip, general_contractor + general_phone, foundation_contractor + phone, electrician + phone, hvac + phone, other_contractor (plumber implied). Solar_Permit sublayer at FeatureServer/4. Permit types: New Construction / Addition / Renovation / Demolition. owner_name=YES, contractor_name=YES, phone=YES. Direct fix for Henri's 1% phone-fill ceiling within Butler County."
+  },
+  {
+    "state": "KS",
+    "jurisdiction": "Butler County (Solar Permits sublayer)",
+    "jurisdiction_type": "county",
+    "platform": "arcgis",
+    "endpoint_url": "https://services5.arcgis.com/SU4Aj97XUNDcwkDb/arcgis/rest/services/Permits_Premium/FeatureServer/4/query",
+    "evidence_url": "https://www.arcgis.com/home/item.html?id=5f61ec36e418473d9ce793c051885978",
+    "notes": "Companion to butler-county-ks at FeatureServer/3. Solar-specific permits — separate ingest target for solar contractors. Same schema with phones."
+  },
+  {
+    "state": "NE",
+    "jurisdiction": "Lincoln",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://services1.arcgis.com/wpJGOi6N4Rq5cqFv/arcgis/rest/services/AccelaResidentialPermits/FeatureServer/5/query",
+    "evidence_url": "https://www.arcgis.com/home/item.html?id=ce66f2ee14d545a6804a86ca0905a33e",
+    "terms_url": "https://www.lincoln.ne.gov/City/Departments/Building-Safety",
+    "notes": "VERIFIED 2026-05-08: HTTP 200, 7,160 records on layer 5 (Residential Permits), 559 issued since 2025-09-01 (very fresh). Last edit 2026-05-07. Source: City of Lincoln Accela. Fields: BldgCombinedTable_Issued, BldgCombinedTable_PermNo, BldgCombinedTable_CurrStatus, BldgCombinedTable_DescWork, parcels_LEGAL. NO owner/contractor/phone in this geographic mirror — Accela primary."
+  },
+
+  {
+    "_block_comment": "Phase 4 backlog — Agent-2 confirmed AUTH_REQUIRED. Insert with --include-backlog flag.",
+    "_skip": true
+  },
+  {
+    "state": "KS",
+    "jurisdiction": "Overland Park",
+    "jurisdiction_type": "city",
+    "platform": "tyler_energov",
+    "endpoint_url": "https://energov.opkansas.org",
+    "evidence_url": "https://www.arcgis.com/home/item.html?id=91af26fc6fd84b8b8640fa77899c6bd8",
+    "terms_url": "https://www.opkansas.org/government/services/permits-and-inspections/",
+    "notes": "Tyler EnerGov (EPL). Public Building Permits Dashboard exists but underlying feature service NOT publicly indexed. EnerGov public portal at energov.opkansas.org may expose REST. Phase 4 scrape candidate.",
+    "verdict": "AUTH_REQUIRED"
+  },
+  {
+    "state": "KS",
+    "jurisdiction": "Topeka",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://topeka.maps.arcgis.com/apps/webappviewer/index.html?id=c2488ad09aa5483d9bce8f7b8e959a60",
+    "evidence_url": "https://www.arcgis.com/home/item.html?id=c2488ad09aa5483d9bce8f7b8e959a60",
+    "terms_url": "https://www.topeka.org/development-services/building-permits/",
+    "notes": "Web map item modified 2025-11-10 (fresh). Underlying feature service URL hidden in webapp config. Default view shows last 90 days. Phase 4 task: scrape feature service URL from webapp network requests, then promote to ACCEPT.",
+    "verdict": "ENDPOINT_HIDDEN_NEEDS_DISCOVERY"
+  },
+  {
+    "state": "NE",
+    "jurisdiction": "Omaha",
+    "jurisdiction_type": "city",
+    "platform": "accela",
+    "endpoint_url": "https://permitsandinspections.cityofomaha.org",
+    "evidence_url": "https://apps.dogis.org/findpermits/",
+    "terms_url": "https://permitsandinspections.cityofomaha.org/",
+    "notes": "Accela Civic Platform. DOGIS hosts Accela_Dynamic MapServer with parcels/inspector areas only — no public Building Permits feature layer. ACA portal at permitsandinspections.cityofomaha.org. Phase 4 scrape candidate via load_accela.py.",
+    "verdict": "AUTH_REQUIRED"
+  },
+  {
+    "state": "SD",
+    "jurisdiction": "Rapid City / Pennington County",
+    "jurisdiction_type": "city",
+    "platform": "tyler_energov",
+    "endpoint_url": "https://eservices.rcgov.org/EnerGov_Prod/SelfService",
+    "evidence_url": "https://www.rcgov.org/departments/community-development/building-services-1.html",
+    "terms_url": "https://www.rcgov.org/",
+    "notes": "City uses Tyler EnerGov SelfService. Public portal at eservices.rcgov.org. Phase 4 candidate via load_energov_ss.py.",
+    "verdict": "AUTH_REQUIRED"
+  },
+
+  {
+    "_block_comment": "Agent-1 verified additions for AK/HI/ID (2026-05-08).",
+    "_skip": true
+  },
+  {
+    "state": "ID",
+    "jurisdiction": "Boise (Development Tracker)",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://services1.arcgis.com/WHM6qC35aMtyAAlN/arcgis/rest/services/Development_Tracker_Open_Data/FeatureServer/0/query",
+    "evidence_url": "https://opendata.cityofboise.org/datasets/development-tracker-open-data",
+    "terms_url": "https://www.cityofboise.org/about-the-city/website-policies/",
+    "notes": "VERIFIED 2026-05-08: HTTP 200, 735 records, latest 2026-04-06. PLANNING TRACKER ONLY — Floodplain-Hillside, Design Review-Historic, Project records. NOT building permits. Useful as PRE-PERMIT SIGNAL: planning approvals precede building permits by 6-18mo. For builders/general contractors, this is a forward-looking lead pipeline. NOT useful for HVAC/plumbing/electrical trades. Score these as low-urgency leads (no permit_freshness boost) but tag them as 'pipeline_signal'.",
+    "verdict": "ACCEPT_PLANNING_ONLY",
+    "data_layer": "planning_pipeline"
+  },
+  {
+    "state": "ID",
+    "jurisdiction": "Boise (PDS Zoning Activities)",
+    "jurisdiction_type": "city",
+    "platform": "arcgis",
+    "endpoint_url": "https://services1.arcgis.com/WHM6qC35aMtyAAlN/arcgis/rest/services/PDS_Zoning_Activities/FeatureServer/0/query",
+    "evidence_url": "https://opendata.cityofboise.org/datasets/boise-zoning-activities",
+    "terms_url": "https://www.cityofboise.org/about-the-city/website-policies/",
+    "notes": "VERIFIED 2026-05-08: HTTP 200, 1,828 records. Includes ProposedUnitsTotal — strong leading indicator of imminent construction-permit volume. SAME PIPELINE-ONLY caveat as Development Tracker. ProjectType / ProposedUseCategory / ResidentialType break out enough for builder-segmentation.",
+    "verdict": "ACCEPT_PLANNING_ONLY",
+    "data_layer": "planning_pipeline"
+  },
+  {
+    "state": "HI",
+    "jurisdiction": "Honolulu City+County (HISTORICAL Socrata snapshot)",
+    "jurisdiction_type": "county",
+    "platform": "socrata",
+    "endpoint_url": "https://data.honolulu.gov/resource/4vab-c87q.json",
+    "evidence_url": "https://data.honolulu.gov/d/4vab-c87q",
+    "terms_url": "https://data.honolulu.gov/about",
+    "notes": "GOLDEN SCHEMA, FROZEN 2025-06-30. Static snapshot Jan-2005 through Jun-2025. Fails 90-day freshness rule. EXCELLENT field set: buildingpermitno, issuedate, address, contractor, contractorelectrical, contractorplumbing, applicant, estimatedvalueofwork, plus boolean flags addition/alteration/repair/demolition/solar/pool/accessorydwellingunitadu/electricvehiclecharger/plumbingwork/electricalwork/newbuilding. owner_name=false (only applicant), contractor_name=YES (3 separate contractor fields), phone=false. INGEST AS HISTORICAL BACKFILL ONLY (status: historical_only). Live successor at DPP HNL portal — see separate AUTH_REQUIRED entry.",
+    "verdict": "STALE_BUT_VALUABLE_SCHEMA",
+    "data_layer": "permit"
+  },
+
+  {
+    "_block_comment": "Phase 4 backlog — Agent-1 confirmed AUTH_REQUIRED for AK/HI/ID. The Honolulu DPP scrape is the highest single-jurisdiction value of this group (most of HI's population).",
+    "_skip": true
+  },
+  {
+    "state": "AK",
+    "jurisdiction": "Anchorage (MOA)",
+    "jurisdiction_type": "city",
+    "platform": "accela",
+    "endpoint_url": "https://aca-prod.accela.com/Anchorage/Default.aspx",
+    "evidence_url": "https://www.muni.org/Departments/OCPD/development/BSD/Pages/default.aspx",
+    "terms_url": "https://www.muni.org/pages/privacy.aspx",
+    "notes": "Anchorage MOA Building Safety Division on Accela ACA. Auth-walled HTML. Only public ArcGIS layer is DevServices_BuildingsOfInterest_ReadOnly_Hosted (12 demolition records — too few). Phase 4 candidate via load_accela.py.",
+    "verdict": "AUTH_REQUIRED"
+  },
+  {
+    "state": "AK",
+    "jurisdiction": "Juneau (CBJ)",
+    "jurisdiction_type": "city",
+    "platform": "accela",
+    "endpoint_url": "https://aca-prod.accela.com/CBJ/",
+    "evidence_url": "https://juneau.org/community-development/building-division",
+    "terms_url": "https://juneau.org/privacy",
+    "notes": "City and Borough of Juneau on Accela ACA. data.cbj.org is HTTP 410. Phase 4 candidate via load_accela.py.",
+    "verdict": "AUTH_REQUIRED"
+  },
+  {
+    "state": "HI",
+    "jurisdiction": "Honolulu DPP (live successor portal)",
+    "jurisdiction_type": "county",
+    "platform": "custom",
+    "endpoint_url": "https://www.honoluludpp.org/PermitsAndApplications.aspx",
+    "evidence_url": "https://www.honoluludpp.org/",
+    "terms_url": "https://www.honoluludpp.org/Privacy",
+    "notes": "HIGHEST-LEVERAGE HI WORK. Replaces the 2025-06-30 stale Socrata feed. ASP.NET-rendered citizen portal — needs custom .NET scraper (or eTRAKiT-style if backed by Tyler). Honolulu City+County is ~70% of Hawaii's population — solving this gets HI to ACCEPTABLE coverage in one move. Phase 4 priority above Anchorage.",
+    "verdict": "AUTH_REQUIRED"
+  },
+  {
+    "state": "HI",
+    "jurisdiction": "Hawaii County (Big Island / Hilo / Kona)",
+    "jurisdiction_type": "county",
+    "platform": "custom",
+    "endpoint_url": "https://epic.hawaiicounty.gov/",
+    "evidence_url": "https://www.hawaiicounty.gov/our-county/departments/public-works/building-division",
+    "terms_url": "https://www.hawaiicounty.gov/privacy-policy",
+    "notes": "Custom .NET portal (EPIC). No JSON API. Phase 4 candidate.",
+    "verdict": "AUTH_REQUIRED"
+  },
+  {
+    "state": "HI",
+    "jurisdiction": "Maui County (MAPPS)",
+    "jurisdiction_type": "county",
+    "platform": "custom",
+    "endpoint_url": "https://mauicounty.gov/2105/Building-Permits",
+    "evidence_url": "https://mauicounty.gov/2105/Building-Permits",
+    "terms_url": "https://mauicounty.gov/privacy",
+    "notes": "Maui Application Plan Permit System (MAPPS) — internal portal. ArcGIS Hub has only Lahaina_TMK_Expedited_Permitting_Georules (post-fire zoning, not permits). Phase 4 candidate.",
+    "verdict": "AUTH_REQUIRED"
+  },
+  {
+    "state": "ID",
+    "jurisdiction": "Boise (Citizen Portal — live permits)",
+    "jurisdiction_type": "city",
+    "platform": "accela",
+    "endpoint_url": "https://citizenportal.cityofboise.org/",
+    "evidence_url": "https://www.cityofboise.org/departments/planning-and-development-services/permits/",
+    "terms_url": "https://www.cityofboise.org/about-the-city/website-policies/",
+    "notes": "Boise PDS uses Accela ACA for actual building permits (HVAC, plumbing, electrical, mechanical). Companion to the planning-tracker ACCEPT entries — that's pipeline; this is permits. Phase 4 candidate via load_accela.py.",
+    "verdict": "AUTH_REQUIRED"
+  },
+  {
+    "state": "ID",
+    "jurisdiction": "Meridian",
+    "jurisdiction_type": "city",
+    "platform": "accela",
+    "endpoint_url": "https://aca-prod.accela.com/MERIDIAN/",
+    "evidence_url": "https://meridiancity.org/community-development/building",
+    "terms_url": "https://meridiancity.org/privacy",
+    "notes": "ID's 2nd-largest city. Accela ACA. Phase 4 candidate via load_accela.py.",
+    "verdict": "AUTH_REQUIRED"
+  },
+
+  {
+    "_block_comment": "Agent-3: parcel/assessor/lien/license_roster substitutes for the 7 dead-permit states (ME, MS, NH, OK, RI, UT, WV). Henri's wedge can absorb these via the regrid-parcel enricher + a new lien/license enricher. data_layer field marks intended consumer. NON-PERMIT entries are inserted by _ingest-missing-permits.mjs only with --include-non-permit flag (not the default).",
+    "_skip": true
+  },
+
+  {
+    "state": "UT",
+    "jurisdiction": "Utah State Construction Registry (SCR) — GOLD STANDARD",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "custom",
+    "endpoint_url": "https://secure.utah.gov/scr/scr",
+    "evidence_url": "https://dopl.utah.gov/scr/",
+    "terms_url": "https://dopl.utah.gov/scr/",
+    "notes": "THE BEST construction lead-gen data source nationally. UT law requires every contractor on a $5k+ job to file a preliminary notice within 20 days. Returns project_name, project_address, owner, original_contractor, prelim_notice_filer, license_number, filing_date, amount. Search-only HTML — needs ASP.NET ViewState scrape. Phase 4 priority above Honolulu DPP.",
+    "verdict": "SEARCH_ONLY",
+    "data_layer": "lien"
+  },
+  {
+    "state": "UT",
+    "jurisdiction": "Utah Statewide Parcels (UGRC SGID)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services1.arcgis.com/99lidPhWCzftIe9K/arcgis/rest/services/UtahStatewideParcels/FeatureServer/0/query",
+    "evidence_url": "https://gis.utah.gov/products/sgid/cadastre/parcels/",
+    "terms_url": "https://gis.utah.gov/about/policy/",
+    "notes": "VERIFIED 2026-05-08: HTTP 200, 1,586,356 parcels statewide, refreshed quarterly. Geometry+metadata layer (PARCEL_ID, PARCEL_ADD, RECORDER, ParcelsCur, County, CoParcel_URL). NO owner names here — must pair with Parcels_LIR (next entry).",
+    "data_layer": "parcel"
+  },
+  {
+    "state": "UT",
+    "jurisdiction": "Utah LIR Parcels (assessor companion)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://opendata.gis.utah.gov/datasets/utah::utah-lir-parcels/about",
+    "evidence_url": "https://gis.utah.gov/products/sgid/cadastre/parcels-lir/",
+    "terms_url": "https://gis.utah.gov/about/policy/",
+    "notes": "PRIMARY UT SUBSTITUTE. Companion to UtahStatewideParcels. Fields: OWN_NAME, OWN_ADDR, OWN_CITY, OWN_ZIP, TOTAL_MKT_VALUE, BLDG_SQFT, BUILT_YR, EFFBUILT_YR, LAST_SALE_DT, LAST_SALE_AMT, USE_DESC. Quarterly refresh. The trifecta for predicting upcoming construction: owner + last_sale + building characteristics. Ingest URL needs API endpoint resolution (this is the dataset landing page; probe the underlying FeatureServer via opendata.gis.utah.gov DCAT).",
+    "data_layer": "assessor"
+  },
+  {
+    "state": "UT",
+    "jurisdiction": "Utah DOPL — License Roster (BULK CSV available)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "custom",
+    "endpoint_url": "https://dopl.utah.gov/licensee-statistics/",
+    "evidence_url": "https://dopl.utah.gov/",
+    "terms_url": "https://dopl.utah.gov/",
+    "notes": "BEST license-roster source of all 7 states. UT DOPL publishes a downloadable monthly CSV of ALL active licenses (general contractors B/E1/R100, electricians, plumbers, HVAC). license_number, name, address, phone, profession, status, expiration. Bulk download — no scraping required. Direct ingest target.",
+    "data_layer": "license_roster"
+  },
+
+  {
+    "state": "WV",
+    "jurisdiction": "West Virginia ParcelSummary (statewide assessor)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services.wvgis.wvu.edu/arcgis/rest/services/Planning_Cadastre/WV_Parcels/MapServer/11/query",
+    "evidence_url": "https://www.mapwv.gov/parcel/",
+    "terms_url": "https://wvgis.wvu.edu/",
+    "notes": "PRIMARY WV SUBSTITUTE. VERIFIED 2026-05-08: HTTP 200, 1,499,827 records. Fields: Owner1, Owner2, FullOwnerName, OwnerAddress, NewOwner (recent-transfer flag — STRONGEST construction-leading-indicator), NewBook, NewPage, DeedBook, DeedPage, PhysicalAddress, YearBuilt, LandUse, OccupancyDescription, BasementType, ExteriorWallType, BusinessLivingArea, StructureArea, DwellingValue, CommercialValue, LandAppraisal, BuildingAppraisal, TotalAppraisal, TaxYear. Quarterly refresh from county assessors. Closes WV in ONE endpoint.",
+    "data_layer": "assessor"
+  },
+  {
+    "state": "WV",
+    "jurisdiction": "West Virginia Site Address Points (911)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services.wvgis.wvu.edu/arcgis/rest/services/Planning_Cadastre/WV_Parcels/MapServer/5/query",
+    "evidence_url": "https://www.mapwv.gov/parcel/",
+    "terms_url": "https://wvgis.wvu.edu/",
+    "notes": "VERIFIED 2026-05-08: HTTP 200, 1,052,219 records. RARE FIND: WVDHSEM 911 dataset includes Res_Name + Res_Phone fields. Direct phone-fill source for WV residents — Henri's 1% phone ceiling drops to near-100% for WV leads.",
+    "data_layer": "parcel"
+  },
+  {
+    "state": "WV",
+    "jurisdiction": "West Virginia Parcels (geometry)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services.wvgis.wvu.edu/arcgis/rest/services/Planning_Cadastre/WV_Parcels/MapServer/0/query",
+    "evidence_url": "https://www.mapwv.gov/parcel/",
+    "terms_url": "https://wvgis.wvu.edu/",
+    "notes": "VERIFIED: 1,389,855 polygon parcels. Pair with ParcelSummary table 11 (above) for owner data.",
+    "data_layer": "parcel"
+  },
+
+  {
+    "state": "OK",
+    "jurisdiction": "Canadian County Parcel Data (OKC western metro)",
+    "jurisdiction_type": "county",
+    "platform": "arcgis",
+    "endpoint_url": "https://services2.arcgis.com/0NjdXxmJp53hZWPd/arcgis/rest/services/ParcelDataService_2_view/FeatureServer/3/query",
+    "evidence_url": "https://www.arcgis.com/home/item.html?id=7bbc6322290241a891f237dc43ed16bd",
+    "terms_url": "https://www.canadiancounty.org/",
+    "notes": "VERIFIED 2026-05-08: HTTP 200, 84,772 records, lastEditDate 2026-04-30 (FRESH). displayField=owners_name. Highest-quality OK source. Covers OKC western suburbs (Yukon, Mustang, El Reno) — fast-growing residential market. Direct ingest. Companion sublayers: 0=Subdivisions, 2=Lots, 4=Blocks.",
+    "data_layer": "parcel"
+  },
+  {
+    "state": "OK",
+    "jurisdiction": "Oklahoma Construction Industries Board — License Roster",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "custom",
+    "endpoint_url": "https://oklahoma.gov/cib/licensee-search.html",
+    "evidence_url": "https://oklahoma.gov/cib.html",
+    "terms_url": "https://oklahoma.gov/cib.html",
+    "notes": "OK CIB licenses electrical, plumbing, mechanical/HVAC, roofing (commercial+residential). Public search returns license #, name, address, phone, classification, status. Search-only; CIB also publishes downloadable PDF roster on request.",
+    "verdict": "SEARCH_ONLY",
+    "data_layer": "license_roster"
+  },
+
+  {
+    "state": "ME",
+    "jurisdiction": "Maine Parcels Organized Towns (alt service — refreshable)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "arcgis",
+    "endpoint_url": "https://services1.arcgis.com/RbMX0mRVOFNTdLzd/arcgis/rest/services/Maine_Parcels_Organized_Towns/FeatureServer/0/query",
+    "evidence_url": "https://maine.hub.arcgis.com/",
+    "terms_url": "https://www.maine.gov/geolib/policies/dataacquisition.html",
+    "notes": "ME parcel substitute. Non-static, refreshable. Capabilities=Query,Extract,Sync. Pair with the 'Maine Parcels Organized Towns ADB' related table (joined on Parcel_ID) for OWNER1, OWNER2, MAILADDR, BOOK, PAGE, SALEDATE, SALEPRICE, ASSESSED.",
+    "data_layer": "parcel"
+  },
+  {
+    "state": "ME",
+    "jurisdiction": "Maine PFR — Trade License Roster (search-only)",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "custom",
+    "endpoint_url": "https://www.maine.gov/online/pfr/portal/professionallicensing/searchlicense",
+    "evidence_url": "https://www.maine.gov/pfr/professionallicensing/professions/index.html",
+    "terms_url": "https://www.maine.gov/pfr/policies",
+    "notes": "ME PFR licenses electricians, plumbers, oil/solid-fuel installers, propane/natural-gas installers (NO general-contractor license in ME). Search-only portal. Returns license #, name, address, license_type, status, expiration.",
+    "verdict": "SEARCH_ONLY",
+    "data_layer": "license_roster"
+  },
+
+  {
+    "state": "MS",
+    "jurisdiction": "Harrison County, MS (Gulfport area parcels)",
+    "jurisdiction_type": "county",
+    "platform": "arcgis",
+    "endpoint_url": "https://geo.co.harrison.ms.us/server/rest/services/AGO/HarrisonCounty_ApprovedParcels/FeatureServer/0/query",
+    "evidence_url": "https://opendata.gis.ms.gov/datasets/harcogis::approved-parcels",
+    "terms_url": "https://opendata.gis.ms.gov/",
+    "notes": "BORDERLINE FRESHNESS — 108,901 parcels, modified 2024-12-16. MS has NO statewide parcel aggregator; this is the best Gulf Coast substitute. Coastal rebuild work signal. Owner data presence not confirmed; probe field schema before ingest.",
+    "verdict": "BORDERLINE_FRESHNESS",
+    "data_layer": "parcel"
+  },
+  {
+    "state": "MS",
+    "jurisdiction": "Mississippi State Board of Contractors — License Roster",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "custom",
+    "endpoint_url": "https://msbcl.ms.gov/onlineverification/Lookup.aspx",
+    "evidence_url": "https://msbcl.ms.gov/",
+    "terms_url": "https://msbcl.ms.gov/",
+    "notes": "MS contractor license search (commercial + residential builders, remodelers). Search-only; returns license #, name, address, classification, expiration.",
+    "verdict": "SEARCH_ONLY",
+    "data_layer": "license_roster"
+  },
+
+  {
+    "state": "RI",
+    "jurisdiction": "RI Contractors' Registration & Licensing Board — License Roster",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "custom",
+    "endpoint_url": "https://crb.ri.gov/contractor-search",
+    "evidence_url": "https://crb.ri.gov/",
+    "terms_url": "https://crb.ri.gov/",
+    "notes": "STRONGEST single source for RI contractor leads. RI CRB registers ALL residential contractors (general, remodeling, additions). Public search returns registration_number, name, address, phone, work_classification, insurance_status, complaints. Electrical/plumbing/mechanical separately licensed via DBR.",
+    "verdict": "SEARCH_ONLY",
+    "data_layer": "license_roster"
+  },
+  {
+    "state": "RI",
+    "jurisdiction": "Providence VGSI — Assessor Portal",
+    "jurisdiction_type": "city",
+    "platform": "custom",
+    "endpoint_url": "https://gis.vgsi.com/providenceri/",
+    "evidence_url": "https://www.providenceri.gov/assessor/",
+    "terms_url": "https://gis.vgsi.com/providenceri/",
+    "notes": "RI's largest city. VGSI public portal — search by address/owner returns owner_name, mailing_addr, sale_date, sale_price, assessed_value, BUILDING_AREA, YEAR_BUILT, RECENT_PERMITS. Same VGSI pattern serves Warwick, Cranston, Pawtucket. Search-only HTML.",
+    "verdict": "SEARCH_ONLY",
+    "data_layer": "assessor"
+  },
+
+  {
+    "state": "NH",
+    "jurisdiction": "Hillsborough County NH (Manchester/Nashua VGSI)",
+    "jurisdiction_type": "county",
+    "platform": "custom",
+    "endpoint_url": "https://gis.vgsi.com/manchesternh/",
+    "evidence_url": "https://www.manchesternh.gov/Departments/Assessors",
+    "terms_url": "https://www.manchesternh.gov/",
+    "notes": "Manchester (NH largest city). VGSI portal — sale_date, sale_price, assessed_val, owner, mailing_addr. Same VGSI pattern across NH municipalities.",
+    "verdict": "SEARCH_ONLY",
+    "data_layer": "assessor"
+  },
+  {
+    "state": "NH",
+    "jurisdiction": "NH OPLC — License Roster",
+    "jurisdiction_type": "state_aggregator",
+    "platform": "custom",
+    "endpoint_url": "https://elicense.oplc.nh.gov/Verification/Search.aspx",
+    "evidence_url": "https://www.oplc.nh.gov/",
+    "terms_url": "https://www.oplc.nh.gov/",
+    "notes": "OPLC licenses electricians, plumbers, gas-fitters (no GC license in NH). Standard Thentia/Iron Data eLicense. Search-only.",
+    "verdict": "SEARCH_ONLY",
+    "data_layer": "license_roster"
+  }
+]

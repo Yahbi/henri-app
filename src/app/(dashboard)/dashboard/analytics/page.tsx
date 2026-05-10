@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import { MetricGrid } from "@/components/analytics/MetricGrid";
 import { BenchmarkWidget } from "@/components/dashboard/BenchmarkWidget";
+import { StageHistogram } from "@/components/analytics/StageHistogram";
 import { useLeads } from "@/hooks/useLeads";
 import { useGodMode } from "@/hooks/useGodMode";
 import { useUser } from "@/hooks/useUser";
@@ -423,6 +424,13 @@ export default function AnalyticsPage() {
         </div>
         <BenchmarkWidget />
       </div>
+
+      {/* Module 24 (2026-05-09) — opportunity-stage histogram. Same
+          palette as drawer chip / map pin / LeadCard / kanban card. The
+          founder pricing premise becomes legible at a glance: terracotta
+          stripes are hot leads, green stripes are completed maintenance
+          opportunities, etc. */}
+      <StageHistogram leads={leads} isLoading={leadsLoading} />
 
       {/* Property age distribution — sourced from cron/enrich year_built. */}
       <PropertyAgeChart leads={leads} isLoading={leadsLoading} />
