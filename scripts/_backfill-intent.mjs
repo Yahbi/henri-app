@@ -52,8 +52,33 @@ async function sql(query, attempt = 0) {
     }
     throw new Error(`Management API returned HTML after 3 retries (status ${r.status})`);
   }
+  // 2026-05-10 — handle 429 ThrottlerException. The Mgmt API rate-limits
+  // service tokens at ~60 req/min; this script makes ~7 calls per 250-row
+  // page, so a continuous run easily trips the limit. Back off long
+  // enough for the bucket to refill (60s), then retry. Without this we
+  // mis-treat throttle errors as "empty page" and bail prematurely.
+  if (r.status === 429) {
+    if (attempt < 8) {
+      const backoffMs = 30000 + 15000 * attempt; // 30s, 45s, 60s, ...
+      console.warn(`[backfill] 429 throttle (attempt ${attempt + 1}/8); waiting ${backoffMs}ms…`);
+      await new Promise((r) => setTimeout(r, backoffMs));
+      return sql(query, attempt + 1);
+    }
+    throw new Error(`Management API throttled after 8 retries`);
+  }
   try {
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    // Throttle / DB-error JSON shape: {"message":"..."}. Treat as retryable.
+    if (parsed && !Array.isArray(parsed) && typeof parsed.message === "string"
+        && /Too Many Requests|ThrottlerException|timeout|canceling/i.test(parsed.message)) {
+      if (attempt < 5) {
+        const backoffMs = 20000 + 10000 * attempt;
+        console.warn(`[backfill] retryable error: ${parsed.message.slice(0, 120)} — waiting ${backoffMs}ms`);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        return sql(query, attempt + 1);
+      }
+    }
+    return parsed;
   } catch (e) {
     throw new Error(`Management API returned non-JSON: ${text.slice(0, 200)}`);
   }
