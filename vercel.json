@@ -1,13 +1,11 @@
 {
-  "_comment": "Module 6 (2026-05-09) — most crons paused per founder direction. The 36 prior schedules were removed. Two pre-intent crons re-enabled in Phase AA-3 (2026-05-09 late evening) because the parcel-synthesis + ZIP-aggregate-refresh path is dead without them; both run weekly + are bounded.",
+  "_comment": "Module 6 (2026-05-09) — most crons paused per founder direction. The 36 prior schedules were removed. Two pre-intent crons re-enabled in Phase AA-3 (2026-05-09 late evening) because the parcel-synthesis + ZIP-aggregate-refresh path is dead without them; both run weekly + are bounded. CRON SCHEDULE NOTES (cannot live as `_comment` inside each cron entry — Vercel schema rejects it as 'additional property'): (1) refresh-zip-aggregates runs at Sun 03:00 UTC, BEFORE synthesize-pre-intent at 04:00 UTC, so any consumer reads fresh aggregates. (2) synthesize-pre-intent walks parcels_sidecar per claimed ZIP; bounded by GLOBAL_INSERT_CAP_PER_RUN=2000 + PER_CONTRACTOR_PER_ZIP_CAP=50; uses the (state_code, situs_zip) compound index via ZIP_PREFIX_TO_STATES.",
   "crons": [
     {
-      "_comment": "Phase AA-3 — refresh zip_pre_intent_aggregates so the 3 ZIP-aggregate reason codes (nearby_adu_activity_90d, nearby_remodel_activity_90d, neighborhood_upgrade_trend) stay current. Runs at Sunday 03:00 UTC, BEFORE the synthesis cron at 04:00 UTC.",
       "path": "/api/cron/refresh-zip-aggregates",
       "schedule": "0 3 * * 0"
     },
     {
-      "_comment": "Phase AA-3 — synthesise pre_intent leads from parcels_sidecar. Runs Sunday 04:00 UTC, weekly. Bounded by GLOBAL_INSERT_CAP_PER_RUN (2000 leads) + PER_CONTRACTOR_PER_ZIP_CAP (50). Uses the (state_code, situs_zip) compound index via the ZIP_PREFIX_TO_STATES filter.",
       "path": "/api/cron/synthesize-pre-intent",
       "schedule": "0 4 * * 0"
     }
