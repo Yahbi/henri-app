@@ -1125,11 +1125,38 @@ Working session driven by deep gap audit. Live-DB queries surfaced multiple sile
 ### Vercel cron schedule clarification
 `vercel.json` only schedules 2 crons (`refresh-zip-aggregates` Sun 03:00 UTC + `synthesize-pre-intent` Sun 04:00 UTC) — Hobby plan limit. All other 16+ crons (score, swdi-events, state-licenses-rotate, openfema-*, courtlistener-liens, usgs-quakes, etc.) are triggered by an external scheduler (Hetzner cron-job hitting Vercel HTTPS endpoints). `cron_runs.trigger='cron'` means "non-admin-trigger" — it does NOT necessarily mean Vercel-scheduled.
 
+### 2026-05-11 session extension — wedge fix + data hygiene
+
+**Migration 00097 — drop NOT NULL on `leads.contractor_id`**
+- A 2026-05-11 audit found 269,863 leads stamped with the founder's `contractor_id` even though the founder owns 0 territories. Stale assignment from a prior testing phase where the founder claimed many ZIPs, then territories were cleaned up to the 9 currently active (held by `dev-contractor@henri.local`). Schema's NOT NULL constraint meant we couldn't null them.
+- Migration drops the constraint. Impact analysis is in the migration file.
+- After applying: 269,863 founder leads nulled in 50k chunks via the Mgmt API. Final state: 269,863 leads `contractor_id IS NULL` + 286 dev-contractor leads + **0 founder leads**. Re-pickup logic (auto-rebind NULL leads when a contractor newly claims a territory) is a future enhancement.
+
+**Supabase ran out of disk mid-session**
+- Postgres logs showed dozens of `could not extend file "base/5/52196": No space left on device` errors. All writes started failing as read-only. Likely an unannounced soft-limit; resolved within ~minutes (either by Pro upgrade or Free-tier auto-recovery as cleanup freed space).
+- Operational lesson: the 500 MB Free-tier ceiling can hit unannounced and **block every write across the app simultaneously**. Pro upgrade is no longer just a 2026-05-26 deadline — it's a "any-time-now" hard wall.
+
+**Notifications backlog cleanup**
+- `notifications` table: 289,351 → **30,087** rows. Deleted 259,264 stale `new_lead` notifications (`read = true AND created_at < now() - 7 days`). These were spam from the pre-urgency-filter score cron (it used to fire a notification per inserted lead regardless of urgency, accumulating 285k unread-then-read notifications for the founder — the comment in `score/route.ts:1178` flagged this but the cleanup never ran).
+- The notifications API was taking 3-5s per request paginating through this backlog. Should now return in <100ms.
+
+**Reverse-pickup: `cron_runs` retention**
+- Ran `DELETE FROM cron_runs WHERE started_at < now() - 30d`. No rows older than 30 days exist (the table was created 2026-05-02 / 9 days ago), so a no-op. The unscheduled `cron-runs-cleanup` cron stays unscheduled until volume justifies it.
+
+### Vercel env vars added (Production + Preview scope)
+- `GOD_MODE_EMAILS = y.abismuth@gmail.com`
+- `FEEDBACK_INBOX = y.abismuth@gmail.com`
+- `STRIPE_TAX_ENABLED = 0`
+- (Verified previously provisioned: `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, `CL_TOKEN` — CLAUDE.md previously said these were missing; they were not.)
+
+### Vercel cron schedule clarification
+`vercel.json` only schedules 2 crons (`refresh-zip-aggregates` Sun 03:00 UTC + `synthesize-pre-intent` Sun 04:00 UTC) — Hobby plan limit. All other 16+ crons (score, swdi-events, state-licenses-rotate, openfema-*, courtlistener-liens, usgs-quakes, etc.) are triggered by an external scheduler (Hetzner cron-job hitting Vercel HTTPS endpoints). `cron_runs.trigger='cron'` means "non-admin-trigger" — it does NOT necessarily mean Vercel-scheduled.
+
 ### Still pending
-- **Merge PR #1** to get the 3 cron-handler fixes (NRI / fema-nri / dedupe) into production. Until then, fixes only live on the Preview deployment.
+- **Merge PR #1** to get the 4 cron-handler fixes (NRI booster / fema-nri / rotator dedupe / leads NULL contractor_id) into production. Until then, fixes only live on the Preview deployment.
 - **Provision 12 free-tier API keys + Twilio + Resend webhook + Supabase webhook + Stripe extra-zip price** in Vercel — blocked on operator action (cannot create accounts on user's behalf).
 - **Service-role JWT rotation** (leaked 2026-05-04 in chat).
-- **Supabase Pro upgrade** ($25/mo, due 2026-05-26).
+- **Supabase Pro upgrade** ($25/mo) — disk-full event today proved this is no longer deferrable to 2026-05-26.
 - **102k unscored permits** in queue — will benefit from booster fix when code goes live. Rotator clears ~24k/day so backlog drains in ~4 days.
 - **Hetzner Playwright work** for AZ ROC + TN BLC + parcels_sidecar loaders.
 
