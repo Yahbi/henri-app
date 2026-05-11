@@ -478,30 +478,65 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // ── Wave 2.A NRI lookup — county-level only (tract-level needs
-    //    a tract_fips on every lead; we don't have that yet, so we
-    //    join via state+county slug from the lead row). The ~3k NRI
-    //    counties fit comfortably in memory.
+    // ── Wave 2.A NRI lookup — county-level keyed lookup + state-level
+    //    median fallback. The ~3k NRI counties fit comfortably in memory.
+    //
+    //    2026-05-11 fix: the original city↔county join only matched
+    //    ~7% of permits (verified via SQL probe) because `permits.city`
+    //    is a city name and `risk_nri_county.county_name` is a county
+    //    name. They coincide only for "namesake" cities (Sacramento,
+    //    Austin, etc.). The other 93% got null and the booster never
+    //    fired.
+    //
+    //    To recover coverage we now ALSO pre-compute the MEDIAN risk
+    //    score per state. When the city↔county lookup misses, we fall
+    //    back to the state median — the "typical county in the state"
+    //    rather than its worst county (state-max would saturate +3 for
+    //    every state since each state has at least one extreme county).
+    //
+    //    Net effect vs. pre-fix: leads in high-risk states (CA / AZ /
+    //    FL / NJ / HI median 88-95) get +3; mid-risk states (OR / SC /
+    //    NC / LA / PA median 70-85) get +2-3; lower-risk states (WI /
+    //    MD / OH / TN / TX median 53-64) get +1; truly low-risk states
+    //    stay at 0. Leads where the city↔county lookup matched still
+    //    get the precise county value (county lookup runs first).
     const nriByCounty = new Map<string, number>(); // key: "AL/Autauga" lowercased → risk_score
+    const nriStateMedian = new Map<string, number>(); // key: "AL" lowercased → median risk_score
     try {
       const { data } = await supabase
         .from("risk_nri_county")
         .select("state_abbrv, county_name, risk_score")
         .not("risk_score", "is", null)
         .limit(5000);
+      // First pass: county-keyed map + per-state collection for median.
+      const stateRiskBuckets = new Map<string, number[]>();
       for (const r of data ?? []) {
         if (
           typeof r.state_abbrv === "string" &&
           typeof r.county_name === "string" &&
           typeof r.risk_score === "number"
         ) {
-          nriByCounty.set(
-            `${r.state_abbrv.toLowerCase()}/${r.county_name.toLowerCase()}`,
-            r.risk_score,
-          );
+          const st = r.state_abbrv.toLowerCase();
+          nriByCounty.set(`${st}/${r.county_name.toLowerCase()}`, r.risk_score);
+          const bucket = stateRiskBuckets.get(st) ?? [];
+          bucket.push(r.risk_score);
+          stateRiskBuckets.set(st, bucket);
         }
       }
-      logger.info("score.nri_loaded", { counties: nriByCounty.size });
+      // Second pass: compute median per state.
+      for (const [st, scores] of stateRiskBuckets) {
+        if (scores.length === 0) continue;
+        scores.sort((a, b) => a - b);
+        const mid = Math.floor(scores.length / 2);
+        const median = scores.length % 2 === 0
+          ? (scores[mid - 1] + scores[mid]) / 2
+          : scores[mid];
+        nriStateMedian.set(st, median);
+      }
+      logger.info("score.nri_loaded", {
+        counties: nriByCounty.size,
+        states_with_median: nriStateMedian.size,
+      });
     } catch (e) {
       logger.warn("score.nri_load_failed", {
         error: e instanceof Error ? e.message : String(e),
@@ -643,15 +678,29 @@ export async function GET(request: NextRequest) {
       return v != null ? v : null;
     }
 
-    /** NRI risk score for a permit's (state, city). NRI is keyed on
-     *  county_name, not city, so this is a heuristic — many cities
-     *  share their county name (e.g., "Sacramento" maps to Sacramento
-     *  County). When no match, returns null and the booster stays 0. */
+    /** NRI risk score for a permit's (state, city).
+     *
+     *  Lookup order:
+     *    1. county-level — city↔county_name match (works for "namesake"
+     *       cities like Sacramento, Austin, etc., ~7% of permits)
+     *    2. state-level — MEDIAN NRI risk_score across all counties in
+     *       the state (fallback for the other ~93%)
+     *    3. null — when state isn't on file
+     *
+     *  Median (not max) is the state-level fallback so high-risk states
+     *  don't all saturate at +3. Booster tiers fire at median > 50;
+     *  truly low-risk states (median < 50) stay at 0.
+     */
     function nriRiskScoreFor(state: string | null, city: string | null): number | null {
-      if (!state || !city) return null;
-      const k = `${state.toLowerCase()}/${city.toLowerCase()}`;
-      const v = nriByCounty.get(k);
-      return v != null ? v : null;
+      if (!state) return null;
+      const st = state.toLowerCase();
+      if (city) {
+        const k = `${st}/${city.toLowerCase()}`;
+        const countyVal = nriByCounty.get(k);
+        if (countyVal != null) return countyVal;
+      }
+      const stateMedian = nriStateMedian.get(st);
+      return stateMedian != null ? stateMedian : null;
     }
 
     /** NFIP claim count for a 5-digit ZIP. */
