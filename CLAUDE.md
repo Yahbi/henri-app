@@ -650,7 +650,7 @@ First loader: `~/scrapling_loaders/load_austin.py`. Pulls 50 most recently issue
 Audit aligned the work to two tiers of launch blockers and rejected anything that costs money or is post-revenue scope. Goal: soft-launch to 5 contractors at $149/mo on a $0 marginal-spend stack. New artifacts shipped this session:
 
 **TIER 1 (must-fix-before-charging) deliverables**:
-- `scripts/cleanup-test-territories.sql` — two-step (preview → transactional DELETE) to drop the ~11,444 god-mode-claimed territories. Uses `god-mode.ts` allowlist (2 founder emails; extend array to 4 if more exist). Idempotent — safe to re-run.
+- `scripts/cleanup-test-territories.sql` — two-step (preview → transactional DELETE) to drop god-mode-claimed test territories. Uses `god-mode.ts` allowlist (2 founder emails; extend array to 4 if more exist). Idempotent — safe to re-run. **As of 2026-05-11 audit:** live DB has only 9 active territories total, so the cleanup is effectively already done (the prior 11,444 number was a stale snapshot from before the migration that broke the test-claim path; the actual count never reached that). Script kept for safety in case of future test-claim regressions.
 - `e2e/onboarding-stripe.spec.ts` — Playwright smoke for `/signup → /onboarding/license → /plan → /payment → Stripe checkout → /territory → /dashboard`. Asserts no 5xx, no console errors, prices match source-of-truth ($149/$749/$1,499/$2,555), Stripe in test mode (`pk_test_` prefix), no password input field (passwordless brand rule). Full happy-path is sketched in a comment block; needs an auth bypass (`/api/dev/login-as`) or a Mailpit interceptor to run end-to-end.
 - `scripts/_sidecar_loaders/UPLOAD.md` extended with §7 (Tyler EnerGov deploy), §8 ($0-tier API-key checklist for Vercel), §9 (NC + OH voter ingest one-liners). FL voter file deferred — public-records fee may apply.
 
@@ -1066,17 +1066,71 @@ Five full work blocks covering the wedge gap inventory in `~/.claude/plans/whats
 | `_refresh-zip-aggregates.mjs` | Calls `refresh_zip_pre_intent_aggregates()` via Mgmt API + retries |
 | `_check-mv.mjs`, `_probe-db-health.mjs`, `_verify-all-migrations.mjs`, `_verify-aborted-only.mjs` | Health probes for the operator |
 
-**Operational state today (2026-05-10):**
+**Operational state (2026-05-11 audit refresh):**
 
 | What | Status |
 |---|---|
-| Schema 00085-00096 | ✅ All 12 migrations applied + verified (26+ schema checks pass) |
-| Backfill `opportunity_stage` | ⚠️ ~95k of 270k leads stamped. Resume with `--start-after-id` after Supabase project restart |
-| `zip_pre_intent_aggregates` row count | ⚠️ 0 rows (Mgmt API timeouts blocked initial population). Run `_populate-zip-aggregates-volume.mjs` after restart |
-| `stage_history` row count | ✅ Backfilled by 00096 to match every stamped lead |
-| `parcels_sidecar` row count | ⚠️ Awaiting Hetzner sidecar fill of UT/WV/OK/ME loaders |
+| Schema 00085-00096 | ✅ All 12 migrations applied + verified |
+| Backfill `opportunity_stage` | ✅ **100% complete** — all 270,149 leads stamped; 0 NULL |
+| `zip_pre_intent_aggregates` row count | ✅ **7,033 rows** populated (manual `_populate-zip-aggregates-volume.mjs` finished) |
+| `stage_history` row count | ✅ 275,976 rows (trigger fired on backfill + ongoing) |
+| Territories cleanup (11,444 god-mode claims) | ✅ Live DB at 9 active territories; cleanup never needed (the 11,444 number was a stale snapshot) |
+| `parcels_sidecar` row count | ⚠️ 0 rows — still awaiting Hetzner loaders for UT/WV/OK/ME |
 | Service-role JWT rotation | ⚠️ STILL PENDING (leaked 2026-05-04 in chat) |
-| Sentry DSN, Twilio account, free-tier API keys | ⚠️ Pending operational provisioning |
-| Supabase Pro upgrade | ⚠️ Due 2026-05-26; today's saturation is a preview of the Free-tier ceiling |
+| Sentry DSN | ✅ Provisioned (verified live in Vercel env Apr 30) |
+| Twilio account + 12 free-tier API keys | ⚠️ Pending operational provisioning |
+| Supabase Pro upgrade | ⚠️ Due 2026-05-26; Free-tier saturation visible in score cron timeout failures |
 
-**Where to start the next session:** read `~/.claude/plans/whats-the-14-days-purring-papert.md` from the top — Phase Z gap inventory + AA + AA-2 + AA-3 retrospectives are all there. The most leveraged unblock is a Supabase project restart from the dashboard (drops orphaned queries, lets `_populate-zip-aggregates-volume.mjs` finish, lets the backfill resume past 95k).
+## 2026-05-11 silent-failure sweep
+
+Working session driven by deep gap audit. Live-DB queries surfaced multiple silent failures invisible to the cron_runs success-counter. Each fix is additive + reversible.
+
+### Schema-level fixes (applied directly via Supabase MCP)
+- **Migration 00030 (feedback table + enums + RLS)** — was in repo but never applied. Now live. `/api/feedback` POST path now writes to the DB-backed inbox instead of falling through to the email/JSONL fallback every time.
+- **Migration 00055 (`v_permit_adjacent_count` + `v_permit_storm_proximity` views)** — was in repo but never applied. Now live. The lead-detail drawer's "neighborhood activity" + "storm proximity" panels finally have data to render.
+- **CLI migration tracking gap remains**: Supabase CLI's `schema_migrations` table only tracks 22 of the 93 repo migrations. All schema is applied; the gap is metadata-only. Future engineers must apply migrations via the Mgmt API (`scripts/_apply-migration-*.mjs`) — `supabase db push` would try to re-apply or 409.
+
+### Code-level fixes (commit `fcc56c0`, pushed to `data-gap-tier-research-2026-05-07`)
+
+**1. NRI booster city↔county join bug** (`src/app/api/cron/score/route.ts`)
+   - Symptom: NRI booster fired on **0% of leads** despite 3,144 county rows + 270k scored leads. Top observed score: 69 (Hot threshold: 75).
+   - Root cause: `nriRiskScoreFor(state, city)` joined `permits.city` → `risk_nri_county.county_name`. Only 7.1% of permit (state, city) pairs match a county name (verified via SQL probe). 92.9% returned null.
+   - Fix: pre-compute state-level NRI **median** during the loop. Lookup order is county → state-median → null. Median (not max) is the right fallback so high-risk states don't all saturate at +3.
+   - Expected effect once deployed: top score climbs from 69 → 72-77 for high-risk states (CA/AZ/FL/NJ median 88-95 → +3) and ~70 → 72-74 for mid-tier states (TX/IL/OH median 53-64 → +1). Should cross the Hot threshold (75) for thousands of leads.
+
+**2. `fema-nri` cron 4/4 timeouts** (`src/app/api/cron/fema-nri/route.ts`)
+   - Symptom: every run since 2026-05-02 errored `TimeoutError: The operation was aborted due to timeout`. NRI tract dataset (~84k rows) stalled at 77,294 rows.
+   - Root cause: ArcGIS endpoint at services.arcgis.com taking >120s per 2000-row page; per-fetch budget exceeded.
+   - Fix: `PAGE_SIZE 2000 → 500`. Each fetch now returns in 3-5s; the 280s function budget completes the remaining ~7k tracts in one run.
+
+**3. State license rotator silent 0-row inserts** (`src/app/api/cron/state-licenses-rotate/route.ts`)
+   - Symptom: OR pulled 55,715 rows over 56 pages → 0 inserts. AK pulled 229 → 0. cron_runs marked status=ok / error=null.
+   - Root cause: OR Socrata returns 241 duplicate license_numbers per 1000 rows (one row per endorsement / county). AK CSV ships one row per program per license. Postgres `ON CONFLICT DO UPDATE` errors `cannot affect row a second time` when a PK appears twice in one batch. The error was caught + warn-logged but never bubbled — every batch silently produced 0 inserts.
+   - Fix: `dedupeRowsByPk()` helper called in both CSV and Socrata/ArcGIS upsert paths. Keeps last-seen so raw_json from the most recent endorsement wins.
+   - Pairs with two DB-side fixes:
+     - MN config changed from `source_kind=scrape` (no scraper exists) to `csv` pointing to `https://secure.doli.state.mn.us/ccld/data/MNDLILicRegCertExport_Residential_Contractors.csv` (verified live 2026-05-11, ships **phone + email** in the CSV — gold for the wedge contact-completeness ceiling).
+     - OR / AK / MN `last_run_at` reset to NULL so the rotator (orders by `last_run_at ASC NULLS FIRST`) picks them on the next 3 days after deploy.
+
+### DB-only operational fixes (no code change required)
+- **AZ ROC notes updated**: documented Cloudflare interactive challenge (`cf-mitigated: challenge`); no HTTP-only bypass exists even with full Chrome 130 sec-ch-ua headers. Marked as Phase 4 (Hetzner Playwright dependency).
+- **TN BLC notes updated**: `verify.tn.gov` is a Next.js SPA — `verify-qa.html` is the help page, not a data export. Underlying record-search requires session JS calls. Marked as Phase 4.
+- **11 chronic-failure VA placeholder sources disabled** in `permit_sources` (error_count=99, never scraped, all named "County ArcGIS Hub - Verify endpoint" — discovery stubs pointing to landing pages, never resolved to queryable FeatureServer URLs). Reversible via `enabled=true`.
+
+### Vercel env vars added (Production + Preview scope)
+- `GOD_MODE_EMAILS = y.abismuth@gmail.com`
+- `FEEDBACK_INBOX = y.abismuth@gmail.com`
+- `STRIPE_TAX_ENABLED = 0`
+- (Verified previously provisioned: `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, `CL_TOKEN` — CLAUDE.md previously said these were missing; they were not.)
+
+### Vercel cron schedule clarification
+`vercel.json` only schedules 2 crons (`refresh-zip-aggregates` Sun 03:00 UTC + `synthesize-pre-intent` Sun 04:00 UTC) — Hobby plan limit. All other 16+ crons (score, swdi-events, state-licenses-rotate, openfema-*, courtlistener-liens, usgs-quakes, etc.) are triggered by an external scheduler (Hetzner cron-job hitting Vercel HTTPS endpoints). `cron_runs.trigger='cron'` means "non-admin-trigger" — it does NOT necessarily mean Vercel-scheduled.
+
+### Still pending
+- **Merge PR #1** to get the 3 cron-handler fixes (NRI / fema-nri / dedupe) into production. Until then, fixes only live on the Preview deployment.
+- **Provision 12 free-tier API keys + Twilio + Resend webhook + Supabase webhook + Stripe extra-zip price** in Vercel — blocked on operator action (cannot create accounts on user's behalf).
+- **Service-role JWT rotation** (leaked 2026-05-04 in chat).
+- **Supabase Pro upgrade** ($25/mo, due 2026-05-26).
+- **102k unscored permits** in queue — will benefit from booster fix when code goes live. Rotator clears ~24k/day so backlog drains in ~4 days.
+- **Hetzner Playwright work** for AZ ROC + TN BLC + parcels_sidecar loaders.
+
+**Where to start the next session:** if PR #1 is merged, validate booster firing via `SELECT count(*) FILTER (WHERE (score_signals->>'nri')::int > 0) FROM leads TABLESAMPLE SYSTEM (5)`. Target: >0 (any non-zero proves the patch shipped). If not merged, the booster fix sits on the feature branch but production crons keep using the old code.
