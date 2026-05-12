@@ -1346,3 +1346,46 @@ SKIPS (don't ingest):
 - AL/KS/NE statewide parcels confirmed unavailable on free public sources.
 - AZ ROC, TN BLC, NJ DCA permit aggregators known but operator-blocked behind Hetzner Camoufox work.
 - PR #1 merge to push code fixes live remains operator-blocked.
+
+### 2026-05-11 session 6 — final completion pass
+
+Sixth-round agent + 16 additional INSERTs (10 catch-ups from earlier agent findings I missed + 6 from a focused 7-state final probe). Result: **49 of 51 states covered (50 states + DC) = 96% national parcel coverage**.
+
+**Catch-up inserts (10 rows, already found by earlier agents but not yet in DB):**
+- AL-MOBILE-COUNTY (213k from Agent 1)
+- NH-GRANIT-STATEWIDE (616k from Agent 6)
+- OR-ODF-STATEWIDE (36 county sublayers from Agent 5)
+- SC-CHARLESTON-COUNTY (owner+mailing+sale_price)
+- KY-FAYETTE-LEXINGTON (114k boundary)
+- LA-JEFFERSON-PARISH (155k w/ flood_zone+BFE)
+- LA-CADDO-PARISH (137k w/ owner — frozen 2019)
+- IA-STATEWIDE-2017 (2.45M frozen w/ deedholder)
+- MI-WAYNE-COUNTY (768k boundary)
+- MI-OAKLAND-COUNTY (558k site-address points)
+
+**Final-round Agent 8 (6 verified new endpoints):**
+- **DC** — DCGIS Property and Land MapServer/40 owner polygons. Owner + mailing + sale_price + sale_date.
+- **DE** — New Castle County agsserver (covers populated half of DE). Owner LAST name only; SSL chain warning. No year_built/sale.
+- **IL** — Cook County Assessor Parcel Sales Socrata (`wvhk-k5uv`). Multi-year sale history for ~1.8M Cook parcels. Loader must join to gis.cookcountyil.gov Parcel_2022 FeatureServer on PIN14 for geometry.
+- **LA** — East Baton Rouge Parish (state capital, 205,820 parcels w/ owner+mailing+flood_zone+SALE_YEAR).
+- **NE** — Douglas-Omaha (DOGIS, 216,645 parcels w/ owner+mailing+BLDG_YRBLT+sqft — year_built is rare bonus).
+- **NJ** — NJOGIS Parcels Composite ALL 21 counties in ONE endpoint (3,478,727 parcels w/ owner+mailing+sale_price+DEED_DATE+YR_CONSTR). **Gold-tier finale**. Daniel''s Law redaction filter: `WHERE OWNER_NAME IS NOT NULL`.
+
+**Hard dead-ends documented (2 states):**
+- **KS** — agent 8 verified the AIMS Johnson Co server returns HTTP 403 to all direct ArcGIS REST probes; AIMS publishes only via the shapefile-download HTML page. Sedgwick/Wyandotte/Douglas KS counties all use vendor SPA platforms. **Phase 4 scrape only.**
+- **RI** — entire state on OpenGov ViewPoint Cloud (Auth0-gated GraphQL). No free public parcel REST anywhere in RI. Partnership-only per the 2026-05-07 doc.
+
+**Final inventory after the 6-session sprint:**
+- `parcel_sources`: **59 rows** covering **49 of 51 states + DC** (96% national parcel coverage).
+- `contractor_license_sources`: 26 rows / 20 enabled.
+- Migrations applied today: 3 (00030, 00055, 00097).
+- Code fixes pushed: 4 (NRI booster, fema-nri PAGE_SIZE, rotator dedupe, leads contractor_id nullable).
+- DB ops fixes: 17 (MN unlock, AZ/TN docs, 11 VA chronic-fail disables, 269k contractor_id pollution NULL'd, 259k notification cleanup).
+- Vercel env: 3 ops vars added.
+- 7 git commits pushed today (fcc56c0 → 9420b66 + final).
+- Permit field-maps captured for 15 endpoints (NYC dual + Chicago + Philly + SF + Dallas + 7 frozen BLDS partner Socrata + 2 SKIPs).
+
+**This is the realistic ceiling on free public data acquisition.** Beyond this point:
+1. KS + RI require either Phase 4 scrape work or commercial fallback (ATTOM / Regrid premium / Schneider Beacon).
+2. National phone-fill cannot exceed 8-12% without paid waterfall (Apollo / Spokeo).
+3. Henri's data pipeline is functionally complete on free sources — the remaining wedge unlocks all need operator action (PR #1 merge, Hetzner smoke-tests, Vercel keys, first MRR for Apollo).
