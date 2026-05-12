@@ -365,3 +365,101 @@ After 00085 + 00086 land + per-source verification:
   means it needs a custom ASP.NET ViewState scraper. Targets `liens_county_recorder` (00084) once written.
 - **License-roster scrapers for NH/RI/MS/WV** — added to `contractor_license_sources` (00086) but `enabled=false`. Each needs an HTML-search scraper. RI CRB is the highest-priority of the four (registers ALL residential contractors, returns phone).
 - **Read-side enricher integration** — Henri's orchestrator doesn't yet read from `parcels_sidecar`. Follow-up: extend `regrid-parcel.ts` to fall through to `parcels_sidecar` when Regrid returns null AND state ∈ {ME, MS, NH, OK, RI, UT, WV}.
+
+## §13 — v2-catalog loaders (2026-05-12)
+
+Five new loaders shipped for migration 00098's sidecar tables. All use
+stdlib only (no scrapling / yaml dependencies — just urllib + csv +
+gzip + html.parser). Same `~/.henri-sidecar.env` SUPABASE_URL +
+SUPABASE_SERVICE_ROLE_KEY pattern as the existing loaders.
+
+### Deploy
+
+```bash
+scp scripts/_sidecar_loaders/load_hmda.py            henri@5.78.152.250:~/scrapling_loaders/
+scp scripts/_sidecar_loaders/load_acris.py           henri@5.78.152.250:~/scrapling_loaders/
+scp scripts/_sidecar_loaders/load_cfpb_complaints.py henri@5.78.152.250:~/scrapling_loaders/
+scp scripts/_sidecar_loaders/load_redfin_zip.py      henri@5.78.152.250:~/scrapling_loaders/
+scp scripts/_sidecar_loaders/load_wa_li_debar.py     henri@5.78.152.250:~/scrapling_loaders/
+```
+
+### Smoke-test each (before enabling cron)
+
+```bash
+ssh henri@5.78.152.250
+cd ~/scrapling_loaders
+source ~/scrapling-env/bin/activate
+
+# 1. HMDA — smallest state first to validate
+python load_hmda.py --year=2024 --state=VT
+# Expect: [hmda] DONE — pulled N / inserted N relevant rows
+
+# 2. ACRIS — last 3 days only for quick check
+python load_acris.py --source=nyc-acris --days-back=3
+# Expect: [acris/nyc-acris] DONE — pulled N / inserted N
+
+# 3. CFPB Complaints — last 7 days
+python load_cfpb_complaints.py --days-back=7
+# Expect: [cfpb] DONE — pulled N / inserted N
+
+# 4. Redfin — full file (101MB, ~2 min)
+python load_redfin_zip.py --since-weeks=4   # only recent weeks first
+# Expect: [redfin] DONE — pulled ~250k rows / inserted N ZIP-period rows
+
+# 5. WA L&I Debar
+python load_wa_li_debar.py
+# Expect: [wa-li-debar] DONE — inserted N debarments
+```
+
+### Cron schedule (Hetzner)
+
+```cron
+# v2 sidecar loaders (added 2026-05-12)
+0 5 1 * *   /home/henri/scrapling_loaders/run.sh load_hmda.py --year=$(date +\%Y) --all-states >> /home/henri/scrapling-loaders.log 2>&1
+0 7 * * *   /home/henri/scrapling_loaders/run.sh load_acris.py --source=nyc-acris --days-back=3 >> /home/henri/scrapling-loaders.log 2>&1
+30 7 * * *  /home/henri/scrapling_loaders/run.sh load_acris.py --source=king-wa --days-back=14 >> /home/henri/scrapling-loaders.log 2>&1
+0 6 * * *   /home/henri/scrapling_loaders/run.sh load_cfpb_complaints.py --days-back=2 >> /home/henri/scrapling-loaders.log 2>&1
+0 9 * * 1   /home/henri/scrapling_loaders/run.sh load_redfin_zip.py >> /home/henri/scrapling-loaders.log 2>&1
+0 10 * * 1  /home/henri/scrapling_loaders/run.sh load_wa_li_debar.py >> /home/henri/scrapling-loaders.log 2>&1
+```
+
+### Verification
+
+After cron has fired a few times:
+
+```sql
+-- Check row counts via Supabase MCP or psql
+SELECT 'mortgage_originations' AS t, count(*) FROM mortgage_originations
+UNION ALL SELECT 'recorder_events', count(*) FROM recorder_events
+UNION ALL SELECT 'enforcement_actions', count(*) FROM enforcement_actions
+UNION ALL SELECT 'market_metrics_zip', count(*) FROM market_metrics_zip
+UNION ALL SELECT 'discipline_actions', count(*) FROM discipline_actions;
+```
+
+Expected after first week of crons:
+- mortgage_originations: 500k-1M rows (annual HMDA for current year, all states)
+- recorder_events: 50k-100k rows (NYC ACRIS 3-day windows × 7 daily runs)
+- enforcement_actions: 10k-30k rows (CFPB complaints)
+- market_metrics_zip: 30k+ rows (Redfin ZIP × 4 recent weeks)
+- discipline_actions: <500 rows (WA L&I debar list)
+
+### Henri-side consumer wiring (NOT in this drop — Phase 5+ follow-up)
+
+These tables are loaded but not yet read by Henri's scoring or UI:
+
+1. **Score-cron booster** — `src/app/api/cron/score/route.ts` needs to
+   pre-fetch each new sidecar (per the existing SWDI/NRI/NFIP pattern)
+   and pass new signal values to `buildSignals`. Estimated effort:
+   ~3 hours per signal × 5 = ~15 hours.
+
+2. **Drawer panels** — `src/components/dashboard/PropertyContextSection.tsx`
+   needs new panels for:
+   - "Recent cash-out refi in census tract" (mortgage_originations)
+   - "Mortgage payoff nearby" / "Lis pendens nearby" (recorder_events)
+   - "Contractor flagged in FTC docket" (enforcement_actions name-match)
+   - "ZIP demand: N new listings this week" (market_metrics_zip)
+   - "Contractor barred in this state" (discipline_actions)
+
+3. **Onboarding cross-check** — `src/app/api/onboarding/verify-license/route.ts`
+   should ALSO query `discipline_actions` and reject contractors with
+   active debarments.
