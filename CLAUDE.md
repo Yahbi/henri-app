@@ -1389,3 +1389,58 @@ Sixth-round agent + 16 additional INSERTs (10 catch-ups from earlier agent findi
 1. KS + RI require either Phase 4 scrape work or commercial fallback (ATTOM / Regrid premium / Schneider Beacon).
 2. National phone-fill cannot exceed 8-12% without paid waterfall (Apollo / Spokeo).
 3. Henri's data pipeline is functionally complete on free sources — the remaining wedge unlocks all need operator action (PR #1 merge, Hetzner smoke-tests, Vercel keys, first MRR for Apollo).
+
+### 2026-05-12 — v2 catalog (pre-permit + contractor-trust gap closure)
+
+Companion doc: [`docs/permit-catalog/free-data-sources-v2-2026-05-12.md`](docs/permit-catalog/free-data-sources-v2-2026-05-12.md). Three parallel research agents probed 200+ endpoints over ~3.5h wall time, focused on the categories the master catalog left uncovered: pre-permit demand signals + contractor-trust signals + outreach hygiene + market-size.
+
+**Net architectural conclusion**: the pre-permit demand-signal stack + the contractor-trust loop are NOW CLOSED at the free-data level. Phone (Tier 2) + property context (Tier 4) are saturated — no more research yields. Future research budget should redirect to (a) operator integration time, (b) careful paid-tier evaluation (Apollo / WCIRB / BBB Pro).
+
+**Top 5 new sources (ranked by impact × ease):**
+
+1. **HMDA Loan-Level via CFPB Data Browser** (tied #1, score 72) — `https://ffiec.cfpb.gov/v2/data-browser-api/view/nationwide/csv`. National 100% lender coverage. Census-tract grain. Filter `loan_purposes=31,32,2` for refi + cash-out + home improvement. TX 2023 alone = 107k cash-out + 55k refi. 1-6 month lead-time advantage on permits. 68MB stream in 8s. No auth, public domain. **The single highest-leverage pre-permit demand signal available at national scale on free data.**
+
+2. **NYC ACRIS Real Property Master** (tied #1, score 72) — `https://data.cityofnewyork.us/resource/bnx9-e6tj.json`. 3.6M DEED + 4.2M MTGE + 2.6M SAT (mortgage satisfaction = payoff) + Lis Pendens. BBL-grain (block-lot = address-grain). Socrata daily refresh. The only single dataset combining address-grain + deed-date + mortgage-event + lis-pendens. Pattern replicates to King County WA (`nx4x-daw6` Socrata foreclosures — already verified). Lis Pendens subset added to `lien_sources` 2026-05-12 as `NY-NYC-ACRIS-LIS-PENDENS`.
+
+3. **WA L&I Debarred Contractors + per-license-detail scrape** (score 63) — `https://secure.lni.wa.gov/debarandstrike/ContractorDebarList.aspx` + per-license-detail at `secure.lni.wa.gov/verify/`. WA-only initially. Pattern explicitly replicates to CA CSLB + OR CCB. Cleanest free, no-ToS-risk binary discipline flag. The only viable trust-loop closure at zero cost. Recommended workflow: Henri's existing WA Socrata license loop scrapes per-license-detail to capture `Infractions` + `Lawsuits Against Bond` blocks for contractor trust scoring.
+
+4. **FTC Cases & Proceedings + Home Improvement Penalty Offenses** (tied #4, score 60) — `https://www.ftc.gov/legal-library/browse/cases-proceedings`. Federal enforcement is rare but each hit is catastrophic for contractor trust. ~hundreds of relevant cases. Name-matchable against existing contractor_license_sources roster. One-time bulk pull + monthly delta. Negative-screening at federal scale, single integration covers all 50 states.
+
+5. **CFPB Consumer Complaint DB** (tied #4, score 60) — `https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/`. 1,085,449 confirmed records. Financial-products focus (mortgage / PACE / debt) — contractor-adjacent. PACE-financed renovation fraud often catches contractors state license boards haven't disciplined yet. Open REST API, daily refresh, well-documented.
+
+**Honorable mentions (just outside Top 5):**
+
+- **Redfin Data Center ZIP Tracker** (score 54) — `redfin-public-data.s3.us-west-2.amazonaws.com/redfin_market_tracker/zip_code_market_tracker.tsv000.gz`. 101MB gzipped weekly. Best free national real-estate-demand signal at ZIP grain.
+- **Realtor.com Inventory ZIP CSV** (score similar) — `econdata.s3.amazonaws.com/Reports/Core/RDC_Inventory_Core_Metrics_Zip.csv`. 7.2MB weekly with `new_listing_count` + `median_days_on_market` + `price_reduced_count` per ZIP.
+- **Zillow ZHVI/ZORI** (Metro/County/ZIP monthly) — `files.zillowstatic.com/research/public_csvs/zhvi/`.
+- **OpenFEMA FimaNfipClaims v2** (score 45) — `fema.gov/api/open/v2/FimaNfipClaims`. ~2.6M claims with `dateOfLoss`. Henri already has `claims_nfip` via 00071; extending the score booster to use `dateOfLoss`-driven freshness adds 3-9-month-prior rebuild signal.
+- **Census County Business Patterns (CBP)** (score 40) — `api.census.gov/data/cbp`. ZIP × NAICS-23xx establishment counts. More granular than BLS QCEW (county-only).
+
+**Net-new DB rows added 2026-05-12:**
+
+- `lien_sources`: `NY-NYC-ACRIS-LIS-PENDENS` + `WA-KING-COUNTY-FORECLOSURES` (lien_kind = `lis_pendens` / `foreclosure`, both `enabled=false` pending Hetzner loader work).
+
+**Still pending integration (these need NEW sidecar tables — not in existing schema):**
+
+- **`mortgage_originations`** table for HMDA loan-level (refi/cash-out/improvement signal). Need migration + Hetzner loader. Highest-leverage Tier-1 add.
+- **`recorder_events`** table for NYC ACRIS DEED/MTGE/SAT (sale/origination/satisfaction events at BBL grain). Could generalize to King County + other Socrata recorder feeds.
+- **`enforcement_actions`** table for FTC + CFPB + state AG enforcement actions. Per-contractor name-match against existing license rosters.
+- **`market_metrics_zip`** table for Redfin + Realtor.com + Zillow ZIP aggregates. Could enrich `zip_demand_scores` instead of new table.
+- **`discipline_actions`** table for WA L&I debar + CSLB CA discipline + similar per-state. Per-license-detail scrape output.
+
+**Saturated categories (stop researching):**
+
+- **TIER 2 — Phone**: WV NG911 `Res_Phone` is the only unicorn. Agent 3 closed this definitively across 10 different probe families (voter files, county PSAPs, assessor CAMA, white-pages services, court e-filing party-phone, utility customer rolls).
+- **TIER 4 — Property context**: No free national year-built/sqft database exists; 59 state parcel sources is the ceiling. Roof age has no free national substrate. Energy program participation lists are aggregate-only by federal/state confidentiality rule.
+
+**Re-add to roadmap:**
+
+- **Census ACS 5-year re-pull** — `api.census.gov/data/2022/acs/acs5` w/ free API key. ZIP/tract tenure + housing-cost-burden + median-year-built. Originally pruned in 00079 because no consumers — v2 audit identifies it as worth re-adding now that scoring + outreach hygiene use cases exist.
+- **State DNC subscriptions** (under-$50/mo): NJ ($50/yr/area), CO ($25/qtr/area), IN ($10/qtr/area), TX ($75/qtr/area), OK ($50+$25/qtr/area). Skip federal FCC DNC ($75/area, full-US ~$20k/yr — busts $50 budget).
+
+**Documents now in `docs/permit-catalog/`:**
+- `16-stale-states-2026-05-06.md`
+- `opengov-viewpoint-partnership-2026-05-07.md`
+- `free-data-sources-2026-05-08.md` (v1 working doc)
+- `free-data-sources-v2-2026-05-12.md` (v2 consolidated audit)
+- Plus 5 deeper-dive companion docs from the day's research work.
