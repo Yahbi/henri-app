@@ -1199,3 +1199,61 @@ These are NOT auto-inserted into `permit_sources` because the 361k-row table alr
 
 **Honest scope ceiling re-confirmed:**
 - Agent 3 found ZERO state-mandated permit aggregators equivalent to NJ DCA's `N.J.A.C. 5:23-4.5(d)` law in NY/MA/CT/MD/NC/GA/FL/TX/CA. NJ's monthly muni-reporting mandate is structurally unique. Don't chase phantoms — invest cycles in muni-level Tyler BLDS partner-portal coverage instead.
+
+### 2026-05-11 session 4 — second-wave 4-agent expansion
+
+Four more parallel research agents probed gaps left by session 3. The aggregate yield + key honest corrections:
+
+**`parcel_sources` deltas (12 new county-level / 1 statewide):**
+- **CO-STATEWIDE-PARCELS** (GOLD) — `gis.colorado.gov/.../Colorado_Public_Parcels/FeatureServer/0`. 2,504,966 parcels with owner + mailing + sale price + sale date covering Denver/Jefferson/El Paso/Arapahoe/Adams + all CO counties in ONE endpoint. Single biggest parcel win this session.
+- **MI-DETROIT-PARCEL** — Detroit Master Parcel Authoritative. 379k parcels w/ taxpayer_1 + sale_price + sale_date + year_built + total_floor_area.
+- **MO-ST-LOUIS-COUNTY** — 401k parcels w/ owner + mailing + assessment + year built + sqft + deed metadata.
+- **MO-ST-CHARLES-COUNTY** — 171k parcels with RICHEST schema in agent-1 report (sale history + beds/baths + sqft).
+- **CO-ADAMS-COUNTY** — 188k. Redundant with statewide but more granular.
+- **GA-FULTON-COUNTY** (Atlanta) — 372k w/ owner + mailing.
+- **KY-KENTON-COUNTY** — 64k w/ owner + mailing.
+- **MI-KENT-COUNTY** (Grand Rapids) — 231k w/ owner + mailing.
+- **NM-DONA-ANA-COUNTY** (Las Cruces) — 95k w/ owner + valuation.
+- **SC-GREENVILLE-COUNTY** — 88k w/ owner + sale + sqft + beds/baths.
+- **SD-MINNEHAHA-SIOUX-FALLS** — 66k w/ owner + mailing.
+- **SD-PENNINGTON-RAPID-CITY** — 54k w/ grantee + grantor (ownership-change signal — rare).
+
+Agent 1 documented honest dead-ends: Birmingham/Madison AL, DeKalb GA (502), Bernalillo NM, Richland SC, Greene MO (Springfield), East Baton Rouge LA. All vendor SPA platforms, no public REST.
+
+**`contractor_license_sources` deltas:**
+- **VA** repointed (scrape → TSV bulk) at `dpor.virginia.gov/.../Regulant List/2710__crnt.txt`. ~30k tradesmen (electricians + plumbers + HVAC). **INCLUDES EMAIL** (`EMAILADDRESS` column) — first VA source with it. Sister rosters 2701/2705b/2705c/2709 exist; schema's one-row-per-state PK limits to 2710 tradesman as canonical.
+- **DE** (new) — DE Business Licenses Socrata `5zy2-grhr`. 60k businesses, filter to RESIDENT/NON-RESIDENT CONTRACTOR for ~12k contractor entities. NO phone/email.
+- **MD** (new) — Montgomery County Master Electrician Socrata `v8mn-6i2r`. 4,250 records. Statewide MD has no bulk source; MHIC requires direct contact. NO phone/email.
+
+**Tyler / EnerGov reality check (Agent 3):**
+- The `permits.partner.socrata.com` portal contains only 11 unique BLDS datasets, **all frozen 2012–2016**. Tyler abandoned the partner-Socrata ingest. The "hidden goldmine" framing in the master catalog was overstated.
+- Net-new finds on that portal: Seattle `m393-mbxq` (frozen ~2012) + Nashville `7ky7-xbzp` (frozen 2016, Henri already has Nashville on ArcGIS — superseded). Skip both.
+- Tyler EnerGov SelfService has the ACTUAL live data, but every tenant requires Camoufox scraping (already built as `load_energov_ss.py`). Top-10 tenant configs to add: Albuquerque NM, Wilmington NC, Whatcom Co WA, Conroe TX, Wake Co NC, Lake Co IL, Clermont Co OH, Clayton Co GA, Forsyth Co GA, Allen TX. Each needs per-tenant `PartType` enum captured during smoke-test.
+
+**🔥 Brutal phone-fill ceiling honest revision (Agent 4):**
+- **Free-data phone-fill national ceiling is 8-12%, NOT the 15-25% the master catalog asserted.**
+- Only ONE new state added by agent search: **Wisconsin** voter file (Badger Voters bulk) — voter-supplied OPTIONAL phone + commercial-use ALLOWED. Add to ingest backlog alongside NC + OH.
+- Every other "phone-in-file" voter state has a commercial-use prohibition that survives the cleanest reading: SD, MN, IA, KS, NE, NM, AK, UT, ID, AL, KY, LA, MS, ND, NV, WY, MT, ME, NH, VT.
+- **WV NG911 `Res_Phone` is an outlier, not a pattern.** Agent probed VT/ID/MT/WY NG911 layers + multiple counties — all comply with NENA standard fields (no phone). VT VCGI ESITE worth ONE direct `?f=json` probe on Hetzner (one source hinted at phone fields, none confirmed); plan for "no phone" and treat any as bonus.
+- **Assessor "FL counties include owner phone" claim was wrong.** Agent verified: no assessor in the probe (FL/TX/AZ/HI) ships phone. The master catalog claim retracted.
+- **Bonus find — Maricopa AZ launched free bulk parcel download March 2026.** No phone but full owner + mailing. Not yet inserted; add as `MARICOPA-AZ-PARCELS` row in a future session.
+- **All "creative free sources" are dry**: FEC (52 USC §30111 forbids solicitation), UCC-1 (debtor has no phone field), marriage licenses (phone not retained), court e-filing (attorney phone only), state DOL (aggregate only), HUD Section 8 (FOIA-walled), utility customer lists (denied), state SoS business entities (officer phone almost never required).
+
+**Path to phone-fill >25%**: Apollo ($49/mo cheapest tier) is the only thing that meaningfully moves the needle. Defer until first $1k MRR per existing CLAUDE.md plan.
+
+**Phase 4 license-roster backlog additions from Agent 2** (ASP.NET ViewState scrape — same pattern as existing Phase 4 Accela/Tyler scrapers):
+- NJ mylicense.com bulk (Home Improvement + HVACR + Electrical + Plumbing)
+- CT eLicense Generate Roster ("No Fee Required" on all roster types)
+- OH elicense4 DownloadRoster (Generate flow, multi-step PostBack)
+- AL genconbd roster.aspx (10,346 GCs confirmed in HTML)
+- NC NCLBGC portal (HTTP 200 today; Cloudflare wall reduced — retry vs Phase 4 prior)
+- MD MHIC + Electricians CGI
+- KY DHBC ASP.NET
+
+**REJECT (mark in catalog as no-bulk-API)**: MA Pro Licensing (per-license lookup only, no enumeration), IN PLA (paid), WI DSPS (paid CLPS), MO MOpro (Salesforce LWC), SC LLR (FOIA-style), KS-statewide (state regulates zero residential trades), NE-statewide, ID DOPL (HTML only), SD plumbing/electrical (lookup only), VT OPR (Pega SPA — Phase 4), WY ImageTrend (Phase 4), NM CID (PSI portal Phase 4), HI PVL (paid List Builder), Puerto Rico, Guam.
+
+**Final inventory after session 4:**
+- `parcel_sources`: 30 rows (7 original + 11 session-3 + 2 session-3 agents + 12 session-4) — covers 17 states with statewide aggregators + 13 highest-volume county-level fallbacks.
+- `contractor_license_sources`: 24 rows (22 prior + DE + MD; with FL/IL/VA repointed). Phone-bearing license sources: DC only (MT was wrongly claimed). Email-bearing: VA tradesmen + MN residential.
+
+**Where to start the next session:** the data-side work has hit diminishing returns. Real progress now requires (a) Hetzner smoke-testing the 30 parcel sources + 4 license-source rotator runs, (b) PR #1 merge to push booster fixes live, (c) Vercel API key provisioning, (d) first paying contractor to fund Apollo. The path is operator-blocked, not researchable.
