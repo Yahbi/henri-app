@@ -1257,3 +1257,92 @@ Agent 1 documented honest dead-ends: Birmingham/Madison AL, DeKalb GA (502), Ber
 - `contractor_license_sources`: 24 rows (22 prior + DE + MD; with FL/IL/VA repointed). Phone-bearing license sources: DC only (MT was wrongly claimed). Email-bearing: VA tradesmen + MN residential.
 
 **Where to start the next session:** the data-side work has hit diminishing returns. Real progress now requires (a) Hetzner smoke-testing the 30 parcel sources + 4 license-source rotator runs, (b) PR #1 merge to push booster fixes live, (c) Vercel API key provisioning, (d) first paying contractor to fund Apollo. The path is operator-blocked, not researchable.
+
+### 2026-05-11 session 5 — third-wave (4 agents) + permit field-mapping pass
+
+Three more parallel agents probed remaining state gaps + captured exact field schemas for 15 permit Socrata endpoints. Result: **parcel_sources grew from 18 → 53 rows covering 40 distinct states + DC**.
+
+**`parcel_sources` deltas (21 new rows):**
+
+Statewide aggregators (massive volume in single endpoints):
+- **NY** state ITS (`NYS_Tax_Parcels_Public`) — 3,827,530 parcels covering 38 of 62 counties incl all 5 NYC boroughs. Schema gold: includes BEDS + BATHS + sqft_living + year_built — rarest combo nationally.
+- **NC** OneMap — **5,925,306 parcels** covering all 100 NC counties + Eastern Band of Cherokee in ONE endpoint. MaxRecordCount=5000 (fastest paging).
+- **MD** SDAT — 2,393,149 parcels w/ year_built + sqft + sale_date + consideration.
+- **MA** MassGIS L3 — ~2.5M parcels w/ owner + mailing + sale + year_built + sqft. All 351 municipalities.
+- **AR** AGISO — 2,117,780 parcels covering 74 of 75 counties.
+- **MN** Met Council 7-county — 1,140,678 parcels w/ excellent trade-prediction schema (sale + year + sqft + garage + basement + heating + home_style).
+- **WY** statewide 2024 — 370,132 w/ owner + value.
+- **ND** statewide — 741,885 boundary-only.
+
+NYC supplement:
+- **NYC PLUTO** (5 boroughs MAPPLUTO) — 856,670 w/ building-class granularity.
+
+Texas (state has no aggregator):
+- **TX-HARRIS-HCAD** (Houston) — 1,547,035 w/ joint-owner + mailing.
+- **TX-BEXAR-COUNTY** (San Antonio) — 710,772 w/ owner + year_built + GBA.
+- **TX-TRAVIS-TCAD** (Austin) — 373,683 w/ deed date + year_built.
+- **TX-COLLIN-CCAD** (Plano/Frisco) — 443,238 w/ year_built + living_area.
+
+Tennessee (state has no aggregator):
+- **TN-DAVIDSON-NASHVILLE** — 286,448 w/ sale_price + ownership_date. MaxRecordCount=10000.
+- **TN-SHELBY-MEMPHIS** — 353,448 w/ owner + mailing.
+
+Other state-level + high-value county:
+- **AK-ANCHORAGE-MOA** — 99,731 w/ owner + deed_date + year_built. Anchorage = 40% of AK pop. Sister mailing-list dataset has 188k.
+- **OK-OKLAHOMA-COUNTY** (OKC metro) — 336,732 w/ owner + mailing + sale_date + sale_price. **Replaces the Phase-4 OKC Accela scrape backlog** — same data without scraping.
+- **IA-LINN-COUNTY** (Cedar Rapids) — 105,788 w/ owner + mailing + deed-recording.
+- **VT-PROPERTY-TRANSFERS** (PTTR sale-recording layer) — 223,046 sale events w/ buyer + seller + sale price + close date. Geocoded. PTT-172 form filings near-real-time. **Strongest "homeowner just bought" signal nationally** — perfect for contractor wedge.
+
+Plus immediate INSERTs from earlier:
+- **AZ-MARICOPA-COUNTY** (free bulk launched March 2026 — 1.7M parcels covering all Phoenix metro).
+- **FL-DOR-STATEWIDE-PARCELS** (FTP — Kimi find, ~9.8M parcels statewide aggregator, requires new load_parcels_ftp.py).
+
+Plus 1 correction:
+- **WV-PARCEL-SUMMARY** layer ID fixed (/MapServer/11 was 404 → /MapServer/0 returns 1,389,855 parcels).
+
+**Agent-3 permit field-mapping pass — 15 endpoints fully captured for INSERT:**
+
+LIVE Tier-A (6 endpoints, captured complete field-maps):
+- **NYC DOB legacy `ipu4-2q9a`** — 3,987,241 historical permits with `owner_s_phone__` + `permittee_s_phone__` (gold; issuance frozen 2020-06-05 but filings continue).
+- **NYC DOB NOW `rbx6-tga4`** — 935,442 LIVE permits (issued yesterday). owner_name + applicant_business_name. NO phones (dropped in migration). PAIR with legacy for backfill.
+- **Chicago `ydr8-5enu`** — 835,310 LIVE permits with up to 15 contacts/permit pivoted into 60 columns. Trade attribution per contact (OWNER/GC/CONTRACTOR-ELECTRICAL/CONTRACTOR-PLUMBING/SIGN CONTRACTOR/etc) — beats every other US city.
+- **SF DBI `i98e-djp9`** — 1,287,964 LIVE permits. NO names but **ADU flag** + units delta + estimated_cost.
+- **Philly Carto SQL** — 918,096 LIVE permits w/ `opa_owner` + `contractorname` + `contractoraddress1`. **NO phones** (agent 3's earlier claim was wrong — verified). Carto SQL API uses different ingest pattern than Socrata.
+- **Dallas `e7gq-4sah`** — 126,840 LIVE permits w/ `contractor` field containing embedded phone numbers (regex `\(\d{3}\)\s*\d{3}-\d{4}`). Buried gold.
+
+HISTORICAL Tier-B (7 frozen 2014-2016 Tyler partner Socrata — useful for storm-trigger backfill + historical_conversion scoring denominator):
+- Boston `ga54-wzas` (298k frozen 2016)
+- Fort Worth `qy5k-jz7m` (264k frozen 2015, owner)
+- Seattle Tyler partner `m393-mbxq` (51k frozen 2016, applicant)
+- Nashville Tyler partner `7ky7-xbzp` (33k frozen 2016, contractor)
+- Raleigh `pjib-v4rg` (105k frozen 2016, owner+contractor)
+- Hartford `itj8-dtui` (19k frozen 2016, owner+contractor)
+- New Orleans `gk94-9m35` (141k frozen 2016, owner+contractor — most-complete)
+
+SKIPS (don't ingest):
+- Seattle SDCI `76t5-zqzr` — no issue_date column (deal-breaker for freshness scoring)
+- Auburn `mwqc-wq7d` — no location columns (deal-breaker)
+
+**Agent-4 phone-fill DEFINITIVE result:**
+- VT VCGI ESITE Site Address Points — **DEFINITIVELY NO PHONE COLUMN.** 46 fields probed live; zero phone/tel/contact. The earlier "Res_Phone reference" belongs to WV's Site Address layer, NOT Vermont's ESITE. Agent 4 marked this gap closed.
+- VT bonus: Property Transfers (PTTR) layer has buyer/seller addresses + sale price — added as VT-PROPERTY-TRANSFERS.
+
+**Final inventory after session 5:**
+- `parcel_sources`: **53 rows** covering **40 distinct states** (was 18 / 8 states at session-start).
+- `contractor_license_sources`: **26 rows** (20 enabled).
+- States missing parcel coverage entirely: AL (partial — only Mobile via earlier session), KS, NE (both confirmed-no-free-bulk by Agent 6), plus AL/CO/GA/KY/LA/MI/MO/NM/SC/SD partials all now have ≥1 county source.
+
+**Net delta across the 5-session sprint:**
+- Migrations applied: 3 (00030 feedback, 00055 views, 00097 contractor_id nullable)
+- Code fixes pushed: 4 (NRI booster, fema-nri PAGE_SIZE, rotator dedupe, leads NULL pattern)
+- DB ops fixes: 17 (MN unlock, AZ/TN docs, 11 VA chronic-fail disable, 269k contractor_id pollution NULL'd, 259k notification cleanup)
+- Vercel env: 3 ops vars added
+- License sources: 22 → 26 (+IL fix, +DE, +MD, +MT, +DC, +VA repointed, +FL repointed)
+- Parcel sources: 7 → 53 (+13 statewide + 28 county-level + 5 corrections/additions)
+- 5 commits pushed to feature branch
+
+**Remaining gaps that can't be closed by data research:**
+- Phone-fill nationally caps at 8-12% on free data (only NC + OH + WV + FL + WI + Bozeman MT for homeowner phone; DC + VA for contractor phone/email).
+- AL/KS/NE statewide parcels confirmed unavailable on free public sources.
+- AZ ROC, TN BLC, NJ DCA permit aggregators known but operator-blocked behind Hetzner Camoufox work.
+- PR #1 merge to push code fixes live remains operator-blocked.
