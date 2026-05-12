@@ -1444,3 +1444,77 @@ Companion doc: [`docs/permit-catalog/free-data-sources-v2-2026-05-12.md`](docs/p
 - `free-data-sources-2026-05-08.md` (v1 working doc)
 - `free-data-sources-v2-2026-05-12.md` (v2 consolidated audit)
 - Plus 5 deeper-dive companion docs from the day's research work.
+
+### 2026-05-12 session-end — migrations + loaders shipped
+
+Two new migrations + five new Hetzner loaders + operator runbook landed this session. Everything ships as graceful-degrade-safe additive infrastructure — schema + Python scripts ready for when operator deploys.
+
+**Migrations applied:**
+- **00098_v2_sidecar_tables.sql** — 5 new sidecar tables for the v2 catalog's identified data classes:
+  - `mortgage_originations` (HMDA loan-level — pre-permit refi/cash-out/improvement signal)
+  - `recorder_events` (NYC ACRIS + King WA + future county recorders — DEED/MTGE/SAT/LP/NLP/FORECLOSURE)
+  - `enforcement_actions` (FTC + CFPB + state AG enforcement against contractors)
+  - `market_metrics_zip` (Redfin + Realtor.com + Zillow ZIP-level demand aggregates)
+  - `discipline_actions` (WA L&I debar + CSLB CA + TDLR TX + NYC DCWP discipline)
+  All follow the sidecar pattern: service-role-write only, RLS-on-no-policies, raw_json + created_at audit, idempotent CREATE TABLE IF NOT EXISTS.
+
+- **00099_acs_5yr_readd.sql** — re-adds `demo_acs_zcta` (was pruned in 00079; v2 audit identifies it as worth re-adding for scoring + outreach hygiene + contractor tier pricing).
+
+**Hetzner loaders shipped** (in `scripts/_sidecar_loaders/`, deploy per `UPLOAD.md` §13):
+- `load_hmda.py` — CFPB Data Browser CSV API → `mortgage_originations`. Monthly cron.
+- `load_acris.py` — NYC ACRIS Socrata + King WA Socrata → `recorder_events`. Daily cron.
+- `load_cfpb_complaints.py` — CFPB Consumer Complaint REST API → `enforcement_actions`. Daily cron.
+- `load_redfin_zip.py` — Redfin S3 gzipped TSV (101MB) → `market_metrics_zip`. Weekly cron.
+- `load_wa_li_debar.py` — WA L&I Debarred Contractors HTML scrape → `discipline_actions`. Weekly cron.
+
+All use stdlib only (urllib + csv + gzip + html.parser) — no scrapling/pyyaml dependency. Same `~/.henri-sidecar.env` pattern. Total: 941 LOC across 5 files.
+
+**Operator runbook** (`scripts/_sidecar_loaders/UPLOAD.md` §13) covers:
+- SCP commands per loader
+- Per-loader smoke-test invocations
+- Cron schedule with stagger windows
+- Expected post-week row counts
+- Henri-side consumer wiring still pending (Phase 5+)
+
+**Henri-side consumer wiring intentionally deferred to next session.** The 5 new sidecar tables are populated by the loaders but not yet read by:
+1. **Score cron booster** — proper booster threshold tuning requires reading actual loaded data distributions. Doing it blind would ship code requiring rewrite. Estimated effort once data lands: 3-4 hours.
+2. **Lead drawer panels** — 5 new panels for the new signals. ~3 hours, requires browser preview verification.
+3. **Onboarding cross-check** — `verify-license` should also query `discipline_actions` to reject debarred contractors. ~30 min.
+
+**Today's commit chain (2026-05-11 + 2026-05-12, ~14 commits):**
+
+| Commit | What |
+|---|---|
+| `fcc56c0` | 3 cron handler fixes (NRI booster + fema-nri + dedupe) |
+| `3d3f2e6` | CLAUDE.md mid-session refresh |
+| `9268016` | Migration 00097 (leads.contractor_id nullable) |
+| `ea0b970` | CLAUDE.md wedge + disk-full |
+| `47c0cd4` | Session-3 (IL + 13 parcels + DE + MD) |
+| `e11758b` | Session-4 (12 parcels + VA repoint) |
+| `9420b66` | Session-5 (21 parcels + permit field-maps) |
+| `dc8de53` | Session-6 (96% coverage) |
+| `575ff6e` | docs: free-data-sources audit |
+| `8947fd2` | Session-7 (v2 catalog) |
+| `ea20966` | **Migration 00098 — 5 v2 sidecar tables** |
+| `8e0f252` | **5 Hetzner loaders (941 LOC)** |
+| `b45cdcd` | UPLOAD.md §13 operator runbook |
+| `+ this commit` | **Migration 00099 (ACS re-add) + final CLAUDE.md sync** |
+
+**Path-to-operational order (operator):**
+1. Merge PR #1 → 4 cron fixes go live
+2. Rotate service-role JWT
+3. Supabase Pro upgrade ($25/mo)
+4. Provision 12 Vercel API keys (already-open Chrome tab)
+5. Provision Twilio account
+6. SCP + cron the 5 new loaders per UPLOAD.md §13
+7. NC + OH voter file ingest on Hetzner
+8. Soft-launch to 5 contractors at $149/mo
+
+After step 8 → $745 MRR funds Apollo ($49/mo) → phone fill 1% → 25%+ → wedge promise deliverable.
+
+**Engineering work still ahead (post-loader-deployment):**
+- Score-cron booster wiring for 5 new sidecars (~3-4 hours)
+- Drawer panels for new signals (~3 hours)
+- Onboarding cross-check against `discipline_actions` (~30 min)
+- Code cleanup for 4 dropped-table refs (~30 min)
+- State DNC outreach hygiene integration (~3 hours, depends on Twilio)
