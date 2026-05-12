@@ -1161,3 +1161,41 @@ Working session driven by deep gap audit. Live-DB queries surfaced multiple sile
 - **Hetzner Playwright work** for AZ ROC + TN BLC + parcels_sidecar loaders.
 
 **Where to start the next session:** if PR #1 is merged, validate booster firing via `SELECT count(*) FILTER (WHERE (score_signals->>'nri')::int > 0) FROM leads TABLESAMPLE SYSTEM (5)`. Target: >0 (any non-zero proves the patch shipped). If not merged, the booster fix sits on the feature branch but production crons keep using the old code.
+
+### 2026-05-11 session 3 — agent-driven data-source expansion
+
+Three parallel research agents probed gaps left by the 2026-05-08 master catalog. Net additions:
+
+**`contractor_license_sources` deltas:**
+- **IL IDFPR** — slug fix: `idfpr-licenses` (HTTP 404) → `pzzh-kp68` (live, **4.2M+ rows**). Enabled, `last_run_at` reset.
+- **MT** (new) — Montana DLI BIRT XLSX endpoint, 13,842 approved construction contractors. Master catalog wrongly claimed phone in this feed — verified NONE. Rotator needs XLSX parsing (currently csv/socrata/arcgis/scrape only); row sits at `enabled=false` until support added.
+- **DC** (new) — DC OpenData FEEDS/DCRA ArcGIS filtered to license categories 4101/4102/4105/4106 (Electrical/Plumbing/General/Home Improvement). 12,594 contractor rows. **Includes `PHONE_NUMBER` + `AGENT_PHONE` columns** — first license-roster source for Henri with phone fields.
+- **FL** (repointed) — existing row was at `data.fldfs.com` (Dept of Financial Services, wrong agency). Updated to DBPR CILB positional CSV at `myfloridalicense.com/sto/file_download/extracts/CONSTRUCTIONLICENSE_1.csv`. 47.5 MB, ~200-300k licenses, weekly refresh.
+
+**`parcel_sources` deltas (13 new statewide endpoints):**
+All probed live HTTP 200 + verified field_map shape. All `enabled=false` until Hetzner `load_parcels_arcgis.py` smoke-tests each.
+- **WI** (3.56M w/ owner), **CT** (1.25M w/ CAMA-joined owner), **IN** (3.64M w/ owner), **MT** (917k w/ DOR ORION owner), **VT** (344k w/ Grand List owner), **NV** (1.39M partial owner — NRS 250 redacts), **WA** (3.32M partial), **VA** (3.5M w/ owner — agent corrected stale catalog URL to VGIN MapServer path), **PA** (4.69M partial), **CA** (13.15M — no owner per state privacy, but APN+site_addr+city), **HI** (384k w/ TMK owner), **ID** (1.15M, **97% owner-fill** — agent identified Idaho Dept of Lands WhiteStar Parcels, much richer than IDWR's geometry-only feed), **OH** (6.32M, **91% owner-fill** — agent identified ODNR LandBase MapServer 5; the OGRIP "Public View" hub URL was intentionally owner-masked).
+
+**Cross-state catalog corrections discovered today:**
+- Master catalog said MT BSD XLSX "Includes phone" — **wrong**. Verified zero phone fill.
+- Master catalog said CA CSLB ships "FTP zip" — **stale**. CSLB shifted to daily PDF deltas (PL/PP[YYMMDD].pdf) on 2020-11-13. Phase 4 PDF-parse work to recover.
+- Master catalog said MI LARA XLSX "Includes phone" — **partial**. The XLSX path covers architects/engineers/surveyors only. Builders/Electrical/Plumbing/Mechanical moved to CSCL on 2021-03-24, which is FOIA-form-only.
+- Master catalog said LA LSLBC has "CSV export from search" — **wrong**. Search UI has no Export button. Phase 4 ASP.NET ViewState scrape.
+- Master catalog said MA DPL ships "separate XLSX" — **wrong**. Accela citizen-portal search only. Phase 4.
+
+**Permit aggregators surveyed (NOT auto-inserted; documented for Phase 5+):**
+Agent 3 identified 20+ high-value permit Socrata endpoints. The top 8 with full contact fields:
+- NYC DOB Permit Issuance (legacy) `ipu4-2q9a` — 3.6M permits + `owner_s_phone__` + `permittee_s_phone__` (gold-tier for NYC metro phone fill).
+- NYC DOB NOW Build `rbx6-tga4` — 1.5M+ permits + owner + applicant business names.
+- Chicago Building Permits `ydr8-5enu` — 1M+ permits with up to 15 contacts per permit (CONTRACTOR + OWNER + ARCHITECT roles).
+- Philadelphia L&I Carto SQL — 600k permits + `opa_owner` + `contractorname` (gold).
+- New Orleans `gk94-9m35` (Tyler BLDS partner) — 200k permits + owner + contractor + lat/lng + value.
+- Boston BLDS partner `ga54-wzas` + Analyze Boston datastore — 500k permits combined.
+- SF DBI `i98e-djp9` — 1.3M permits (no owner/contractor but value + lat/lng + plumbing/electrical sibling datasets).
+- Dallas `e7gq-4sah` — 500k permits + contractor name (and contractor phone per Apify scraper notes; needs verify).
+Plus 8 BLDS-shaped Tyler partner-portal tenants (Raleigh, Fort Worth, Hartford CT, New Castle DE, Santa Rosa CA, Redmond WA, Auburn) — same field shape as NOLA.
+
+These are NOT auto-inserted into `permit_sources` because the 361k-row table already contains many stub entries for the same cities; doing a mass INSERT without first reconciling existing stubs would create duplicate ingest paths. Reconciliation + Hetzner YAML config addition is Phase 5 follow-up.
+
+**Honest scope ceiling re-confirmed:**
+- Agent 3 found ZERO state-mandated permit aggregators equivalent to NJ DCA's `N.J.A.C. 5:23-4.5(d)` law in NY/MA/CT/MD/NC/GA/FL/TX/CA. NJ's monthly muni-reporting mandate is structurally unique. Don't chase phantoms — invest cycles in muni-level Tyler BLDS partner-portal coverage instead.
