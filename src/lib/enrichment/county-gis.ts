@@ -1,3 +1,5 @@
+import { queryParcelsSidecar } from "./parcels-sidecar";
+
 /* ── Free property enrichment via verified public parcel endpoints ───────
  *
  * Each lookup below has been directly probed against the live service
@@ -945,6 +947,71 @@ async function queryOSMBuilding(
   }
 }
 
+/** Florida Statewide Cadastral — fallback for FL counties not covered
+ * by Miami-Dade or Hillsborough adapters. Layer is hosted by FDOR Property
+ * Tax Oversight and aggregates ~67 county appraisers. Schema verified
+ * 2026-05-07 in research/tier1b_county_parcels.md.
+ *
+ * Field summary (full 5/5 for Henri's score signals):
+ *   PHY_ADDR1     situs street address
+ *   OWN_NAME      owner name
+ *   ACT_YR_BLT    actual year built
+ *   TOT_LVG_AR    total living area sqft
+ *   JV / TV_*     just / taxable values (assessed-value proxies)
+ *
+ * Used as fallback only — Miami-Dade + Hillsborough have richer
+ * county-specific feeds. */
+async function queryFloridaStatewide(address: string): Promise<ParcelHit | null> {
+  const safe = stripAddressTrailer(address).replace(/'/g, "''").toUpperCase();
+  const a = await arcgisQuery(
+    "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0/query",
+    `UPPER(PHY_ADDR1) LIKE UPPER('${safe}%')`,
+    ["PHY_ADDR1", "PHY_CITY", "PHY_ZIPCD", "OWN_NAME", "OWN_ADDR1",
+     "ACT_YR_BLT", "TOT_LVG_AR", "LND_SQFOOT", "JV", "TV_NSD", "S_LEGAL"],
+  );
+  if (!a) return null;
+  return {
+    owner_name: (a.OWN_NAME as string) ?? null,
+    mailing_address: (a.OWN_ADDR1 as string) ?? null,
+    year_built: numOrNull(a.ACT_YR_BLT),
+    home_sqft: numOrNull(a.TOT_LVG_AR),
+    lot_sqft: numOrNull(a.LND_SQFOOT),
+    assessed_value: numOrNull(a.TV_NSD ?? a.JV),
+    source: "Florida Statewide Cadastral",
+  };
+}
+
+/** New York State Tax Parcels Public — covers ~30 NY counties that opted
+ * into the NYS GIS sharing program: Suffolk, Westchester, Erie, Onondaga,
+ * Albany, Rockland, Broome, Chautauqua, Dutchess, Saratoga, etc. Notable
+ * holdout: Nassau (did not opt in). Fallback for non-NYC NY addresses.
+ *
+ * Field summary verified 2026-05-07:
+ *   PARCEL_ADDR     situs address
+ *   PRIMARY_OWNER   owner name
+ *   YR_BLT          year built
+ *   SQ_FT or SQFT_LIVING  living area
+ *   TOTAL_AV        total assessed value
+ *
+ * Used as fallback only — NYC PLUTO covers the 5 boroughs with richer data. */
+async function queryNYStatewide(address: string): Promise<ParcelHit | null> {
+  const safe = stripAddressTrailer(address).replace(/'/g, "''").toUpperCase();
+  const a = await arcgisQuery(
+    "https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/1/query",
+    `UPPER(PARCEL_ADDR) LIKE UPPER('${safe}%')`,
+    ["PARCEL_ADDR", "MUNI_NAME", "ZIP_CODE", "PRIMARY_OWNER",
+     "YR_BLT", "SQ_FT", "SQFT_LIVING", "TOTAL_AV"],
+  );
+  if (!a) return null;
+  return {
+    owner_name: (a.PRIMARY_OWNER as string) ?? null,
+    year_built: numOrNull(a.YR_BLT),
+    home_sqft: numOrNull(a.SQFT_LIVING ?? a.SQ_FT),
+    assessed_value: numOrNull(a.TOTAL_AV),
+    source: "NY State Tax Parcels Public",
+  };
+}
+
 /* ── Registry ───────────────────────────────────────────────────────── */
 
 const COUNTY_LOOKUPS: Array<{
@@ -1126,6 +1193,23 @@ const COUNTY_LOOKUPS: Array<{
     ),
     fn: (addr) => queryMilwaukeeWI(addr),
   },
+  // ── State-level fallbacks (research/tier1b_county_parcels.md) ───────
+  // Listed AFTER Miami-Dade + Hillsborough so the richer county-specific
+  // adapters always run first. The statewide layer is the catch-all for
+  // the remaining ~50 FL counties (Broward, Palm Beach, Duval, Pinellas,
+  // Orange, etc.).
+  {
+    match: (s) => s === "FL",
+    fn: (addr) => queryFloridaStatewide(addr),
+  } as { match: (s: string, c: string) => boolean; fn: (a: string, z?: string | null, c?: string | null) => Promise<ParcelHit | null> },
+  // Likewise after queryNYC — NYC Open Data PLUTO has richer fields for
+  // the 5 boroughs. NYS Tax Parcels covers ~30 upstate + LI counties
+  // that opted into the state GIS-sharing program. Nassau is a notable
+  // holdout (did not opt in) — Nassau falls through to OpenStreetMap.
+  {
+    match: (s) => s === "NY",
+    fn: (addr) => queryNYStatewide(addr),
+  } as { match: (s: string, c: string) => boolean; fn: (a: string, z?: string | null, c?: string | null) => Promise<ParcelHit | null> },
 ];
 
 /**
@@ -1151,6 +1235,14 @@ export async function enrichFromCounty(
       if (hit) return hit;
     }
   }
+
+  // Sidecar fallthrough for the 7 dead-permit states (ME/MS/NH/OK/RI/UT/WV).
+  // Populated by Hetzner load_parcels_arcgis.py from the parcel_sources
+  // registry created in migration 00085. Returns null until Hetzner fills
+  // the table — at which point this captures owner_name + assessed_value
+  // + recent_transfer for those states whose permits APIs are dead.
+  const sidecarHit = await queryParcelsSidecar(state, address);
+  if (sidecarHit) return sidecarHit;
 
   // Fallback — OpenStreetMap gives us year_built + building levels for
   // some fraction of buildings everywhere in the US.

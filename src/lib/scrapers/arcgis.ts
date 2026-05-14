@@ -110,7 +110,7 @@ const ID_FALLBACK_FIELDS = [
   "GlobalID", "GLOBALID",
 ] as const;
 
-function resolveId(
+export function resolveId(
   attributes: Record<string, unknown>,
   configuredField: string | null | undefined,
 ): string | null {

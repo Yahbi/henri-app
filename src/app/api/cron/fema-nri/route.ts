@@ -31,7 +31,18 @@ import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 export const runtime = "nodejs";
 export const maxDuration = 280;
 
-const PAGE_SIZE = 2000;
+// 2026-05-11 fix: reduced PAGE_SIZE 2000 → 500 because ArcGIS's
+// services.arcgis.com endpoint was returning each 2000-row page
+// past the 120s per-fetch budget, killing every cron run with a
+// `TimeoutError: The operation was aborted due to timeout`. The
+// county dataset (~3k rows) already short-circuits via the count
+// gate; the tract dataset is now ~84k rows / 500 per page = 168
+// pages, but each fetch returns in ~3-5s so the 280s function
+// budget still fits the full tract pull (per-run cap MAX_PAGES=60
+// is the new bottleneck — at 60 pages × 500 = 30k rows per run,
+// the tract leg completes in 3 runs starting from a fresh DB and
+// 1-2 runs once auto-resume kicks in).
+const PAGE_SIZE = 500;
 
 const DATASETS = {
   county:

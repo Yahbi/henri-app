@@ -27,6 +27,7 @@ import {
   Star,
   Shield,
   Briefcase,
+  XCircle,
 } from "lucide-react";
 import { useUser } from "@/hooks/useUser";
 
@@ -91,6 +92,8 @@ export default function HomeownerIntakePage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
 
   useEffect(() => {
     if (userLoading || !user) return;
@@ -161,7 +164,38 @@ export default function HomeownerIntakePage() {
     );
   }
 
+  async function handleWithdraw() {
+    if (!intake) return;
+    const confirmed = window.confirm(
+      "Withdraw this project? Your matched contractor will no longer be able to reach out, and any pending outreach will be cancelled. You can submit a new project anytime.",
+    );
+    if (!confirmed) return;
+
+    setWithdrawBusy(true);
+    setWithdrawError(null);
+    try {
+      const res = await fetch(`/api/intake/${intake.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "withdraw" }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        setWithdrawError(body?.error ?? "Failed to withdraw project.");
+        return;
+      }
+      setIntake({ ...intake, status: "withdrawn" });
+    } catch (err) {
+      setWithdrawError(err instanceof Error ? err.message : "Failed to withdraw project.");
+    } finally {
+      setWithdrawBusy(false);
+    }
+  }
+
   const primary = matches.find((m) => m.is_primary) ?? matches[0] ?? null;
+  const isWithdrawn = intake.status === "withdrawn";
   const statusIndex = Math.max(
     0,
     STATUS_STEPS.findIndex((s) => s.key === intake.status),
@@ -205,10 +239,27 @@ export default function HomeownerIntakePage() {
         )}
       </header>
 
+      {isWithdrawn && (
+        <div
+          role="status"
+          className="mt-6 rounded-lg border border-border bg-bg-subtle px-4 py-3 text-sm text-muted-foreground"
+        >
+          <p>
+            <strong className="text-foreground">Project withdrawn.</strong>{" "}
+            Your matched contractor can no longer reach out, and any pending
+            outreach has been cancelled. You can{" "}
+            <Link href="/portal" className="text-primary hover:underline">
+              start a new project
+            </Link>{" "}
+            anytime.
+          </p>
+        </div>
+      )}
+
       {/* Status timeline */}
       <ol className="mt-8 flex flex-wrap items-center gap-2" aria-label="Project status">
         {STATUS_STEPS.map((step, idx) => {
-          const active = idx <= statusIndex;
+          const active = !isWithdrawn && idx <= statusIndex;
           return (
             <li
               key={step.key}
@@ -350,6 +401,38 @@ export default function HomeownerIntakePage() {
           </div>
         )}
       </section>
+
+      {/* Withdraw / opt-out — appears unless already withdrawn or completed.
+          Withdrawal sets status='withdrawn' and clears consent_given_at, which
+          the outreach hygiene gate (`src/lib/outreach/hygiene.ts`) reads to
+          refuse any further SMS / email targeting this intake. */}
+      {!isWithdrawn && intake.status !== "completed" && (
+        <section className="mt-8 rounded-xl border border-border bg-card p-6">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Privacy controls
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            You authorized Henri to share your contact info with one matched
+            contractor in your territory. You can withdraw that authorization
+            at any time — your matched contractor will stop receiving outreach
+            on this project.
+          </p>
+          {withdrawError && (
+            <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {withdrawError}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={handleWithdraw}
+            disabled={withdrawBusy}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/5 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <XCircle className="h-4 w-4" />
+            {withdrawBusy ? "Withdrawing…" : "Withdraw this project"}
+          </button>
+        </section>
+      )}
 
       {/* Contact block */}
       {intake.contact.email && (

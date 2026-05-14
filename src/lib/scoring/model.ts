@@ -81,6 +81,44 @@ export interface ScoringSignals {
   recentQuakeCount?: number | null;
 }
 
+/* ── Calibration shape (Module 13) ─────────────────────────────────────── */
+
+/**
+ * Per-trade weight multipliers applied to the four base components
+ * (freshness, value, contact, demand) BEFORE the booster sum and the
+ * stage cap are applied. Sourced from `score_trade_weights` (migration
+ * 00090). All weights default to 1.0 so a missing row is a no-op.
+ */
+export interface TradeWeightRow {
+  trade: string;
+  freshness_weight: number;
+  value_weight: number;
+  contact_weight: number;
+  demand_weight: number;
+}
+
+/**
+ * Per-stage cap + multiplier applied AFTER component summing so noisy
+ * stages (`pre_intent`, `archived`) can't surface as hot. Sourced from
+ * `score_stage_modifiers` (migration 00090). Defaults: cap=100,
+ * base_modifier=1.0 (a no-op).
+ */
+export interface StageModifierRow {
+  stage: string;
+  cap: number;
+  base_modifier: number;
+}
+
+/**
+ * Optional calibration overrides passed per-lead. Both fields default
+ * to safe no-ops; the cron pre-fetches the small calibration tables
+ * once and looks up the right row per (trade, stage).
+ */
+export interface ScoreCalibration {
+  tradeWeights?: TradeWeightRow | null;
+  stageModifier?: StageModifierRow | null;
+}
+
 /* ── Output shape ──────────────────────────────────────────────────────── */
 
 export type Urgency = "hot" | "warm" | "cool" | "cold";
@@ -426,17 +464,47 @@ function deriveUrgency(total: number): Urgency {
  *   freshness (0-20) + value (0-20) + contact (0-15) +
  *   demand (0-15) + engagement (0-15) + conversion (0-15)
  *
+ * The optional `calibration` arg applies (Module 13):
+ *   - Per-trade weights to freshness/value/contact/demand BEFORE summing
+ *   - A per-stage modifier and cap AFTER summing
+ * Both default to no-ops (weight=1.0, cap=100, modifier=1.0) so callers
+ * that don't pass calibration get the legacy behaviour unchanged.
+ *
  * Returns sub-scores, urgency tier, and human-readable factor explanations.
  */
-export function calculateScore(signals: ScoringSignals): ScoreResult {
+export function calculateScore(
+  signals: ScoringSignals,
+  calibration: ScoreCalibration = {},
+): ScoreResult {
   const factors: string[] = [];
 
-  const freshness  = scoreFreshness(signals, factors);
-  const value      = scoreValue(signals, factors);
-  const contact    = scoreContact(signals, factors);
-  const demand     = scoreDemand(signals, factors);
-  const engagement = scoreEngagement(signals, factors);
-  const conversion = scoreConversion(signals, factors);
+  const freshnessRaw  = scoreFreshness(signals, factors);
+  const valueRaw      = scoreValue(signals, factors);
+  const contactRaw    = scoreContact(signals, factors);
+  const demandRaw     = scoreDemand(signals, factors);
+  const engagement    = scoreEngagement(signals, factors);
+  const conversion    = scoreConversion(signals, factors);
+
+  // Module 13 — per-trade weights. Apply BEFORE summing so the
+  // calibration shifts component contributions visibly in the
+  // drawer breakdown. Each weighted component is re-clamped to its
+  // legacy ceiling (20/20/15/15) so over-weighted trades don't push
+  // any single signal past its design max — calibration shifts
+  // emphasis, it doesn't break the budget.
+  const tw = calibration.tradeWeights ?? null;
+  const wFreshness = tw?.freshness_weight ?? 1.0;
+  const wValue     = tw?.value_weight     ?? 1.0;
+  const wContact   = tw?.contact_weight   ?? 1.0;
+  const wDemand    = tw?.demand_weight    ?? 1.0;
+
+  const freshness = Math.min(20, Math.max(0, Math.round(freshnessRaw * wFreshness)));
+  const value     = Math.min(20, Math.max(0, Math.round(valueRaw     * wValue)));
+  const contact   = Math.min(15, Math.max(0, Math.round(contactRaw   * wContact)));
+  const demand    = Math.min(15, Math.max(0, Math.round(demandRaw    * wDemand)));
+
+  if (tw && (wFreshness !== 1.0 || wValue !== 1.0 || wContact !== 1.0 || wDemand !== 1.0)) {
+    factors.push(`Trade calibration applied (${tw.trade})`);
+  }
 
   // Wave 1.5 + 2.A additive boosters — all capped so the total stays
   // within [0, 100] and urgency thresholds (75/50/25) keep their
@@ -449,11 +517,26 @@ export function calculateScore(signals: ScoringSignals): ScoreResult {
   const nfip  = scoreNfipBooster(signals, factors);
   const quake = scoreQuakeBooster(signals, factors);
 
-  const total = Math.min(
-    100,
+  const componentSum =
     freshness + value + contact + demand + engagement + conversion +
-      storm + lien + nri + nfip + quake,
-  );
+    storm + lien + nri + nfip + quake;
+
+  // Module 13 — per-stage modifier + cap. Applied AFTER component
+  // summing so noisy stages (pre_intent, archived) can't surface as
+  // hot regardless of how strong the underlying signals are. Default
+  // is a no-op (modifier=1.0, cap=100). When a row's stage is
+  // unknown (no calibration row supplied), the legacy 100-pt cap
+  // applies untouched.
+  const sm = calibration.stageModifier ?? null;
+  const baseModifier = sm?.base_modifier ?? 1.0;
+  const stageCap     = sm?.cap ?? 100;
+  const modifiedTotal = componentSum * baseModifier;
+  const total = Math.max(0, Math.min(stageCap, Math.min(100, Math.round(modifiedTotal))));
+
+  if (sm && (sm.cap < 100 || sm.base_modifier !== 1.0)) {
+    factors.push(`Stage modifier applied (${sm.stage}, cap ${sm.cap})`);
+  }
+
   const urgency = deriveUrgency(total);
 
   return {

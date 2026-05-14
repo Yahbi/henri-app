@@ -65,6 +65,10 @@ export interface LeadContextData {
   nri_risk?: NriRisk | null;
   nfip_history?: NfipHistory | null;
   recent_disasters?: RecentDisaster[];
+  /** Module 7 — ISO timestamp when the lead entered its CURRENT stage.
+   *  Drives the "for 12d" duration badge on IntentChip. Optional
+   *  because pre-migration 00092 responses don't include it. */
+  stage_entered_at?: string | null;
 }
 
 /**

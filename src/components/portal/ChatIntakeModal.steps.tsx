@@ -89,6 +89,9 @@ export interface IntakeStepAreaProps {
   onContactPhoneChange: (value: string) => void;
   onContactEmailChange: (value: string) => void;
   onContactSubmit: () => void;
+  // Module 5 (2026-05-09) — TCPA-style consent. Submit is gated on this.
+  consentGiven: boolean;
+  onConsentChange: (value: boolean) => void;
 
   // Step 7 — Result
   isComputing: boolean;
@@ -412,6 +415,8 @@ function Step6Contact({
   contactName,
   contactPhone,
   contactEmail,
+  consentGiven,
+  onConsentChange,
   contactErrors,
   onContactNameChange,
   onContactPhoneChange,
@@ -477,9 +482,30 @@ function Step6Contact({
           <p className="mt-1 text-xs text-destructive">{contactErrors.email}</p>
         )}
       </div>
+      {/* Module 5 (2026-05-09) — TCPA-style consent checkbox. The
+          outreach hygiene gate (src/lib/outreach/hygiene.ts) refuses
+          every send when consent_given_at is NULL on the intake row, so
+          this checkbox is the only path to homeowner outreach. We make
+          it explicit + opt-in (unchecked by default) so the homeowner
+          consciously agrees. Copy is intentionally plain English, no
+          legalese — this is the founder voice. */}
+      <label className="flex items-start gap-2 rounded-lg border border-border bg-bg-subtle/50 px-3 py-2.5 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={consentGiven}
+          onChange={(e) => onConsentChange(e.target.checked)}
+          className="mt-0.5 h-3.5 w-3.5 rounded border-border accent-primary"
+        />
+        <span className="text-[11px] text-foreground/85 leading-snug">
+          I authorize Henri to share my contact info with one matched contractor in my territory.
+          I can opt out anytime by withdrawing my project from my homeowner dashboard.
+        </span>
+      </label>
       <button
         onClick={onContactSubmit}
-        className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+        disabled={!consentGiven}
+        className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+        title={consentGiven ? undefined : "Please check the consent box to continue"}
       >
         Find my contractor
       </button>

@@ -1,0 +1,27 @@
+# Gulfport, MS — STARTER (status: unverified).
+# MGO is the dominant Mississippi Gulf-Coast permit-portal vendor.
+# Per Tier-2 research, this single MGO adapter unlocks the most stale-MS
+# cities at once (the entire Gulf Coast is on MGO).
+#
+# Smoke-test: DEBUG_HTML_DUMP=1 python ~/scrapling_loaders/load_mygovonline.py gulfport-ms
+
+loader: mgo
+name: GULFPORT-MS
+city: Gulfport
+state: MS
+juris_slug: gulfport-ms
+status: unverified
+date_range_days: 14
+
+# Tune after first run — the SPA may use either:
+#   table[id*="permit"]   (most tenants)
+#   div.permit-list       (newer SPAs)
+result_table_selector: 'table[id*="permit"]'
+
+fields:
+  permit_no:    permit_number
+  issued_date:  issue_date
+  address:      site_address
+  description:  project_description
+  permit_type:  permit_type_name
+  status:       status

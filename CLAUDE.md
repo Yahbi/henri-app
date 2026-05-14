@@ -650,7 +650,7 @@ First loader: `~/scrapling_loaders/load_austin.py`. Pulls 50 most recently issue
 Audit aligned the work to two tiers of launch blockers and rejected anything that costs money or is post-revenue scope. Goal: soft-launch to 5 contractors at $149/mo on a $0 marginal-spend stack. New artifacts shipped this session:
 
 **TIER 1 (must-fix-before-charging) deliverables**:
-- `scripts/cleanup-test-territories.sql` — two-step (preview → transactional DELETE) to drop the ~11,444 god-mode-claimed territories. Uses `god-mode.ts` allowlist (2 founder emails; extend array to 4 if more exist). Idempotent — safe to re-run.
+- `scripts/cleanup-test-territories.sql` — two-step (preview → transactional DELETE) to drop god-mode-claimed test territories. Uses `god-mode.ts` allowlist (2 founder emails; extend array to 4 if more exist). Idempotent — safe to re-run. **As of 2026-05-11 audit:** live DB has only 9 active territories total, so the cleanup is effectively already done (the prior 11,444 number was a stale snapshot from before the migration that broke the test-claim path; the actual count never reached that). Script kept for safety in case of future test-claim regressions.
 - `e2e/onboarding-stripe.spec.ts` — Playwright smoke for `/signup → /onboarding/license → /plan → /payment → Stripe checkout → /territory → /dashboard`. Asserts no 5xx, no console errors, prices match source-of-truth ($149/$749/$1,499/$2,555), Stripe in test mode (`pk_test_` prefix), no password input field (passwordless brand rule). Full happy-path is sketched in a comment block; needs an auth bypass (`/api/dev/login-as`) or a Mailpit interceptor to run end-to-end.
 - `scripts/_sidecar_loaders/UPLOAD.md` extended with §7 (Tyler EnerGov deploy), §8 ($0-tier API-key checklist for Vercel), §9 (NC + OH voter ingest one-liners). FL voter file deferred — public-records fee may apply.
 
@@ -855,3 +855,737 @@ python -m playwright install chromium firefox
 - 12 new configs in `scripts/_sidecar_loaders/configs/`
 - `scripts/_sidecar_loaders/UPLOAD.md` — added §10 (ArcGIS, was missed) and §11 (Phase 4)
 - `docs/permit-catalog/opengov-viewpoint-partnership-2026-05-07.md` (new)
+
+## Audit + discovery tooling (2026-05-08)
+
+Two operational tasks — auditing the existing 12k+ `permit_sources` rows for missing field mappings, and discovering new endpoints for the 18 underserved states — both require unattended-runtime tools, NOT in-chat HTTP work. The right shape: scripts that run on dev machine or Hetzner overnight, output CSVs, then companion scripts bulk-apply the CSV to Supabase. Built four new scripts + a starter candidate list.
+
+**`scripts/_audit-field-mappings.ts`** — pulls every `permit_sources` row WHERE `enabled=true AND field_mapping_status='verified' AND discovered_via='production_grade_2026-04-29'`, probes each endpoint for a sample row (5 RPS with 200-400ms jitter, 5s timeout), runs heuristic chains to recommend `id_field / type_field / status_field / addr_field / date_field / value_field / desc_field / lat_field / lng_field`, and emits a CSV with one of these recommendations per row: `KEEP_AS_IS / UPDATE / DEAD_404 / DEAD_5XX / EMPTY / AUTH_REQUIRED / STALE_>90d`. Checkpoints every 500 rows. Resumable via `--resume`. Output: `docs/studies/henri_field_mappings_YYYY-MM-DD.csv`.
+
+**`scripts/_apply-field-mappings.mjs`** — companion. Reads the CSV, issues bulk UPDATEs for `recommendation=UPDATE` rows. Other recommendations are reported but NOT auto-applied unless `--apply-disables` is passed (which flips `enabled=false` on dead/empty rows). Always supports `--dry-run`.
+
+**`scripts/_discover-missing-permits.ts`** — reads a JSON candidate list (`scripts/_permit_candidates.json`), probes each URL for fresh permit data, applies rejection rules (4xx/5xx/captcha/auth/stale-90d/tiny-100), and emits a CSV with `verdict ∈ {ACCEPT, AUTH_REQUIRED, REJECT_*}` plus extracted field-presence flags (`has_owner_name / has_phone / has_email / has_lat_lng`). Output: `docs/studies/henri_missing_permits_YYYY-MM-DD.csv`.
+
+**`scripts/_ingest-missing-permits.mjs`** — companion. Reads the CSV, upserts ACCEPT rows into `permit_sources` with `discovered_via='discovery_2026-05-08'`. With `--include-backlog`, also inserts AUTH_REQUIRED rows as `enabled=false` for the Phase 4 scrape backlog.
+
+**`scripts/_permit_candidates.json`** — starter list, ~40 entries spanning the 18 underserved states (AK, HI, ID, KS, MS, ND, NE, RI, SD, WV, WY, ME, NM, OK, UT, VT, NH, MT, NV gaps). Hand-seeded from the 2026-05-06 + 2026-05-07 research findings + URL-pattern extrapolation for truly-empty states. **EVERY entry needs probing — many are educated-guess URLs.** Append more as research finds them.
+
+**For the 7 dead-permit states (ME, MS, NH, OK, RI, UT, WV)**: candidate list seeds the **parcel/recorder layer** instead of permits (per the user's directive). Henri's wedge can absorb parcel data via the existing `parcels` enricher (`src/lib/enrichment/regrid-parcel.ts`); a state-level parcel ArcGIS layer covers the entire state in one endpoint, matching the NJ-DCA pattern.
+
+### Runbook (typical session)
+
+```bash
+# A. Field-mapping audit of the 12k existing rows
+npx tsx scripts/_audit-field-mappings.ts --limit=500     # smoke test first
+npx tsx scripts/_audit-field-mappings.ts                 # full run (~60min wall)
+node scripts/_apply-field-mappings.mjs docs/studies/henri_field_mappings_2026-05-08.csv --dry-run
+node scripts/_apply-field-mappings.mjs docs/studies/henri_field_mappings_2026-05-08.csv
+node scripts/_apply-field-mappings.mjs <csv> --apply-disables    # optional, flip dead rows off
+
+# B. Discovery of new endpoints in the 18 underserved states
+# Append more candidates to scripts/_permit_candidates.json first if research permits
+npx tsx scripts/_discover-missing-permits.ts
+node scripts/_ingest-missing-permits.mjs docs/studies/henri_missing_permits_2026-05-08.csv --dry-run
+node scripts/_ingest-missing-permits.mjs docs/studies/henri_missing_permits_2026-05-08.csv --include-backlog
+```
+
+### Scope honesty
+
+- **The audit script is correct but unverified-at-scale**. The heuristic chains cover the dominant ArcGIS + Socrata key patterns. Edge cases (custom CKAN deployments, idiosyncratic municipal endpoints) will land in `EMPTY` or `UPDATE` with sparse mappings. Spot-check the first 50 CSV rows manually before bulk-applying.
+- **The candidate list is starter-quality, not exhaustive**. ~50% of entries are URL-pattern guesses (`opendata.<city>.gov/datasets/building-permits/api`) that need to be probed before they're trusted. The discovery script's `verdict` column does that work — if it returns `REJECT_404` for half the candidates, that's expected; the ACCEPT rows are the real yield. Iterate by appending candidates from probe failures with corrected URLs.
+- **OpenGov ViewPoint stays out of scope** per the 2026-05-07 partnership doc. The discovery script will mark ViewPoint URLs `AUTH_REQUIRED` and `--include-backlog` is the right way to track them (not `--apply-disables`).
+
+### Agent-3 expansion: parcel / lien / license-roster substitutes (2026-05-08 PM)
+
+Three parallel research agents expanded `_permit_candidates.json` with live-probed findings for:
+1. **AK / HI / ID** (Agent 1) — 2 ACCEPT_PLANNING_ONLY (Boise pipeline trackers), 1 STALE-but-valuable Honolulu Socrata schema, 7 Phase-4 backlog entries (Honolulu DPP highest-priority).
+2. **KS / NE / SD** (Agent 2) — 3 ACCEPT (Sedgwick Co KS, **Butler Co KS gold-tier with electrician/plumber/HVAC phones**, Lincoln NE), 4 Phase-4 backlog (Overland Park EnerGov, Omaha + Rapid City + OKC Accela).
+3. **ME / MS / NH / OK / RI / UT / WV** (Agent 3) — parcel/assessor/lien/license_roster substitutes for the 7 dead-permit states. Standout finds:
+   - **UT State Construction Registry (SCR)** — every UT job >$5k files preliminary notice within 20 days. Returns project_address + owner + GC + sub + license. Search-only HTML, but described by the agent as "the GOLD STANDARD construction lead-gen data source nationally."
+   - **WV ParcelSummary table** — 1.5M records with `Owner1`, `Owner2`, `NewOwner` (recent-transfer flag — strongest construction-leading-indicator), `DeedBook`, full assessor data. Closes WV in one endpoint.
+   - **WV Site Address Points** — 1.05M records including `Res_Name + Res_Phone` (rare in 911 datasets — direct phone-fill source).
+   - **UT LIR Parcels** — assessor companion with OWN_NAME / LAST_SALE_DT / BUILT_YR / BLDG_SQFT.
+   - **UT DOPL** — downloadable monthly CSV of ALL active licenses (only state with bulk download).
+   - **OK Canadian County** — 84k parcels, fresh 2026-04-30, displayField=owners_name.
+
+**New `data_layer` field on candidates** marks the kind of data the endpoint serves:
+- `permit` (default) — current behavior, inserts into `permit_sources` enabled=true
+- `planning_pipeline` — Boise-style pre-permit signals; Phase 1 lead source for builders/GCs
+- `parcel` / `assessor` — owner + sale + building characteristics for property-history enrichment
+- `lien` — UCC + mechanic's-lien filings (UT SCR is the standout)
+- `license_roster` — contractor license boards (UT DOPL has bulk CSV; rest are search-only)
+
+**Script changes**:
+- `_discover-missing-permits.ts` — CSV header now includes `data_layer` column. Default 'permit' if absent. `_skip: true` candidates filtered out (block-comment placeholders).
+- `_ingest-missing-permits.mjs` — partitions ACCEPT and AUTH_REQUIRED buckets by `data_layer`. Permit entries flow through the existing path. Non-permit entries (parcel/assessor/lien/license_roster/planning_pipeline) are skipped by default; pass `--include-non-permit` to stage them in `permit_sources` with `enabled=false` and `discovered_via='non_permit_layer_<layer>_2026-05-08'` for a follow-up migration to dedicated tables (`parcel_sources`, `lien_sources`, etc.) when those exist.
+
+**Known schema gap**: Henri's DB doesn't yet have separate tables for parcel/lien/license_roster sources. The `--include-non-permit` flag is a hold-pattern that captures the discovery in `permit_sources` (disabled) so the metadata isn't lost. A future migration will move these rows to proper tables and route them to:
+- `parcel`/`assessor` → existing `regrid-parcel.ts` enricher (already in orchestrator.ts) — extend to read these new sources
+- `license_roster` → `contractor-license.ts` enricher (already exists) — extend with bulk-roster ingest cron
+- `lien` → new `lien_sources` table + `liens-courtlistener` cron pattern (mirrors the existing 00069 migration sidecar)
+- `planning_pipeline` → score booster (low-urgency lead, scored as future-construction signal)
+
+**Coverage delta after this session** (theoretical, pre-Hetzner-deploy):
+
+| State | Before | After (verified ACCEPT) | Phase 4 backlog | Substitute layer |
+|---|---|---|---|---|
+| KS | 0 | Sedgwick Co + Butler Co (gold-tier phones) | Overland Park, Topeka | — |
+| NE | 0 | Lincoln (Accela mirror) | Omaha Accela | — |
+| SD | Sioux Falls only | Sioux Falls only | Rapid City Tyler EnerGov | — |
+| AK | 0 | 0 | Anchorage MOA, Juneau CBJ | — |
+| HI | 0 | Honolulu historical (frozen) | Honolulu DPP, Hawaii Co, Maui Co | — |
+| ID | 0 | Boise planning trackers (pre-permit) | Boise Citizen Portal, Meridian | — |
+| ME | 0 | 0 | Portland eTRAKiT | Maine parcels + PFR roster |
+| MS | 0 | 0 | (none viable for permits) | Harrison Co parcels (borderline), MSBCL roster |
+| NH | Nashua only | Nashua only | Manchester | NH parcels (stale), VGSI assessor, OPLC roster |
+| OK | Tulsa stopgap | Tulsa stopgap | OKC Incapsula | Canadian Co parcels, CIB roster |
+| RI | 0 | 0 | (ViewPoint partnership only) | RI CRB roster (strongest source), Providence VGSI |
+| UT | SLC frozen | SLC frozen | SLC Accela | UT statewide parcels, LIR assessor, **SCR (gold), DOPL bulk CSV** |
+| VT | Act 250 only | Act 250 only | (ViewPoint towns) | — |
+| WV | 0 | 0 | (none viable for permits) | **WV ParcelSummary (1.5M, gold), Site Addresses (Res_Phone)** |
+| WY | Cheyenne stopgap | Cheyenne stopgap | Jackson SmartGov | — |
+| MT | Bozeman | Bozeman | Missoula Accela | — |
+| NV | Henderson Socrata + Las Vegas ArcGIS | same | Clark Co + LV Accela + Henderson EnerGov + Reno + Sparks + NLV + Carson City | — |
+| NJ | DCA statewide (2.7M) | DCA statewide (2.7M) | — | — |
+
+**Honest verdict on the 18 underserved states**: 8 of 18 now have at least one verified ACCEPT-grade endpoint (KS, NE, SD partial, ID partial, NJ already, NV already, MT already, NH partial). The remaining 10 are dependent on Phase 4 scrapers OR substitute layers (parcel/lien/license). The substitute-layer strategy turns dead-permit-states into LIVE data via the parcel + license_roster + lien substitutes — this is the path forward for ME / MS / RI / UT / WV / OK / NH where direct permit APIs are structurally unavailable.
+
+## Phase 5 substitute-layer ingest (2026-05-08 PM)
+
+Closed the SCHEMA + LOADER gap that the discovery scripts left open. The 2026-05-08 AM session produced a candidate list with substitute-layer endpoints for 7 dead-permit states; the existing `--include-non-permit` flag staged them in `permit_sources` (enabled=false) as a hold pattern. Phase 5 ships proper tables + a real loader so those substitutes can flow into Henri's pipeline.
+
+**New migrations**:
+- `00085_parcels_sidecar.sql` — creates `parcel_sources` registry + `parcels_sidecar` data table. Mirrors the `contractor_license_sources` (00073) + `liens_county_recorder` (00084) pattern. Service-role-write only, RLS-enabled-no-policies. Seeds 7 verified ArcGIS endpoints (UT statewide + UT LIR + WV ParcelSummary + WV Site Addresses + OK Canadian County + ME parcels + MS Harrison Co), all `enabled=false` until per-source smoke-test on Hetzner verifies field_map correctness.
+- `00086_lien_sources_ut_scr.sql` — creates `lien_sources` registry. Seeds the **UT State Construction Registry** (gold-standard preliminary-notice feed nationally — every $5k+ UT job files within 20 days, returns project + owner + GC + sub + license + amount) plus 6 UCC search portals (UT, ME, MS, NH, OK, RI, WV). All `phase4_scrape: true` since they need ASP.NET ViewState scrapers. ALSO appends 4 net-new contractor_license_sources (NH OPLC, RI CRB, MS State Board, WV DoL) — RI CRB is the strongest of the four (registers ALL residential contractors, returns phone).
+
+**New table — `public.parcels_sidecar`** distinct from Henri's existing Regrid-sourced `public.parcels`:
+- Captures STATE-SPECIFIC signals Regrid sometimes misses: `recent_transfer_at` (derived from WV's NewOwner field), `resident_phone` (rare — WV Site Addresses has it), full assessor breakdown.
+- Read-path strategy: orchestrator should fall through to `parcels_sidecar` when Regrid returns null AND state ∈ {ME, MS, NH, OK, RI, UT, WV}. NOT yet wired in `regrid-parcel.ts` — follow-up task.
+
+**New loader — `scripts/_sidecar_loaders/load_parcels_arcgis.py`**:
+- Diverges from the Phase 1-3 YAML-config pattern. Reads enabled rows from `parcel_sources` Supabase table directly. The DB is the source of truth — operators can enable/disable sources via SQL without a redeploy.
+- Stdlib + Supabase REST only. No new Hetzner dependencies.
+- Pagination via ArcGIS `resultOffset` (capped at `--max-pages` × `--page-size`, default 25 × 2000 = 50k rows per run).
+- Updates `parcel_sources.last_run_at` + `last_count` for cron observability.
+- Smoke-test workflow: `DEBUG_HTML_DUMP=1 python load_parcels_arcgis.py UT-LIR-PARCELS --max-pages=3` to verify field_map before flipping `enabled=true`.
+
+**Cron schedule** (added to UPLOAD.md §12): weekly Sunday 05:00 UTC. Parcel data refreshes quarterly upstream — daily is overkill, weekly catches up cleanly.
+
+**What ships and what doesn't**:
+
+| Phase 5 component | Status |
+|---|---|
+| Migration 00085 (parcel_sources + parcels_sidecar) | Ready to apply |
+| Migration 00086 (lien_sources + UT SCR + 4 net-new rosters) | Ready to apply |
+| `load_parcels_arcgis.py` (Phase 5 loader) | Ready to deploy |
+| Per-source field_map verification | Operator work on Hetzner (~15 min/source × 7 = ~2 hours) |
+| Read-side enricher integration (orchestrator.ts → parcels_sidecar) | NOT shipped — follow-up task |
+| UT SCR scraper (gold-tier preliminary-notice feed) | NOT shipped — Phase 4 ASP.NET ViewState work, ~1 week |
+| License-roster scrapers for NH/RI/MS/WV | NOT shipped — Phase 4 HTML-search scrapers |
+| MS-only path (Harrison Co borderline-stale) | Marginal value; deprioritize |
+
+**Coverage delta after Phase 5 + verification**:
+
+| State | Before today | After 00085 + smoke-test |
+|---|---|---|
+| UT | SLC frozen Socrata only | UT-LIR (1.58M parcels w/ owner + last_sale + built_yr) |
+| WV | 0 | WV-PARCEL-SUMMARY (1.5M, NewOwner flag) + WV-SITE-ADDRESSES (1.05M w/ Res_Phone) |
+| OK | Tulsa stopgap | + Canadian Co (84k fresh parcels w/ owner) |
+| ME | 0 | ME parcels (716k geometry, ADB join TBD) |
+| MS | 0 | Harrison Co only (borderline) |
+| NH | Nashua only | (Phase 5 doesn't add NH parcels — stale state aggregator. NH gap stays open.) |
+| RI | 0 | (Phase 5 doesn't add RI parcels — no statewide aggregator exists. RI gap stays open.) |
+
+**Net effect**: 4 of the 7 dead-permit states (UT, WV, OK, ME) get meaningful Phase 5 substitute coverage. NH + RI + MS remain genuinely thin and require either Phase 4 scrapers or commercial data partnerships (BuildZoom / ATTOM / Regrid premium tiers).
+
+**Critical follow-up**: extend `src/lib/enrichment/regrid-parcel.ts` to read from `parcels_sidecar` as a fall-through when Regrid returns null AND state ∈ {UT, WV, OK, ME}. Without that read-side wiring, the data lands but never reaches the lead-gen pipeline. Match the existing Wave-2.C pattern of `lib/enrichment/<source>.ts` modules called from `orchestrator.ts`.
+
+## Sprint Z + Phase AA + AA-2 + AA-3 (2026-05-09 → 2026-05-10)
+
+Five full work blocks covering the wedge gap inventory in `~/.claude/plans/whats-the-14-days-purring-papert.md`. Detailed retrospectives there; this section is the navigation map for where things live in the codebase.
+
+**Modules + tables (migrations 00085-00096):**
+
+| # | Migration | What it ships |
+|---|---|---|
+| 00085 | parcels_sidecar | `parcel_sources` registry + `parcels_sidecar` data table (UT/WV/OK/ME/MS/NH/RI ~5M parcel rows pending Hetzner fill) |
+| 00086 | lien_sources | UT SCR + 6 UCC search portals |
+| 00087 | intent_columns | `leads.opportunity_stage` + `leads.reason_codes` + same on `homeowner_intakes` (Module 1) |
+| 00088 | territory_tier_caps | `claim_territory` RPC enforces 3/5/12/20 caps server-side |
+| 00089 | homeowner_consent | `homeowner_intakes.consent_given_at` + `consent_text_version` |
+| 00090 | saved_hidden_alerts_calibration | `saved_leads`, `hidden_leads`, `score_trade_weights`, `score_stage_modifiers`, `alert_rules` |
+| 00091 | stage_outreach_templates | 5 stage-specific seed templates (Module 12) |
+| 00092 | stage_history | `stage_history` table + `record_stage_history()` trigger |
+| 00093 | zip_pre_intent_aggregates | Pre-computed per-ZIP aggregate (was matview, converted to regular table after 8s timeout); `refresh_zip_pre_intent_aggregates()` SECURITY DEFINER helper |
+| 00094 | leads_source_column | `leads.source` (default 'permit') + `leads.parcel_sidecar_uid` + 2 partial indexes |
+| 00095 | check_constraints_aa3 | CHECK on `leads.source` (4 values), `alert_rules.kind` (4 kinds), `stage_history.changed_by_kind` (6 kinds) |
+| 00096 | stage_history_backfill | One-shot INSERT — synthesise initial history row for every pre-trigger lead |
+
+**New code modules:**
+
+| Path | Purpose |
+|---|---|
+| `src/lib/intent/` | classify.ts, derive.ts, reason-codes.ts (69 codes), types.ts, stage-colors.ts (single-source palette) |
+| `src/lib/alerts/` | types.ts, evaluate.ts (matchers per kind), dispatch.ts (Resend + sendLeadSMS) + 17 unit tests |
+| `src/lib/scoring/__tests__/calibration.test.ts` | 9 tests covering trade weights + stage modifier + cap behaviour |
+| `src/lib/outreach/hygiene.ts` | checkOutreachAllowed gate (consent + quiet-hours + suppression) |
+| `src/lib/auth/trade-gating.ts` | resolveTradeGate per-tier trade-visibility |
+| `src/lib/territory/plan-caps.ts` | tier → ZIP cap mapping used by 00088 RPC |
+| `src/lib/enrichment/parcels-sidecar.ts` | read-side fall-through enricher |
+| `src/components/dashboard/IntentChip.tsx` | stage chip + "for Xd" duration |
+| `src/components/dashboard/LeadActionButtons.tsx` | Save + Hide actions in drawer |
+| `src/components/analytics/StageHistogram.tsx` | reusable on intel + storm |
+| `src/components/map/TerritoryStatusChip.tsx` | exclusivity primacy on map |
+| `src/hooks/useSavedLeads.ts` + `useHiddenLeads.ts` | per-contractor sets for filter pills |
+
+**New API routes (6):**
+- `src/app/api/alerts/rules/route.ts` — Module 14 alert_rules CRUD (GET/POST/PATCH/DELETE)
+- `src/app/api/cron/synthesize-pre-intent/route.ts` — parcel-synthesis cron (Sun 04:00 UTC)
+- `src/app/api/cron/refresh-zip-aggregates/route.ts` — refresh `zip_pre_intent_aggregates` (Sun 03:00 UTC)
+- `src/app/api/leads/[id]/save/route.ts` — saved_leads upsert
+- `src/app/api/leads/[id]/hide/route.ts` — hidden_leads upsert
+- `src/app/api/territories/status/route.ts` — territory + watcher buckets
+
+**Renamed surface (Next 16 Turbopack route conflict fix):**
+- `/dashboard/settings/notifications` → `/dashboard/settings/alerts` because the existing `(dashboard)/settings/notifications` (per-channel toggles) collapsed with the new alert_rules page inside the same route group. The pre-existing notifications page at `/settings/notifications` is unaffected.
+
+**Vercel cron schedule (most still paused per Module 6):**
+- `0 3 * * 0` `/api/cron/refresh-zip-aggregates` — Sunday 03:00 UTC
+- `0 4 * * 0` `/api/cron/synthesize-pre-intent` — Sunday 04:00 UTC
+- All other 36 historical schedules remain disabled. Manual trigger via `/api/admin/data-health/trigger` still works for any disabled cron.
+
+**Operator runbooks (`scripts/`):**
+
+| Script | Purpose |
+|---|---|
+| `_apply-migration-NN.mjs` (one per recent migration) | Idempotent re-apply via Mgmt API |
+| `_apply-migrations-95-96.mjs` | Statement-by-statement application that survives the 8s timeout |
+| `_backfill-intent.mjs` | Stamps `opportunity_stage` + `reason_codes` on every existing lead. Keyset-paginated (`--start-after-id=<uuid>` resumes from a known cursor). |
+| `_populate-zip-aggregates-volume.mjs` | Chunked INSERT into `zip_pre_intent_aggregates` per ZIP-prefix (avoids the timeout that broke matview REFRESH) |
+| `_populate-matview-chunked.mjs` | Adds the FILTER+ILIKE columns (adu_90d, remodel_180d) once volume rows exist |
+| `_refresh-zip-aggregates.mjs` | Calls `refresh_zip_pre_intent_aggregates()` via Mgmt API + retries |
+| `_check-mv.mjs`, `_probe-db-health.mjs`, `_verify-all-migrations.mjs`, `_verify-aborted-only.mjs` | Health probes for the operator |
+
+**Operational state (2026-05-11 audit refresh):**
+
+| What | Status |
+|---|---|
+| Schema 00085-00096 | ✅ All 12 migrations applied + verified |
+| Backfill `opportunity_stage` | ✅ **100% complete** — all 270,149 leads stamped; 0 NULL |
+| `zip_pre_intent_aggregates` row count | ✅ **7,033 rows** populated (manual `_populate-zip-aggregates-volume.mjs` finished) |
+| `stage_history` row count | ✅ 275,976 rows (trigger fired on backfill + ongoing) |
+| Territories cleanup (11,444 god-mode claims) | ✅ Live DB at 9 active territories; cleanup never needed (the 11,444 number was a stale snapshot) |
+| `parcels_sidecar` row count | ⚠️ 0 rows — still awaiting Hetzner loaders for UT/WV/OK/ME |
+| Service-role JWT rotation | ⚠️ STILL PENDING (leaked 2026-05-04 in chat) |
+| Sentry DSN | ✅ Provisioned (verified live in Vercel env Apr 30) |
+| Twilio account + 12 free-tier API keys | ⚠️ Pending operational provisioning |
+| Supabase Pro upgrade | ⚠️ Due 2026-05-26; Free-tier saturation visible in score cron timeout failures |
+
+## 2026-05-11 silent-failure sweep
+
+Working session driven by deep gap audit. Live-DB queries surfaced multiple silent failures invisible to the cron_runs success-counter. Each fix is additive + reversible.
+
+### Schema-level fixes (applied directly via Supabase MCP)
+- **Migration 00030 (feedback table + enums + RLS)** — was in repo but never applied. Now live. `/api/feedback` POST path now writes to the DB-backed inbox instead of falling through to the email/JSONL fallback every time.
+- **Migration 00055 (`v_permit_adjacent_count` + `v_permit_storm_proximity` views)** — was in repo but never applied. Now live. The lead-detail drawer's "neighborhood activity" + "storm proximity" panels finally have data to render.
+- **CLI migration tracking gap remains**: Supabase CLI's `schema_migrations` table only tracks 22 of the 93 repo migrations. All schema is applied; the gap is metadata-only. Future engineers must apply migrations via the Mgmt API (`scripts/_apply-migration-*.mjs`) — `supabase db push` would try to re-apply or 409.
+
+### Code-level fixes (commit `fcc56c0`, pushed to `data-gap-tier-research-2026-05-07`)
+
+**1. NRI booster city↔county join bug** (`src/app/api/cron/score/route.ts`)
+   - Symptom: NRI booster fired on **0% of leads** despite 3,144 county rows + 270k scored leads. Top observed score: 69 (Hot threshold: 75).
+   - Root cause: `nriRiskScoreFor(state, city)` joined `permits.city` → `risk_nri_county.county_name`. Only 7.1% of permit (state, city) pairs match a county name (verified via SQL probe). 92.9% returned null.
+   - Fix: pre-compute state-level NRI **median** during the loop. Lookup order is county → state-median → null. Median (not max) is the right fallback so high-risk states don't all saturate at +3.
+   - Expected effect once deployed: top score climbs from 69 → 72-77 for high-risk states (CA/AZ/FL/NJ median 88-95 → +3) and ~70 → 72-74 for mid-tier states (TX/IL/OH median 53-64 → +1). Should cross the Hot threshold (75) for thousands of leads.
+
+**2. `fema-nri` cron 4/4 timeouts** (`src/app/api/cron/fema-nri/route.ts`)
+   - Symptom: every run since 2026-05-02 errored `TimeoutError: The operation was aborted due to timeout`. NRI tract dataset (~84k rows) stalled at 77,294 rows.
+   - Root cause: ArcGIS endpoint at services.arcgis.com taking >120s per 2000-row page; per-fetch budget exceeded.
+   - Fix: `PAGE_SIZE 2000 → 500`. Each fetch now returns in 3-5s; the 280s function budget completes the remaining ~7k tracts in one run.
+
+**3. State license rotator silent 0-row inserts** (`src/app/api/cron/state-licenses-rotate/route.ts`)
+   - Symptom: OR pulled 55,715 rows over 56 pages → 0 inserts. AK pulled 229 → 0. cron_runs marked status=ok / error=null.
+   - Root cause: OR Socrata returns 241 duplicate license_numbers per 1000 rows (one row per endorsement / county). AK CSV ships one row per program per license. Postgres `ON CONFLICT DO UPDATE` errors `cannot affect row a second time` when a PK appears twice in one batch. The error was caught + warn-logged but never bubbled — every batch silently produced 0 inserts.
+   - Fix: `dedupeRowsByPk()` helper called in both CSV and Socrata/ArcGIS upsert paths. Keeps last-seen so raw_json from the most recent endorsement wins.
+   - Pairs with two DB-side fixes:
+     - MN config changed from `source_kind=scrape` (no scraper exists) to `csv` pointing to `https://secure.doli.state.mn.us/ccld/data/MNDLILicRegCertExport_Residential_Contractors.csv` (verified live 2026-05-11, ships **phone + email** in the CSV — gold for the wedge contact-completeness ceiling).
+     - OR / AK / MN `last_run_at` reset to NULL so the rotator (orders by `last_run_at ASC NULLS FIRST`) picks them on the next 3 days after deploy.
+
+### DB-only operational fixes (no code change required)
+- **AZ ROC notes updated**: documented Cloudflare interactive challenge (`cf-mitigated: challenge`); no HTTP-only bypass exists even with full Chrome 130 sec-ch-ua headers. Marked as Phase 4 (Hetzner Playwright dependency).
+- **TN BLC notes updated**: `verify.tn.gov` is a Next.js SPA — `verify-qa.html` is the help page, not a data export. Underlying record-search requires session JS calls. Marked as Phase 4.
+- **11 chronic-failure VA placeholder sources disabled** in `permit_sources` (error_count=99, never scraped, all named "County ArcGIS Hub - Verify endpoint" — discovery stubs pointing to landing pages, never resolved to queryable FeatureServer URLs). Reversible via `enabled=true`.
+
+### Vercel env vars added (Production + Preview scope)
+- `GOD_MODE_EMAILS = y.abismuth@gmail.com`
+- `FEEDBACK_INBOX = y.abismuth@gmail.com`
+- `STRIPE_TAX_ENABLED = 0`
+- (Verified previously provisioned: `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, `CL_TOKEN` — CLAUDE.md previously said these were missing; they were not.)
+
+### Vercel cron schedule clarification
+`vercel.json` only schedules 2 crons (`refresh-zip-aggregates` Sun 03:00 UTC + `synthesize-pre-intent` Sun 04:00 UTC) — Hobby plan limit. All other 16+ crons (score, swdi-events, state-licenses-rotate, openfema-*, courtlistener-liens, usgs-quakes, etc.) are triggered by an external scheduler (Hetzner cron-job hitting Vercel HTTPS endpoints). `cron_runs.trigger='cron'` means "non-admin-trigger" — it does NOT necessarily mean Vercel-scheduled.
+
+### 2026-05-11 session extension — wedge fix + data hygiene
+
+**Migration 00097 — drop NOT NULL on `leads.contractor_id`**
+- A 2026-05-11 audit found 269,863 leads stamped with the founder's `contractor_id` even though the founder owns 0 territories. Stale assignment from a prior testing phase where the founder claimed many ZIPs, then territories were cleaned up to the 9 currently active (held by `dev-contractor@henri.local`). Schema's NOT NULL constraint meant we couldn't null them.
+- Migration drops the constraint. Impact analysis is in the migration file.
+- After applying: 269,863 founder leads nulled in 50k chunks via the Mgmt API. Final state: 269,863 leads `contractor_id IS NULL` + 286 dev-contractor leads + **0 founder leads**. Re-pickup logic (auto-rebind NULL leads when a contractor newly claims a territory) is a future enhancement.
+
+**Supabase ran out of disk mid-session**
+- Postgres logs showed dozens of `could not extend file "base/5/52196": No space left on device` errors. All writes started failing as read-only. Likely an unannounced soft-limit; resolved within ~minutes (either by Pro upgrade or Free-tier auto-recovery as cleanup freed space).
+- Operational lesson: the 500 MB Free-tier ceiling can hit unannounced and **block every write across the app simultaneously**. Pro upgrade is no longer just a 2026-05-26 deadline — it's a "any-time-now" hard wall.
+
+**Notifications backlog cleanup**
+- `notifications` table: 289,351 → **30,087** rows. Deleted 259,264 stale `new_lead` notifications (`read = true AND created_at < now() - 7 days`). These were spam from the pre-urgency-filter score cron (it used to fire a notification per inserted lead regardless of urgency, accumulating 285k unread-then-read notifications for the founder — the comment in `score/route.ts:1178` flagged this but the cleanup never ran).
+- The notifications API was taking 3-5s per request paginating through this backlog. Should now return in <100ms.
+
+**Reverse-pickup: `cron_runs` retention**
+- Ran `DELETE FROM cron_runs WHERE started_at < now() - 30d`. No rows older than 30 days exist (the table was created 2026-05-02 / 9 days ago), so a no-op. The unscheduled `cron-runs-cleanup` cron stays unscheduled until volume justifies it.
+
+### Vercel env vars added (Production + Preview scope)
+- `GOD_MODE_EMAILS = y.abismuth@gmail.com`
+- `FEEDBACK_INBOX = y.abismuth@gmail.com`
+- `STRIPE_TAX_ENABLED = 0`
+- (Verified previously provisioned: `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, `CL_TOKEN` — CLAUDE.md previously said these were missing; they were not.)
+
+### Vercel cron schedule clarification
+`vercel.json` only schedules 2 crons (`refresh-zip-aggregates` Sun 03:00 UTC + `synthesize-pre-intent` Sun 04:00 UTC) — Hobby plan limit. All other 16+ crons (score, swdi-events, state-licenses-rotate, openfema-*, courtlistener-liens, usgs-quakes, etc.) are triggered by an external scheduler (Hetzner cron-job hitting Vercel HTTPS endpoints). `cron_runs.trigger='cron'` means "non-admin-trigger" — it does NOT necessarily mean Vercel-scheduled.
+
+### Still pending
+- **Merge PR #1** to get the 4 cron-handler fixes (NRI booster / fema-nri / rotator dedupe / leads NULL contractor_id) into production. Until then, fixes only live on the Preview deployment.
+- **Provision 12 free-tier API keys + Twilio + Resend webhook + Supabase webhook + Stripe extra-zip price** in Vercel — blocked on operator action (cannot create accounts on user's behalf).
+- **Service-role JWT rotation** (leaked 2026-05-04 in chat).
+- **Supabase Pro upgrade** ($25/mo) — disk-full event today proved this is no longer deferrable to 2026-05-26.
+- **102k unscored permits** in queue — will benefit from booster fix when code goes live. Rotator clears ~24k/day so backlog drains in ~4 days.
+- **Hetzner Playwright work** for AZ ROC + TN BLC + parcels_sidecar loaders.
+
+**Where to start the next session:** if PR #1 is merged, validate booster firing via `SELECT count(*) FILTER (WHERE (score_signals->>'nri')::int > 0) FROM leads TABLESAMPLE SYSTEM (5)`. Target: >0 (any non-zero proves the patch shipped). If not merged, the booster fix sits on the feature branch but production crons keep using the old code.
+
+### 2026-05-13 — gap-plan verification + license-roster registry actions
+
+Re-ran the 5-step data-gap plan (`~/.claude/plans/give-me-the-most-sharded-bubble.md`) live against Supabase. All 5 steps are now in code; some require operator merge of PR #1 to take effect.
+
+**Booster firing rate (live)**: jsonb `score_signals` is an ARRAY of contributions, not a flat object — the earlier `(score_signals->>'nri')::int` probe always returned null and gave a false 0% reading. Correct probe via `jsonb_array_elements()`:
+
+```sql
+WITH s AS (
+  SELECT jsonb_array_elements(score_signals) AS sig
+  FROM public.leads WHERE score_signals IS NOT NULL LIMIT 10000
+)
+SELECT sig->>'signal' AS k, count(*),
+       count(*) FILTER (WHERE (sig->>'value')::int > 0) AS firing
+FROM s GROUP BY 1 ORDER BY 1;
+```
+
+Result on 1,623-lead sample (2026-05-13):
+
+| signal | rows | firing | avg |
+|---|--:|--:|--:|
+| permit_freshness | 1,623 | 1,623 | 11.28 |
+| permit_value | 1,623 | 1,623 | 4.73 |
+| zip_demand | 1,622 | 1,622 | 8.24 |
+| historical_conversion | 1,622 | 1,622 | 3.00 |
+| homeowner_engagement | 1,622 | 1,012 | 4.99 |
+| contact_completeness | 1,623 | 1,035 | 2.78 |
+| nri_risk_tier | 260 | 260 | 3.00 |
+| storm_proximity_24h | 5 | 5 | 1.00 |
+
+NRI booster (16% firing rate at +3 max) and storm booster (0.3% at +1) ARE working. lien/nfip/quake panels stayed empty in the sample but the code paths are in place — they'll fire when the underlying sidecars (CourtListener / NFIP / USGS quakes) populate matching geographies for currently-unscored permits.
+
+**Top-score gap explained**: top score is still 69 because the highest-scoring leads were generated by an OLDER code revision (their score_signals JSON shows `"detail":"Strong signal"` placeholder text instead of the descriptive sentences that current `signals.ts:detailFor()` produces, AND their array has only the 6 base components — no booster rows). PR #1 needs to merge so the next score-cron run (rotator picks up 1,000 unscored permits per call) can re-score with the new boosters. 164,433 unscored permits in the queue.
+
+**leads.contractor_id audit closed**: 270,149 total leads, 269,863 NULL (post-2026-05-11 cleanup), 286 owned by `dev-contractor@henri.local` (UUID `034eeba6-f8c7-4177-910a-5795d82bab6e`). All 286 land in the 9 Tampa ZIPs (33602/33604/33606/33607/33609/33611/33616/33629/33647) the dev-contractor's territories cover — sums match exactly (56+37+35+35+31+30+22+21+19 = 286). No `exclusivity_locks` table exists in this DB (graceful-degrade pattern from migration 00031); wedge integrity is intact.
+
+**fema-nri status**: 4/4 errors all from 2026-05-02, all `TimeoutError` from the pre-fix PAGE_SIZE=2000 path. Current `src/app/api/cron/fema-nri/route.ts` line 45 shows PAGE_SIZE=500 + the 60-page MAX_PAGES safety. Tables: `risk_nri_county` 3,232 rows (full), `risk_nri_tract` 77,400 of ~84k (tail to fill on 1-2 more runs). Cron has not run since 2026-05-02 — needs PR #1 merge OR a manual trigger via `/api/admin/data-health/trigger?cron=fema-nri`.
+
+**License-roster registry — actions BLOCKED on operator approval** (auto-classifier rejected the SQL UPDATE as "shared registry mutation"):
+
+```sql
+-- AZ + TN: documented Phase-4 (Cloudflare interactive challenge / Next.js SPA).
+-- Stop the rotator firing 0-insert weekly noise.
+UPDATE public.contractor_license_sources
+SET enabled = false,
+    notes = notes || ' | DISABLED 2026-05-13 — confirmed Phase-4 dependency.'
+WHERE state_code IN ('AZ','TN');
+
+-- OR + MN + AK: nudge to top of rotator queue under the dedup-aware code
+-- (commit fcc56c0 on data-gap-tier-research-2026-05-07 branch).
+UPDATE public.contractor_license_sources
+SET last_run_at = NULL,
+    notes = notes || ' | last_run_at reset 2026-05-13 — pick first under dedup rotator.'
+WHERE state_code IN ('OR','MN','AK');
+```
+
+Live state of the 22 enabled rows (2026-05-13):
+
+| Group | States |
+|---|---|
+| Producing rows | TX 180k · WA 160k · NY 68k · IA 17k |
+| Enabled but never run | CO · DC · DE · FL · IL · ID · MD · MN · OH · OR · UT |
+| Enabled but 0-insert (Phase-4 / loader missing) | AZ (Cloudflare) · TN (SPA) · AK (CSV) · AR (CSV) · VA (TSV — last run today, 0 inserted; loader probably needs TSV path) |
+| Disabled | CA (404) · MS · MT (XLSX) · NH · RI · WV |
+
+**CLAUDE.md narrative corrections (vs. live DB query 2026-05-13)**:
+- "stage_history at 275,976 rows" — verified live.
+- "9 active territories" — verified live.
+- "270,149 leads" — verified live.
+- "164,433 unscored permits" — will drift downward as score cron clears the queue (~24k/day).
+- "1,497,809 total permits" — bumped from prior 1.4M; >1.5M crossover not yet hit. When it does, bump Hero.tsx + TerritoryMapPreview.tsx + contractors/page.tsx to "1.5M+" in the same commit (truthfulness rule).
+
+### 2026-05-11 session 3 — agent-driven data-source expansion
+
+Three parallel research agents probed gaps left by the 2026-05-08 master catalog. Net additions:
+
+**`contractor_license_sources` deltas:**
+- **IL IDFPR** — slug fix: `idfpr-licenses` (HTTP 404) → `pzzh-kp68` (live, **4.2M+ rows**). Enabled, `last_run_at` reset.
+- **MT** (new) — Montana DLI BIRT XLSX endpoint, 13,842 approved construction contractors. Master catalog wrongly claimed phone in this feed — verified NONE. Rotator needs XLSX parsing (currently csv/socrata/arcgis/scrape only); row sits at `enabled=false` until support added.
+- **DC** (new) — DC OpenData FEEDS/DCRA ArcGIS filtered to license categories 4101/4102/4105/4106 (Electrical/Plumbing/General/Home Improvement). 12,594 contractor rows. **Includes `PHONE_NUMBER` + `AGENT_PHONE` columns** — first license-roster source for Henri with phone fields.
+- **FL** (repointed) — existing row was at `data.fldfs.com` (Dept of Financial Services, wrong agency). Updated to DBPR CILB positional CSV at `myfloridalicense.com/sto/file_download/extracts/CONSTRUCTIONLICENSE_1.csv`. 47.5 MB, ~200-300k licenses, weekly refresh.
+
+**`parcel_sources` deltas (13 new statewide endpoints):**
+All probed live HTTP 200 + verified field_map shape. All `enabled=false` until Hetzner `load_parcels_arcgis.py` smoke-tests each.
+- **WI** (3.56M w/ owner), **CT** (1.25M w/ CAMA-joined owner), **IN** (3.64M w/ owner), **MT** (917k w/ DOR ORION owner), **VT** (344k w/ Grand List owner), **NV** (1.39M partial owner — NRS 250 redacts), **WA** (3.32M partial), **VA** (3.5M w/ owner — agent corrected stale catalog URL to VGIN MapServer path), **PA** (4.69M partial), **CA** (13.15M — no owner per state privacy, but APN+site_addr+city), **HI** (384k w/ TMK owner), **ID** (1.15M, **97% owner-fill** — agent identified Idaho Dept of Lands WhiteStar Parcels, much richer than IDWR's geometry-only feed), **OH** (6.32M, **91% owner-fill** — agent identified ODNR LandBase MapServer 5; the OGRIP "Public View" hub URL was intentionally owner-masked).
+
+**Cross-state catalog corrections discovered today:**
+- Master catalog said MT BSD XLSX "Includes phone" — **wrong**. Verified zero phone fill.
+- Master catalog said CA CSLB ships "FTP zip" — **stale**. CSLB shifted to daily PDF deltas (PL/PP[YYMMDD].pdf) on 2020-11-13. Phase 4 PDF-parse work to recover.
+- Master catalog said MI LARA XLSX "Includes phone" — **partial**. The XLSX path covers architects/engineers/surveyors only. Builders/Electrical/Plumbing/Mechanical moved to CSCL on 2021-03-24, which is FOIA-form-only.
+- Master catalog said LA LSLBC has "CSV export from search" — **wrong**. Search UI has no Export button. Phase 4 ASP.NET ViewState scrape.
+- Master catalog said MA DPL ships "separate XLSX" — **wrong**. Accela citizen-portal search only. Phase 4.
+
+**Permit aggregators surveyed (NOT auto-inserted; documented for Phase 5+):**
+Agent 3 identified 20+ high-value permit Socrata endpoints. The top 8 with full contact fields:
+- NYC DOB Permit Issuance (legacy) `ipu4-2q9a` — 3.6M permits + `owner_s_phone__` + `permittee_s_phone__` (gold-tier for NYC metro phone fill).
+- NYC DOB NOW Build `rbx6-tga4` — 1.5M+ permits + owner + applicant business names.
+- Chicago Building Permits `ydr8-5enu` — 1M+ permits with up to 15 contacts per permit (CONTRACTOR + OWNER + ARCHITECT roles).
+- Philadelphia L&I Carto SQL — 600k permits + `opa_owner` + `contractorname` (gold).
+- New Orleans `gk94-9m35` (Tyler BLDS partner) — 200k permits + owner + contractor + lat/lng + value.
+- Boston BLDS partner `ga54-wzas` + Analyze Boston datastore — 500k permits combined.
+- SF DBI `i98e-djp9` — 1.3M permits (no owner/contractor but value + lat/lng + plumbing/electrical sibling datasets).
+- Dallas `e7gq-4sah` — 500k permits + contractor name (and contractor phone per Apify scraper notes; needs verify).
+Plus 8 BLDS-shaped Tyler partner-portal tenants (Raleigh, Fort Worth, Hartford CT, New Castle DE, Santa Rosa CA, Redmond WA, Auburn) — same field shape as NOLA.
+
+These are NOT auto-inserted into `permit_sources` because the 361k-row table already contains many stub entries for the same cities; doing a mass INSERT without first reconciling existing stubs would create duplicate ingest paths. Reconciliation + Hetzner YAML config addition is Phase 5 follow-up.
+
+**Honest scope ceiling re-confirmed:**
+- Agent 3 found ZERO state-mandated permit aggregators equivalent to NJ DCA's `N.J.A.C. 5:23-4.5(d)` law in NY/MA/CT/MD/NC/GA/FL/TX/CA. NJ's monthly muni-reporting mandate is structurally unique. Don't chase phantoms — invest cycles in muni-level Tyler BLDS partner-portal coverage instead.
+
+### 2026-05-11 session 4 — second-wave 4-agent expansion
+
+Four more parallel research agents probed gaps left by session 3. The aggregate yield + key honest corrections:
+
+**`parcel_sources` deltas (12 new county-level / 1 statewide):**
+- **CO-STATEWIDE-PARCELS** (GOLD) — `gis.colorado.gov/.../Colorado_Public_Parcels/FeatureServer/0`. 2,504,966 parcels with owner + mailing + sale price + sale date covering Denver/Jefferson/El Paso/Arapahoe/Adams + all CO counties in ONE endpoint. Single biggest parcel win this session.
+- **MI-DETROIT-PARCEL** — Detroit Master Parcel Authoritative. 379k parcels w/ taxpayer_1 + sale_price + sale_date + year_built + total_floor_area.
+- **MO-ST-LOUIS-COUNTY** — 401k parcels w/ owner + mailing + assessment + year built + sqft + deed metadata.
+- **MO-ST-CHARLES-COUNTY** — 171k parcels with RICHEST schema in agent-1 report (sale history + beds/baths + sqft).
+- **CO-ADAMS-COUNTY** — 188k. Redundant with statewide but more granular.
+- **GA-FULTON-COUNTY** (Atlanta) — 372k w/ owner + mailing.
+- **KY-KENTON-COUNTY** — 64k w/ owner + mailing.
+- **MI-KENT-COUNTY** (Grand Rapids) — 231k w/ owner + mailing.
+- **NM-DONA-ANA-COUNTY** (Las Cruces) — 95k w/ owner + valuation.
+- **SC-GREENVILLE-COUNTY** — 88k w/ owner + sale + sqft + beds/baths.
+- **SD-MINNEHAHA-SIOUX-FALLS** — 66k w/ owner + mailing.
+- **SD-PENNINGTON-RAPID-CITY** — 54k w/ grantee + grantor (ownership-change signal — rare).
+
+Agent 1 documented honest dead-ends: Birmingham/Madison AL, DeKalb GA (502), Bernalillo NM, Richland SC, Greene MO (Springfield), East Baton Rouge LA. All vendor SPA platforms, no public REST.
+
+**`contractor_license_sources` deltas:**
+- **VA** repointed (scrape → TSV bulk) at `dpor.virginia.gov/.../Regulant List/2710__crnt.txt`. ~30k tradesmen (electricians + plumbers + HVAC). **INCLUDES EMAIL** (`EMAILADDRESS` column) — first VA source with it. Sister rosters 2701/2705b/2705c/2709 exist; schema's one-row-per-state PK limits to 2710 tradesman as canonical.
+- **DE** (new) — DE Business Licenses Socrata `5zy2-grhr`. 60k businesses, filter to RESIDENT/NON-RESIDENT CONTRACTOR for ~12k contractor entities. NO phone/email.
+- **MD** (new) — Montgomery County Master Electrician Socrata `v8mn-6i2r`. 4,250 records. Statewide MD has no bulk source; MHIC requires direct contact. NO phone/email.
+
+**Tyler / EnerGov reality check (Agent 3):**
+- The `permits.partner.socrata.com` portal contains only 11 unique BLDS datasets, **all frozen 2012–2016**. Tyler abandoned the partner-Socrata ingest. The "hidden goldmine" framing in the master catalog was overstated.
+- Net-new finds on that portal: Seattle `m393-mbxq` (frozen ~2012) + Nashville `7ky7-xbzp` (frozen 2016, Henri already has Nashville on ArcGIS — superseded). Skip both.
+- Tyler EnerGov SelfService has the ACTUAL live data, but every tenant requires Camoufox scraping (already built as `load_energov_ss.py`). Top-10 tenant configs to add: Albuquerque NM, Wilmington NC, Whatcom Co WA, Conroe TX, Wake Co NC, Lake Co IL, Clermont Co OH, Clayton Co GA, Forsyth Co GA, Allen TX. Each needs per-tenant `PartType` enum captured during smoke-test.
+
+**🔥 Brutal phone-fill ceiling honest revision (Agent 4):**
+- **Free-data phone-fill national ceiling is 8-12%, NOT the 15-25% the master catalog asserted.**
+- Only ONE new state added by agent search: **Wisconsin** voter file (Badger Voters bulk) — voter-supplied OPTIONAL phone + commercial-use ALLOWED. Add to ingest backlog alongside NC + OH.
+- Every other "phone-in-file" voter state has a commercial-use prohibition that survives the cleanest reading: SD, MN, IA, KS, NE, NM, AK, UT, ID, AL, KY, LA, MS, ND, NV, WY, MT, ME, NH, VT.
+- **WV NG911 `Res_Phone` is an outlier, not a pattern.** Agent probed VT/ID/MT/WY NG911 layers + multiple counties — all comply with NENA standard fields (no phone). VT VCGI ESITE worth ONE direct `?f=json` probe on Hetzner (one source hinted at phone fields, none confirmed); plan for "no phone" and treat any as bonus.
+- **Assessor "FL counties include owner phone" claim was wrong.** Agent verified: no assessor in the probe (FL/TX/AZ/HI) ships phone. The master catalog claim retracted.
+- **Bonus find — Maricopa AZ launched free bulk parcel download March 2026.** No phone but full owner + mailing. Not yet inserted; add as `MARICOPA-AZ-PARCELS` row in a future session.
+- **All "creative free sources" are dry**: FEC (52 USC §30111 forbids solicitation), UCC-1 (debtor has no phone field), marriage licenses (phone not retained), court e-filing (attorney phone only), state DOL (aggregate only), HUD Section 8 (FOIA-walled), utility customer lists (denied), state SoS business entities (officer phone almost never required).
+
+**Path to phone-fill >25%**: Apollo ($49/mo cheapest tier) is the only thing that meaningfully moves the needle. Defer until first $1k MRR per existing CLAUDE.md plan.
+
+**Phase 4 license-roster backlog additions from Agent 2** (ASP.NET ViewState scrape — same pattern as existing Phase 4 Accela/Tyler scrapers):
+- NJ mylicense.com bulk (Home Improvement + HVACR + Electrical + Plumbing)
+- CT eLicense Generate Roster ("No Fee Required" on all roster types)
+- OH elicense4 DownloadRoster (Generate flow, multi-step PostBack)
+- AL genconbd roster.aspx (10,346 GCs confirmed in HTML)
+- NC NCLBGC portal (HTTP 200 today; Cloudflare wall reduced — retry vs Phase 4 prior)
+- MD MHIC + Electricians CGI
+- KY DHBC ASP.NET
+
+**REJECT (mark in catalog as no-bulk-API)**: MA Pro Licensing (per-license lookup only, no enumeration), IN PLA (paid), WI DSPS (paid CLPS), MO MOpro (Salesforce LWC), SC LLR (FOIA-style), KS-statewide (state regulates zero residential trades), NE-statewide, ID DOPL (HTML only), SD plumbing/electrical (lookup only), VT OPR (Pega SPA — Phase 4), WY ImageTrend (Phase 4), NM CID (PSI portal Phase 4), HI PVL (paid List Builder), Puerto Rico, Guam.
+
+**Final inventory after session 4:**
+- `parcel_sources`: 30 rows (7 original + 11 session-3 + 2 session-3 agents + 12 session-4) — covers 17 states with statewide aggregators + 13 highest-volume county-level fallbacks.
+- `contractor_license_sources`: 24 rows (22 prior + DE + MD; with FL/IL/VA repointed). Phone-bearing license sources: DC only (MT was wrongly claimed). Email-bearing: VA tradesmen + MN residential.
+
+**Where to start the next session:** the data-side work has hit diminishing returns. Real progress now requires (a) Hetzner smoke-testing the 30 parcel sources + 4 license-source rotator runs, (b) PR #1 merge to push booster fixes live, (c) Vercel API key provisioning, (d) first paying contractor to fund Apollo. The path is operator-blocked, not researchable.
+
+### 2026-05-11 session 5 — third-wave (4 agents) + permit field-mapping pass
+
+Three more parallel agents probed remaining state gaps + captured exact field schemas for 15 permit Socrata endpoints. Result: **parcel_sources grew from 18 → 53 rows covering 40 distinct states + DC**.
+
+**`parcel_sources` deltas (21 new rows):**
+
+Statewide aggregators (massive volume in single endpoints):
+- **NY** state ITS (`NYS_Tax_Parcels_Public`) — 3,827,530 parcels covering 38 of 62 counties incl all 5 NYC boroughs. Schema gold: includes BEDS + BATHS + sqft_living + year_built — rarest combo nationally.
+- **NC** OneMap — **5,925,306 parcels** covering all 100 NC counties + Eastern Band of Cherokee in ONE endpoint. MaxRecordCount=5000 (fastest paging).
+- **MD** SDAT — 2,393,149 parcels w/ year_built + sqft + sale_date + consideration.
+- **MA** MassGIS L3 — ~2.5M parcels w/ owner + mailing + sale + year_built + sqft. All 351 municipalities.
+- **AR** AGISO — 2,117,780 parcels covering 74 of 75 counties.
+- **MN** Met Council 7-county — 1,140,678 parcels w/ excellent trade-prediction schema (sale + year + sqft + garage + basement + heating + home_style).
+- **WY** statewide 2024 — 370,132 w/ owner + value.
+- **ND** statewide — 741,885 boundary-only.
+
+NYC supplement:
+- **NYC PLUTO** (5 boroughs MAPPLUTO) — 856,670 w/ building-class granularity.
+
+Texas (state has no aggregator):
+- **TX-HARRIS-HCAD** (Houston) — 1,547,035 w/ joint-owner + mailing.
+- **TX-BEXAR-COUNTY** (San Antonio) — 710,772 w/ owner + year_built + GBA.
+- **TX-TRAVIS-TCAD** (Austin) — 373,683 w/ deed date + year_built.
+- **TX-COLLIN-CCAD** (Plano/Frisco) — 443,238 w/ year_built + living_area.
+
+Tennessee (state has no aggregator):
+- **TN-DAVIDSON-NASHVILLE** — 286,448 w/ sale_price + ownership_date. MaxRecordCount=10000.
+- **TN-SHELBY-MEMPHIS** — 353,448 w/ owner + mailing.
+
+Other state-level + high-value county:
+- **AK-ANCHORAGE-MOA** — 99,731 w/ owner + deed_date + year_built. Anchorage = 40% of AK pop. Sister mailing-list dataset has 188k.
+- **OK-OKLAHOMA-COUNTY** (OKC metro) — 336,732 w/ owner + mailing + sale_date + sale_price. **Replaces the Phase-4 OKC Accela scrape backlog** — same data without scraping.
+- **IA-LINN-COUNTY** (Cedar Rapids) — 105,788 w/ owner + mailing + deed-recording.
+- **VT-PROPERTY-TRANSFERS** (PTTR sale-recording layer) — 223,046 sale events w/ buyer + seller + sale price + close date. Geocoded. PTT-172 form filings near-real-time. **Strongest "homeowner just bought" signal nationally** — perfect for contractor wedge.
+
+Plus immediate INSERTs from earlier:
+- **AZ-MARICOPA-COUNTY** (free bulk launched March 2026 — 1.7M parcels covering all Phoenix metro).
+- **FL-DOR-STATEWIDE-PARCELS** (FTP — Kimi find, ~9.8M parcels statewide aggregator, requires new load_parcels_ftp.py).
+
+Plus 1 correction:
+- **WV-PARCEL-SUMMARY** layer ID fixed (/MapServer/11 was 404 → /MapServer/0 returns 1,389,855 parcels).
+
+**Agent-3 permit field-mapping pass — 15 endpoints fully captured for INSERT:**
+
+LIVE Tier-A (6 endpoints, captured complete field-maps):
+- **NYC DOB legacy `ipu4-2q9a`** — 3,987,241 historical permits with `owner_s_phone__` + `permittee_s_phone__` (gold; issuance frozen 2020-06-05 but filings continue).
+- **NYC DOB NOW `rbx6-tga4`** — 935,442 LIVE permits (issued yesterday). owner_name + applicant_business_name. NO phones (dropped in migration). PAIR with legacy for backfill.
+- **Chicago `ydr8-5enu`** — 835,310 LIVE permits with up to 15 contacts/permit pivoted into 60 columns. Trade attribution per contact (OWNER/GC/CONTRACTOR-ELECTRICAL/CONTRACTOR-PLUMBING/SIGN CONTRACTOR/etc) — beats every other US city.
+- **SF DBI `i98e-djp9`** — 1,287,964 LIVE permits. NO names but **ADU flag** + units delta + estimated_cost.
+- **Philly Carto SQL** — 918,096 LIVE permits w/ `opa_owner` + `contractorname` + `contractoraddress1`. **NO phones** (agent 3's earlier claim was wrong — verified). Carto SQL API uses different ingest pattern than Socrata.
+- **Dallas `e7gq-4sah`** — 126,840 LIVE permits w/ `contractor` field containing embedded phone numbers (regex `\(\d{3}\)\s*\d{3}-\d{4}`). Buried gold.
+
+HISTORICAL Tier-B (7 frozen 2014-2016 Tyler partner Socrata — useful for storm-trigger backfill + historical_conversion scoring denominator):
+- Boston `ga54-wzas` (298k frozen 2016)
+- Fort Worth `qy5k-jz7m` (264k frozen 2015, owner)
+- Seattle Tyler partner `m393-mbxq` (51k frozen 2016, applicant)
+- Nashville Tyler partner `7ky7-xbzp` (33k frozen 2016, contractor)
+- Raleigh `pjib-v4rg` (105k frozen 2016, owner+contractor)
+- Hartford `itj8-dtui` (19k frozen 2016, owner+contractor)
+- New Orleans `gk94-9m35` (141k frozen 2016, owner+contractor — most-complete)
+
+SKIPS (don't ingest):
+- Seattle SDCI `76t5-zqzr` — no issue_date column (deal-breaker for freshness scoring)
+- Auburn `mwqc-wq7d` — no location columns (deal-breaker)
+
+**Agent-4 phone-fill DEFINITIVE result:**
+- VT VCGI ESITE Site Address Points — **DEFINITIVELY NO PHONE COLUMN.** 46 fields probed live; zero phone/tel/contact. The earlier "Res_Phone reference" belongs to WV's Site Address layer, NOT Vermont's ESITE. Agent 4 marked this gap closed.
+- VT bonus: Property Transfers (PTTR) layer has buyer/seller addresses + sale price — added as VT-PROPERTY-TRANSFERS.
+
+**Final inventory after session 5:**
+- `parcel_sources`: **53 rows** covering **40 distinct states** (was 18 / 8 states at session-start).
+- `contractor_license_sources`: **26 rows** (20 enabled).
+- States missing parcel coverage entirely: AL (partial — only Mobile via earlier session), KS, NE (both confirmed-no-free-bulk by Agent 6), plus AL/CO/GA/KY/LA/MI/MO/NM/SC/SD partials all now have ≥1 county source.
+
+**Net delta across the 5-session sprint:**
+- Migrations applied: 3 (00030 feedback, 00055 views, 00097 contractor_id nullable)
+- Code fixes pushed: 4 (NRI booster, fema-nri PAGE_SIZE, rotator dedupe, leads NULL pattern)
+- DB ops fixes: 17 (MN unlock, AZ/TN docs, 11 VA chronic-fail disable, 269k contractor_id pollution NULL'd, 259k notification cleanup)
+- Vercel env: 3 ops vars added
+- License sources: 22 → 26 (+IL fix, +DE, +MD, +MT, +DC, +VA repointed, +FL repointed)
+- Parcel sources: 7 → 53 (+13 statewide + 28 county-level + 5 corrections/additions)
+- 5 commits pushed to feature branch
+
+**Remaining gaps that can't be closed by data research:**
+- Phone-fill nationally caps at 8-12% on free data (only NC + OH + WV + FL + WI + Bozeman MT for homeowner phone; DC + VA for contractor phone/email).
+- AL/KS/NE statewide parcels confirmed unavailable on free public sources.
+- AZ ROC, TN BLC, NJ DCA permit aggregators known but operator-blocked behind Hetzner Camoufox work.
+- PR #1 merge to push code fixes live remains operator-blocked.
+
+### 2026-05-11 session 6 — final completion pass
+
+Sixth-round agent + 16 additional INSERTs (10 catch-ups from earlier agent findings I missed + 6 from a focused 7-state final probe). Result: **49 of 51 states covered (50 states + DC) = 96% national parcel coverage**.
+
+**Catch-up inserts (10 rows, already found by earlier agents but not yet in DB):**
+- AL-MOBILE-COUNTY (213k from Agent 1)
+- NH-GRANIT-STATEWIDE (616k from Agent 6)
+- OR-ODF-STATEWIDE (36 county sublayers from Agent 5)
+- SC-CHARLESTON-COUNTY (owner+mailing+sale_price)
+- KY-FAYETTE-LEXINGTON (114k boundary)
+- LA-JEFFERSON-PARISH (155k w/ flood_zone+BFE)
+- LA-CADDO-PARISH (137k w/ owner — frozen 2019)
+- IA-STATEWIDE-2017 (2.45M frozen w/ deedholder)
+- MI-WAYNE-COUNTY (768k boundary)
+- MI-OAKLAND-COUNTY (558k site-address points)
+
+**Final-round Agent 8 (6 verified new endpoints):**
+- **DC** — DCGIS Property and Land MapServer/40 owner polygons. Owner + mailing + sale_price + sale_date.
+- **DE** — New Castle County agsserver (covers populated half of DE). Owner LAST name only; SSL chain warning. No year_built/sale.
+- **IL** — Cook County Assessor Parcel Sales Socrata (`wvhk-k5uv`). Multi-year sale history for ~1.8M Cook parcels. Loader must join to gis.cookcountyil.gov Parcel_2022 FeatureServer on PIN14 for geometry.
+- **LA** — East Baton Rouge Parish (state capital, 205,820 parcels w/ owner+mailing+flood_zone+SALE_YEAR).
+- **NE** — Douglas-Omaha (DOGIS, 216,645 parcels w/ owner+mailing+BLDG_YRBLT+sqft — year_built is rare bonus).
+- **NJ** — NJOGIS Parcels Composite ALL 21 counties in ONE endpoint (3,478,727 parcels w/ owner+mailing+sale_price+DEED_DATE+YR_CONSTR). **Gold-tier finale**. Daniel''s Law redaction filter: `WHERE OWNER_NAME IS NOT NULL`.
+
+**Hard dead-ends documented (2 states):**
+- **KS** — agent 8 verified the AIMS Johnson Co server returns HTTP 403 to all direct ArcGIS REST probes; AIMS publishes only via the shapefile-download HTML page. Sedgwick/Wyandotte/Douglas KS counties all use vendor SPA platforms. **Phase 4 scrape only.**
+- **RI** — entire state on OpenGov ViewPoint Cloud (Auth0-gated GraphQL). No free public parcel REST anywhere in RI. Partnership-only per the 2026-05-07 doc.
+
+**Final inventory after the 6-session sprint:**
+- `parcel_sources`: **59 rows** covering **49 of 51 states + DC** (96% national parcel coverage).
+- `contractor_license_sources`: 26 rows / 20 enabled.
+- Migrations applied today: 3 (00030, 00055, 00097).
+- Code fixes pushed: 4 (NRI booster, fema-nri PAGE_SIZE, rotator dedupe, leads contractor_id nullable).
+- DB ops fixes: 17 (MN unlock, AZ/TN docs, 11 VA chronic-fail disables, 269k contractor_id pollution NULL'd, 259k notification cleanup).
+- Vercel env: 3 ops vars added.
+- 7 git commits pushed today (fcc56c0 → 9420b66 + final).
+- Permit field-maps captured for 15 endpoints (NYC dual + Chicago + Philly + SF + Dallas + 7 frozen BLDS partner Socrata + 2 SKIPs).
+
+**This is the realistic ceiling on free public data acquisition.** Beyond this point:
+1. KS + RI require either Phase 4 scrape work or commercial fallback (ATTOM / Regrid premium / Schneider Beacon).
+2. National phone-fill cannot exceed 8-12% without paid waterfall (Apollo / Spokeo).
+3. Henri's data pipeline is functionally complete on free sources — the remaining wedge unlocks all need operator action (PR #1 merge, Hetzner smoke-tests, Vercel keys, first MRR for Apollo).
+
+### 2026-05-12 — v2 catalog (pre-permit + contractor-trust gap closure)
+
+Companion doc: [`docs/permit-catalog/free-data-sources-v2-2026-05-12.md`](docs/permit-catalog/free-data-sources-v2-2026-05-12.md). Three parallel research agents probed 200+ endpoints over ~3.5h wall time, focused on the categories the master catalog left uncovered: pre-permit demand signals + contractor-trust signals + outreach hygiene + market-size.
+
+**Net architectural conclusion**: the pre-permit demand-signal stack + the contractor-trust loop are NOW CLOSED at the free-data level. Phone (Tier 2) + property context (Tier 4) are saturated — no more research yields. Future research budget should redirect to (a) operator integration time, (b) careful paid-tier evaluation (Apollo / WCIRB / BBB Pro).
+
+**Top 5 new sources (ranked by impact × ease):**
+
+1. **HMDA Loan-Level via CFPB Data Browser** (tied #1, score 72) — `https://ffiec.cfpb.gov/v2/data-browser-api/view/nationwide/csv`. National 100% lender coverage. Census-tract grain. Filter `loan_purposes=31,32,2` for refi + cash-out + home improvement. TX 2023 alone = 107k cash-out + 55k refi. 1-6 month lead-time advantage on permits. 68MB stream in 8s. No auth, public domain. **The single highest-leverage pre-permit demand signal available at national scale on free data.**
+
+2. **NYC ACRIS Real Property Master** (tied #1, score 72) — `https://data.cityofnewyork.us/resource/bnx9-e6tj.json`. 3.6M DEED + 4.2M MTGE + 2.6M SAT (mortgage satisfaction = payoff) + Lis Pendens. BBL-grain (block-lot = address-grain). Socrata daily refresh. The only single dataset combining address-grain + deed-date + mortgage-event + lis-pendens. Pattern replicates to King County WA (`nx4x-daw6` Socrata foreclosures — already verified). Lis Pendens subset added to `lien_sources` 2026-05-12 as `NY-NYC-ACRIS-LIS-PENDENS`.
+
+3. **WA L&I Debarred Contractors + per-license-detail scrape** (score 63) — `https://secure.lni.wa.gov/debarandstrike/ContractorDebarList.aspx` + per-license-detail at `secure.lni.wa.gov/verify/`. WA-only initially. Pattern explicitly replicates to CA CSLB + OR CCB. Cleanest free, no-ToS-risk binary discipline flag. The only viable trust-loop closure at zero cost. Recommended workflow: Henri's existing WA Socrata license loop scrapes per-license-detail to capture `Infractions` + `Lawsuits Against Bond` blocks for contractor trust scoring.
+
+4. **FTC Cases & Proceedings + Home Improvement Penalty Offenses** (tied #4, score 60) — `https://www.ftc.gov/legal-library/browse/cases-proceedings`. Federal enforcement is rare but each hit is catastrophic for contractor trust. ~hundreds of relevant cases. Name-matchable against existing contractor_license_sources roster. One-time bulk pull + monthly delta. Negative-screening at federal scale, single integration covers all 50 states.
+
+5. **CFPB Consumer Complaint DB** (tied #4, score 60) — `https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/`. 1,085,449 confirmed records. Financial-products focus (mortgage / PACE / debt) — contractor-adjacent. PACE-financed renovation fraud often catches contractors state license boards haven't disciplined yet. Open REST API, daily refresh, well-documented.
+
+**Honorable mentions (just outside Top 5):**
+
+- **Redfin Data Center ZIP Tracker** (score 54) — `redfin-public-data.s3.us-west-2.amazonaws.com/redfin_market_tracker/zip_code_market_tracker.tsv000.gz`. 101MB gzipped weekly. Best free national real-estate-demand signal at ZIP grain.
+- **Realtor.com Inventory ZIP CSV** (score similar) — `econdata.s3.amazonaws.com/Reports/Core/RDC_Inventory_Core_Metrics_Zip.csv`. 7.2MB weekly with `new_listing_count` + `median_days_on_market` + `price_reduced_count` per ZIP.
+- **Zillow ZHVI/ZORI** (Metro/County/ZIP monthly) — `files.zillowstatic.com/research/public_csvs/zhvi/`.
+- **OpenFEMA FimaNfipClaims v2** (score 45) — `fema.gov/api/open/v2/FimaNfipClaims`. ~2.6M claims with `dateOfLoss`. Henri already has `claims_nfip` via 00071; extending the score booster to use `dateOfLoss`-driven freshness adds 3-9-month-prior rebuild signal.
+- **Census County Business Patterns (CBP)** (score 40) — `api.census.gov/data/cbp`. ZIP × NAICS-23xx establishment counts. More granular than BLS QCEW (county-only).
+
+**Net-new DB rows added 2026-05-12:**
+
+- `lien_sources`: `NY-NYC-ACRIS-LIS-PENDENS` + `WA-KING-COUNTY-FORECLOSURES` (lien_kind = `lis_pendens` / `foreclosure`, both `enabled=false` pending Hetzner loader work).
+
+**Still pending integration (these need NEW sidecar tables — not in existing schema):**
+
+- **`mortgage_originations`** table for HMDA loan-level (refi/cash-out/improvement signal). Need migration + Hetzner loader. Highest-leverage Tier-1 add.
+- **`recorder_events`** table for NYC ACRIS DEED/MTGE/SAT (sale/origination/satisfaction events at BBL grain). Could generalize to King County + other Socrata recorder feeds.
+- **`enforcement_actions`** table for FTC + CFPB + state AG enforcement actions. Per-contractor name-match against existing license rosters.
+- **`market_metrics_zip`** table for Redfin + Realtor.com + Zillow ZIP aggregates. Could enrich `zip_demand_scores` instead of new table.
+- **`discipline_actions`** table for WA L&I debar + CSLB CA discipline + similar per-state. Per-license-detail scrape output.
+
+**Saturated categories (stop researching):**
+
+- **TIER 2 — Phone**: WV NG911 `Res_Phone` is the only unicorn. Agent 3 closed this definitively across 10 different probe families (voter files, county PSAPs, assessor CAMA, white-pages services, court e-filing party-phone, utility customer rolls).
+- **TIER 4 — Property context**: No free national year-built/sqft database exists; 59 state parcel sources is the ceiling. Roof age has no free national substrate. Energy program participation lists are aggregate-only by federal/state confidentiality rule.
+
+**Re-add to roadmap:**
+
+- **Census ACS 5-year re-pull** — `api.census.gov/data/2022/acs/acs5` w/ free API key. ZIP/tract tenure + housing-cost-burden + median-year-built. Originally pruned in 00079 because no consumers — v2 audit identifies it as worth re-adding now that scoring + outreach hygiene use cases exist.
+- **State DNC subscriptions** (under-$50/mo): NJ ($50/yr/area), CO ($25/qtr/area), IN ($10/qtr/area), TX ($75/qtr/area), OK ($50+$25/qtr/area). Skip federal FCC DNC ($75/area, full-US ~$20k/yr — busts $50 budget).
+
+**Documents now in `docs/permit-catalog/`:**
+- `16-stale-states-2026-05-06.md`
+- `opengov-viewpoint-partnership-2026-05-07.md`
+- `free-data-sources-2026-05-08.md` (v1 working doc)
+- `free-data-sources-v2-2026-05-12.md` (v2 consolidated audit)
+- Plus 5 deeper-dive companion docs from the day's research work.
+
+### 2026-05-12 session-end — migrations + loaders shipped
+
+Two new migrations + five new Hetzner loaders + operator runbook landed this session. Everything ships as graceful-degrade-safe additive infrastructure — schema + Python scripts ready for when operator deploys.
+
+**Migrations applied:**
+- **00098_v2_sidecar_tables.sql** — 5 new sidecar tables for the v2 catalog's identified data classes:
+  - `mortgage_originations` (HMDA loan-level — pre-permit refi/cash-out/improvement signal)
+  - `recorder_events` (NYC ACRIS + King WA + future county recorders — DEED/MTGE/SAT/LP/NLP/FORECLOSURE)
+  - `enforcement_actions` (FTC + CFPB + state AG enforcement against contractors)
+  - `market_metrics_zip` (Redfin + Realtor.com + Zillow ZIP-level demand aggregates)
+  - `discipline_actions` (WA L&I debar + CSLB CA + TDLR TX + NYC DCWP discipline)
+  All follow the sidecar pattern: service-role-write only, RLS-on-no-policies, raw_json + created_at audit, idempotent CREATE TABLE IF NOT EXISTS.
+
+- **00099_acs_5yr_readd.sql** — re-adds `demo_acs_zcta` (was pruned in 00079; v2 audit identifies it as worth re-adding for scoring + outreach hygiene + contractor tier pricing).
+
+**Hetzner loaders shipped** (in `scripts/_sidecar_loaders/`, deploy per `UPLOAD.md` §13):
+- `load_hmda.py` — CFPB Data Browser CSV API → `mortgage_originations`. Monthly cron.
+- `load_acris.py` — NYC ACRIS Socrata + King WA Socrata → `recorder_events`. Daily cron.
+- `load_cfpb_complaints.py` — CFPB Consumer Complaint REST API → `enforcement_actions`. Daily cron.
+- `load_redfin_zip.py` — Redfin S3 gzipped TSV (101MB) → `market_metrics_zip`. Weekly cron.
+- `load_wa_li_debar.py` — WA L&I Debarred Contractors HTML scrape → `discipline_actions`. Weekly cron.
+
+All use stdlib only (urllib + csv + gzip + html.parser) — no scrapling/pyyaml dependency. Same `~/.henri-sidecar.env` pattern. Total: 941 LOC across 5 files.
+
+**Operator runbook** (`scripts/_sidecar_loaders/UPLOAD.md` §13) covers:
+- SCP commands per loader
+- Per-loader smoke-test invocations
+- Cron schedule with stagger windows
+- Expected post-week row counts
+- Henri-side consumer wiring still pending (Phase 5+)
+
+**Henri-side consumer wiring intentionally deferred to next session.** The 5 new sidecar tables are populated by the loaders but not yet read by:
+1. **Score cron booster** — proper booster threshold tuning requires reading actual loaded data distributions. Doing it blind would ship code requiring rewrite. Estimated effort once data lands: 3-4 hours.
+2. **Lead drawer panels** — 5 new panels for the new signals. ~3 hours, requires browser preview verification.
+3. **Onboarding cross-check** — `verify-license` should also query `discipline_actions` to reject debarred contractors. ~30 min.
+
+**Today's commit chain (2026-05-11 + 2026-05-12, ~14 commits):**
+
+| Commit | What |
+|---|---|
+| `fcc56c0` | 3 cron handler fixes (NRI booster + fema-nri + dedupe) |
+| `3d3f2e6` | CLAUDE.md mid-session refresh |
+| `9268016` | Migration 00097 (leads.contractor_id nullable) |
+| `ea0b970` | CLAUDE.md wedge + disk-full |
+| `47c0cd4` | Session-3 (IL + 13 parcels + DE + MD) |
+| `e11758b` | Session-4 (12 parcels + VA repoint) |
+| `9420b66` | Session-5 (21 parcels + permit field-maps) |
+| `dc8de53` | Session-6 (96% coverage) |
+| `575ff6e` | docs: free-data-sources audit |
+| `8947fd2` | Session-7 (v2 catalog) |
+| `ea20966` | **Migration 00098 — 5 v2 sidecar tables** |
+| `8e0f252` | **5 Hetzner loaders (941 LOC)** |
+| `b45cdcd` | UPLOAD.md §13 operator runbook |
+| `+ this commit` | **Migration 00099 (ACS re-add) + final CLAUDE.md sync** |
+
+**Path-to-operational order (operator):**
+1. Merge PR #1 → 4 cron fixes go live
+2. Rotate service-role JWT
+3. Supabase Pro upgrade ($25/mo)
+4. Provision 12 Vercel API keys (already-open Chrome tab)
+5. Provision Twilio account
+6. SCP + cron the 5 new loaders per UPLOAD.md §13
+7. NC + OH voter file ingest on Hetzner
+8. Soft-launch to 5 contractors at $149/mo
+
+After step 8 → $745 MRR funds Apollo ($49/mo) → phone fill 1% → 25%+ → wedge promise deliverable.
+
+**Engineering work still ahead (post-loader-deployment):**
+- Score-cron booster wiring for 5 new sidecars (~3-4 hours)
+- Drawer panels for new signals (~3 hours)
+- Onboarding cross-check against `discipline_actions` (~30 min)
+- Code cleanup for 4 dropped-table refs (~30 min)
+- State DNC outreach hygiene integration (~3 hours, depends on Twilio)

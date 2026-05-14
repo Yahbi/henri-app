@@ -1,0 +1,27 @@
+# Wake County, NC (Raleigh metro) — Inspections / Building Permits.
+# Hosted by Wake County GIS at maps.wake.gov.
+# ~100k rows pulled in discovery (verified-live MapServer).
+
+loader: arcgis
+name: WAKE-COUNTY-NC
+city: Wake County
+state: NC
+status: unverified
+
+url: https://maps.wake.gov/arcgis/rest/services/Inspections/Building_Permits/MapServer/0/query
+limit: 200
+where: '1=1'
+order_field: ISSUED_DATE
+
+fields:
+  permit_no:        PERMIT_NUMBER
+  issued_date:      ISSUED_DATE
+  applied_date:     APPLIED_DATE
+  address:          ADDRESS
+  zip:              ZIP_CODE
+  description:      DESCRIPTION
+  estimated_value:  ESTIMATED_VALUE
+  contractor:       CONTRACTOR
+  applicant:        APPLICANT
+  permit_type_desc: PERMIT_TYPE
+  status:           STATUS

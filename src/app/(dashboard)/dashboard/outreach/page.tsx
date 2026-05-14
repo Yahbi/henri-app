@@ -13,6 +13,11 @@ interface Template {
   name: string;
   channel: "SMS" | "Email";
   preview: string;
+  /** Phase AA — opportunity_stage this template targets (from migration
+   *  00091's stage-specific seeds, or any contractor-authored row that
+   *  set the column). Null = generic / non-stage-specific. Drives the
+   *  stage filter dropdown above the template list. */
+  stage?: string | null;
 }
 
 const defaultTemplates: Template[] = [
@@ -471,6 +476,10 @@ export default function OutreachPage() {
   const [templates, setTemplates] = useState<Template[]>(defaultTemplates);
   const [editTarget, setEditTarget] = useState<Template | null>(null);
   const [sendTarget, setSendTarget] = useState<Template | null>(null);
+  // Phase AA — stage filter for the template library. "all" shows
+  // everything (incl. legacy generic templates with stage=null);
+  // picking a stage shows only the templates targeting that stage.
+  const [stageFilter, setStageFilter] = useState<string>("all");
   const { stats: outreachStats, recent: outreachRecent, isLoading, sendOutreach } = useOutreach();
 
   /* Hydrate templates from the contractor's saved rows. Previously
@@ -482,18 +491,30 @@ export default function OutreachPage() {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    // Phase AA — also fetch the global library rows (contractor_id IS NULL,
+    // is_library=true) so the 5 stage-specific templates seeded by
+    // migration 00091 surface alongside the contractor's own rows. The RLS
+    // policy on outreach_templates already permits SELECT of library rows
+    // for any authenticated user (migration 00032).
     const { data } = await supabase
       .from("outreach_templates")
-      .select("name, channel, body, subject")
-      .eq("contractor_id", user.id)
+      .select("name, channel, body, subject, stage, contractor_id, is_library")
+      .or(`contractor_id.eq.${user.id},and(contractor_id.is.null,is_library.eq.true)`)
       .order("updated_at", { ascending: false });
     if (data && data.length > 0) {
-      type Row = { name?: string | null; subject?: string | null; channel?: string | null; body?: string | null };
+      type Row = {
+        name?: string | null;
+        subject?: string | null;
+        channel?: string | null;
+        body?: string | null;
+        stage?: string | null;
+      };
       setTemplates(
         (data as Row[]).map((r) => ({
           name: r.name ?? r.subject ?? "Untitled",
           channel: r.channel?.toUpperCase() === "EMAIL" ? "Email" : "SMS",
           preview: r.body ?? "",
+          stage: r.stage ?? null,
         })),
       );
     }
@@ -584,9 +605,42 @@ export default function OutreachPage() {
 
       {/* Templates */}
       <div>
-        <h2 className="text-lg font-heading font-normal text-foreground mb-3">Outreach Templates</h2>
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+          <h2 className="text-lg font-heading font-normal text-foreground">Outreach Templates</h2>
+          {/* Phase AA — stage filter (URL-stable could come later; for now
+              this is in-component state). Renders only when ≥1 template
+              has a stage value, so legacy contractors see no UI churn
+              until the migration 00091 templates land. */}
+          {templates.some((t) => t.stage) && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground" htmlFor="outreach-stage-filter">
+                Stage
+              </label>
+              <select
+                id="outreach-stage-filter"
+                value={stageFilter}
+                onChange={(e) => setStageFilter(e.target.value)}
+                className="text-sm rounded-lg border border-border bg-card px-2 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                <option value="all">All templates</option>
+                <option value="generic">Generic only</option>
+                {Array.from(new Set(templates.map((t) => t.stage).filter(Boolean) as string[])).map((s) => (
+                  <option key={s} value={s}>
+                    {s.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {templates.map((tpl) => (
+          {templates
+            .filter((tpl) => {
+              if (stageFilter === "all") return true;
+              if (stageFilter === "generic") return !tpl.stage;
+              return tpl.stage === stageFilter;
+            })
+            .map((tpl) => (
             <Card
               key={tpl.name}
               className="p-4 space-y-2 hover:border-primary/40 transition-colors cursor-pointer"
@@ -600,6 +654,14 @@ export default function OutreachPage() {
                 <p className="text-sm font-medium text-foreground">{tpl.name}</p>
                 {channelBadge(tpl.channel)}
               </div>
+              {/* Phase AA — stage chip on the template card so contractors
+                  can see at a glance which stage the template targets,
+                  even when the filter dropdown isn't engaged. */}
+              {tpl.stage && (
+                <p className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary-10 text-primary border border-primary/30 leading-tight">
+                  {tpl.stage.replace(/_/g, " ")}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground whitespace-pre-line leading-relaxed line-clamp-3">
                 {tpl.preview}
               </p>

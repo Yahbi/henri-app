@@ -91,9 +91,14 @@ export async function notifyMatch(
 
   const notifications: Promise<unknown>[] = [];
 
-  /* Send SMS if contractor has it enabled */
+  /* Send SMS if contractor has it enabled.
+   * Module 7 — pass `homeownerIntakeId` so the hygiene gate verifies
+   * intake.consent_given_at + non-withdrawn status before send. */
   if (profile.sms_notifications && profile.phone) {
-    notifications.push(sendLeadSMS(profile.phone, leadData));
+    notifications.push(sendLeadSMS(profile.phone, leadData, {
+      homeownerIntakeId: intakeId,
+      zip,
+    }));
   }
 
   /* Send email */

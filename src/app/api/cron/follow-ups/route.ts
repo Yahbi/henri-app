@@ -132,24 +132,48 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         let externalId: string | null = null;
 
         if (item.channel === "sms" && item.recipient) {
-          const client = (await import("twilio")).default(
-            process.env.TWILIO_ACCOUNT_SID!,
-            process.env.TWILIO_AUTH_TOKEN!
-          );
-
-          const callbackUrl = process.env.NEXT_PUBLIC_APP_URL
-            ? `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/twilio`
-            : undefined;
-
-          const message = await client.messages.create({
-            body: item.body,
-            from: process.env.TWILIO_FROM_NUMBER ?? "",
-            to: item.recipient,
-            ...(callbackUrl ? { statusCallback: callbackUrl } : {}),
+          // Module 7 wiring — gate the send through the hygiene module.
+          // Follow-up items don't carry an intake_id directly today; the
+          // gate falls through to quiet-hours-only protection. When
+          // future follow-ups carry intake_id metadata, the consent gate
+          // will fire too.
+          const { checkOutreachAllowed } = await import("@/lib/outreach/hygiene");
+          // best-effort ZIP from the joined lead/intake metadata
+          const recipientZip = (item as Record<string, unknown>).zip as string | null ?? null;
+          const intakeId = (item as Record<string, unknown>).homeowner_intake_id as string | null ?? null;
+          const decision = await checkOutreachAllowed({
+            channel: "sms",
+            homeowner_intake_id: intakeId,
+            zip: recipientZip,
           });
+          if (!decision.allowed) {
+            logger.info("follow-ups SMS refused by hygiene gate", {
+              recipient: item.recipient.replace(/\d/g, "*"),
+              reason: decision.reason,
+              detail: decision.detail,
+            });
+            success = false;
+            externalId = null;
+          } else {
+            const client = (await import("twilio")).default(
+              process.env.TWILIO_ACCOUNT_SID!,
+              process.env.TWILIO_AUTH_TOKEN!
+            );
 
-          success = !!message.sid;
-          externalId = message.sid;
+            const callbackUrl = process.env.NEXT_PUBLIC_APP_URL
+              ? `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/twilio`
+              : undefined;
+
+            const message = await client.messages.create({
+              body: item.body,
+              from: process.env.TWILIO_FROM_NUMBER ?? "",
+              to: item.recipient,
+              ...(callbackUrl ? { statusCallback: callbackUrl } : {}),
+            });
+
+            success = !!message.sid;
+            externalId = message.sid;
+          }
         } else if (item.channel === "email" && item.recipient) {
           const { Resend } = await import("resend");
           const resend = new Resend(process.env.RESEND_API_KEY!);

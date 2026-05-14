@@ -98,33 +98,79 @@ const FALLBACK_COVERED_STATES: ReadonlyArray<UsState> = [
  * Graceful when Supabase env vars are missing — returns the fallback
  * constants so a CI build without secrets still completes prerender.
  */
+/** Build-time cap on the live Supabase fetch. The marketing page is
+ *  statically generated with a 60s ceiling per attempt × 3 retries.
+ *  When Supabase is saturated and even `count: "planned"` queries
+ *  hang past 8s, the build worker thrashes and times out. Bail at
+ *  6s and use the FALLBACK constants instead — keeps the build
+ *  deterministic regardless of DB health. */
+const STATS_FETCH_TIMEOUT_MS = 6000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${ms}ms`)),
+        ms,
+      ),
+    ),
+  ]);
+}
+
+function buildFallback(): LandingStats {
+  return {
+    permitsCount: FALLBACK_PERMITS,
+    permitsLabel: formatPermitsLabel(FALLBACK_PERMITS),
+    activeStates: FALLBACK_COVERED_STATES,
+    activeStatesLabel: formatStatesLabel(FALLBACK_COVERED_STATES.length),
+    leadsCount: FALLBACK_LEADS,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 export async function getLandingStats(): Promise<LandingStats> {
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
     !process.env.SUPABASE_SERVICE_ROLE_KEY
   ) {
-    return {
-      permitsCount: FALLBACK_PERMITS,
-      permitsLabel: formatPermitsLabel(FALLBACK_PERMITS),
-      activeStates: FALLBACK_COVERED_STATES,
-      activeStatesLabel: formatStatesLabel(FALLBACK_COVERED_STATES.length),
-      leadsCount: FALLBACK_LEADS,
-      fetchedAt: new Date().toISOString(),
-    };
+    return buildFallback();
   }
   const supabase = createAdminClient();
 
   // Use planned counts (no full-table scan) — fast even on the 1.4M
   // permits table. Supabase returns the planner's row estimate, which
   // is accurate to within ~5% and updates after each ANALYZE.
-  const [permitsResult, leadsResult] = await Promise.all([
-    supabase
-      .from("permits")
-      .select("*", { count: "planned", head: true }),
-    supabase
-      .from("leads")
-      .select("*", { count: "planned", head: true }),
-  ]);
+  //
+  // Wrapped in a 6s timeout because Vercel's static-generate path
+  // gives each page only 60s before the worker retries; if Supabase
+  // is saturated and the count queries hang, fall back to the
+  // hand-curated constants so the build always succeeds. Live
+  // numbers come back on the next revalidate (1h cache window).
+  let permitsResult: { count: number | null };
+  let leadsResult: { count: number | null };
+  try {
+    const results = await withTimeout(
+      Promise.all([
+        supabase
+          .from("permits")
+          .select("*", { count: "planned", head: true }),
+        supabase
+          .from("leads")
+          .select("*", { count: "planned", head: true }),
+      ]),
+      STATS_FETCH_TIMEOUT_MS,
+      "getLandingStats counts",
+    );
+    permitsResult = { count: results[0].count };
+    leadsResult = { count: results[1].count };
+  } catch (err) {
+    console.warn(
+      "[landing-stats] count fetch failed, using fallback:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return buildFallback();
+  }
 
   const permitsCount = permitsResult.count ?? 0;
   const leadsCount = leadsResult.count ?? 0;

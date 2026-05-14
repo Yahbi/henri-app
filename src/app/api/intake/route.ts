@@ -32,6 +32,12 @@ const IntakeBody = z.object({
   contact_phone: z.string().max(40).optional(),
   contact_email: z.string().email().max(200).optional(),
   henri_score: z.number().min(0).max(100).optional(),
+  // Module 5 (2026-05-09) — TCPA-style consent. When true the row gets
+  // consent_given_at = NOW(); when false / missing the outreach hygiene
+  // gate refuses every send (still creates the in-app notification +
+  // quote so the contractor sees the request).
+  consent_given: z.boolean().optional(),
+  consent_text_version: z.string().max(40).optional(),
 });
 
 /* ── Simple in-memory rate limiter (max 5 submissions per IP per hour) ── */
@@ -87,6 +93,7 @@ export async function POST(req: NextRequest) {
       zip, trade, timeline, budget_range, description,
       refinement_answers, photos, contact_name, contact_phone,
       contact_email, henri_score,
+      consent_given, consent_text_version,
     } = parsed;
 
     const supabase = await createClient();
@@ -120,6 +127,11 @@ export async function POST(req: NextRequest) {
         henri_score: henri_score ?? null,
         matched_contractor_id: matchedContractorId,
         status: matches.length > 0 ? "matched" : "pending",
+        // Module 5 — only stamp consent timestamps when the homeowner
+        // affirmatively checked the box. NULL means "no consent yet"
+        // (outreach hygiene gate refuses every send for this intake).
+        consent_given_at: consent_given ? new Date().toISOString() : null,
+        consent_text_version: consent_given ? (consent_text_version ?? "v1.2026-05-09") : null,
       })
       .select()
       .single();
@@ -246,6 +258,66 @@ export async function POST(req: NextRequest) {
           budget_range,
           henri_score,
         }).catch((err) => logger.error("Notification dispatch error", { error: err instanceof Error ? err.message : String(err) }));
+
+        /* ── 5b. Phase AA — Module 14 alert_rules evaluator ──
+         *
+         * Fire homeowner_match-eligible rules for every matched
+         * contractor. Best-effort try/catch — a thrown error never
+         * blocks the intake response. Cross-run dedupe lives inside
+         * dispatchAlertHits via last_fired_at. */
+        if (leadId) {
+          (async () => {
+            try {
+              const { evaluateRules } = await import("@/lib/alerts/evaluate");
+              const { dispatchAlertHits } = await import("@/lib/alerts/dispatch");
+              const allHits: Awaited<ReturnType<typeof evaluateRules>> = [];
+              for (const m of matches) {
+                const { data: rules } = await supabase
+                  .from("alert_rules")
+                  .select("id, contractor_id, kind, criteria, enabled, channel, last_fired_at, fire_count")
+                  .eq("contractor_id", m.contractorId)
+                  .eq("enabled", true);
+                if (!rules || rules.length === 0) continue;
+                const hits = evaluateRules(
+                  rules as Parameters<typeof evaluateRules>[0],
+                  [
+                    {
+                      id: leadId,
+                      contractor_id: m.contractorId,
+                      score: henri_score ?? m.score,
+                      trade,
+                      zip,
+                      address: `ZIP ${zip}`,
+                      permit_number: null,
+                      permit_description: description ?? null,
+                      // Homeowner-submitted intakes default to
+                      // homeowner_submitted stage (consent gate may
+                      // have set status differently — that's fine for
+                      // alerting, the homeowner_match matcher only
+                      // checks `is_homeowner_intake`).
+                      opportunity_stage: "homeowner_submitted",
+                      is_homeowner_intake: true,
+                      previous_stage: null,
+                    },
+                  ],
+                );
+                allHits.push(...hits);
+              }
+              if (allHits.length > 0) {
+                const summary = await dispatchAlertHits(allHits);
+                logger.info("alerts.dispatched_intake", {
+                  intakeId: intake.id,
+                  hits: allHits.length,
+                  ...summary,
+                });
+              }
+            } catch (alertErr) {
+              logger.warn("alerts.intake_evaluator_failed", {
+                error: alertErr instanceof Error ? alertErr.message : String(alertErr),
+              });
+            }
+          })();
+        }
       }
     }
 

@@ -7,6 +7,7 @@ import type { Lead } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
 import { MarketIntelPanel } from "@/components/dashboard/MarketIntelPanel";
+import { StageHistogram } from "@/components/analytics/StageHistogram";
 
 const FILTERS = ["All", "New Today", "High Value", "Cascade"];
 
@@ -430,6 +431,13 @@ export default function IntelPage() {
           )}
         </div>
       ) : null}
+
+      {/* Phase AA — Stage Breakdown. Sits below Trade + Trending so the
+          two existing cards keep their above-the-fold prominence;
+          stage breakdown is a complementary slice (the same leads
+          counted by intent stage instead of by trade or zip). The
+          histogram component handles its own loading + empty states. */}
+      <StageHistogram leads={leads} isLoading={isLoading} />
 
       {/* Filter Bar */}
       <div className="flex gap-2 flex-wrap">

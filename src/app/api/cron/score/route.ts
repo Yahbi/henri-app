@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { calculateScore, buildSignals } from "@/lib/scoring";
-import type { Urgency } from "@/lib/scoring";
+import type {
+  Urgency,
+  TradeWeightRow,
+  StageModifierRow,
+  ScoreCalibration,
+} from "@/lib/scoring";
 import { buildScoreSignalBreakdown } from "@/lib/scoring/signals";
+import { classify as classifyIntent } from "@/lib/intent/classify";
+import type { OpportunityStage } from "@/lib/intent/reason-codes";
 import { logger } from "@/lib/logger";
 import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 import { evaluateRules, type AddressPermitHistory } from "@/lib/predictive/rules";
@@ -57,6 +64,14 @@ interface ScoredLead {
    *  applied; silently dropped otherwise via the try/catch around the
    *  upsert. */
   score_signals: unknown;
+  /** Module 1 — opportunity_stage stamped at score time. Drives
+   *  per-stage modifier lookup (Module 13) and the stage chip in
+   *  the lead-card UI. May be null when the classifier can't
+   *  decide. Written to `leads.opportunity_stage` (migration 00087). */
+  opportunity_stage: OpportunityStage | null;
+  /** Module 1 — reason_codes from the classifier. Top 3 surface in
+   *  the drawer chip tooltip. Written to `leads.reason_codes`. */
+  reason_codes: string[];
 }
 
 /* ── Conversion rate helpers ─────────────────────────────────────────────── */
@@ -215,6 +230,86 @@ export async function GET(request: NextRequest) {
       uniqueZips,
       uniqueTrades
     );
+
+    /* Module 13 — score calibration tables (00090).
+     *
+     * Pre-fetched once per cron run because both tables are tiny
+     * (~7 rows trade, ~11 rows stage). Built into trade- and stage-
+     * keyed maps; per-permit lookup is O(1). When the migration
+     * isn't applied yet (or rows missing) the per-permit path falls
+     * through to undefined → calibration is a no-op (weight=1.0,
+     * cap=100, modifier=1.0). Honest about its own optionality. */
+    const tradeWeightMap = new Map<string, TradeWeightRow>();
+    const stageModifierMap = new Map<string, StageModifierRow>();
+    try {
+      const [{ data: tradeRows }, { data: stageRows }] = await Promise.all([
+        supabase.from("score_trade_weights").select("*"),
+        supabase.from("score_stage_modifiers").select("*"),
+      ]);
+      for (const r of tradeRows ?? []) {
+        tradeWeightMap.set((r.trade as string).toLowerCase().trim(), {
+          trade: r.trade as string,
+          freshness_weight: Number(r.freshness_weight ?? 1.0),
+          value_weight:     Number(r.value_weight     ?? 1.0),
+          contact_weight:   Number(r.contact_weight   ?? 1.0),
+          demand_weight:    Number(r.demand_weight    ?? 1.0),
+        });
+      }
+      for (const r of stageRows ?? []) {
+        stageModifierMap.set(r.stage as string, {
+          stage: r.stage as string,
+          cap: Number(r.cap ?? 100),
+          base_modifier: Number(r.base_modifier ?? 1.0),
+        });
+      }
+      logger.info("score.calibration_loaded", {
+        tradeWeights: tradeWeightMap.size,
+        stageModifiers: stageModifierMap.size,
+      });
+    } catch (e) {
+      logger.warn("score.calibration_fetch_failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
+    /* Phase AA-3 — ZIP pre-intent aggregates (migration 00093).
+     *
+     * The materialised view caches per-ZIP COUNT(*) FILTER aggregates
+     * over recent permits. Reading it once per cron run lets every
+     * lead's classifier call light up the 3 starved ZIP-aggregate
+     * reason codes (`nearby_adu_activity_90d`,
+     * `nearby_remodel_activity_90d`, `neighborhood_upgrade_trend`)
+     * without each call hitting the underlying aggregate inline (which
+     * was the original Z.2 timeout root cause).
+     *
+     * Graceful-degrade: when the view is missing or empty, the map
+     * stays empty and the classifier sees null for all 3 inputs (no
+     * change from the pre-AA-3 behaviour). */
+    const zipAggMap = new Map<
+      string,
+      { adu_90d: number; remodel_180d: number; yoy_growth: number | null }
+    >();
+    try {
+      const { data: zipRows, error: zipErr } = await supabase
+        .from("zip_pre_intent_aggregates")
+        .select("zip, adu_90d, remodel_180d, yoy_growth")
+        .or("adu_90d.gte.1,remodel_180d.gte.1,yoy_growth.not.is.null");
+      if (!zipErr) {
+        for (const r of zipRows ?? []) {
+          if (!r.zip) continue;
+          zipAggMap.set(r.zip as string, {
+            adu_90d: Number(r.adu_90d ?? 0),
+            remodel_180d: Number(r.remodel_180d ?? 0),
+            yoy_growth: r.yoy_growth == null ? null : Number(r.yoy_growth),
+          });
+        }
+        logger.info("score.zip_aggregates_loaded", { zips: zipAggMap.size });
+      }
+    } catch (e) {
+      logger.warn("score.zip_aggregates_fetch_failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
 
     /* Tier A+ Sprint 2 (F2.2) — value-forecast model.
      *
@@ -383,30 +478,65 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // ── Wave 2.A NRI lookup — county-level only (tract-level needs
-    //    a tract_fips on every lead; we don't have that yet, so we
-    //    join via state+county slug from the lead row). The ~3k NRI
-    //    counties fit comfortably in memory.
+    // ── Wave 2.A NRI lookup — county-level keyed lookup + state-level
+    //    median fallback. The ~3k NRI counties fit comfortably in memory.
+    //
+    //    2026-05-11 fix: the original city↔county join only matched
+    //    ~7% of permits (verified via SQL probe) because `permits.city`
+    //    is a city name and `risk_nri_county.county_name` is a county
+    //    name. They coincide only for "namesake" cities (Sacramento,
+    //    Austin, etc.). The other 93% got null and the booster never
+    //    fired.
+    //
+    //    To recover coverage we now ALSO pre-compute the MEDIAN risk
+    //    score per state. When the city↔county lookup misses, we fall
+    //    back to the state median — the "typical county in the state"
+    //    rather than its worst county (state-max would saturate +3 for
+    //    every state since each state has at least one extreme county).
+    //
+    //    Net effect vs. pre-fix: leads in high-risk states (CA / AZ /
+    //    FL / NJ / HI median 88-95) get +3; mid-risk states (OR / SC /
+    //    NC / LA / PA median 70-85) get +2-3; lower-risk states (WI /
+    //    MD / OH / TN / TX median 53-64) get +1; truly low-risk states
+    //    stay at 0. Leads where the city↔county lookup matched still
+    //    get the precise county value (county lookup runs first).
     const nriByCounty = new Map<string, number>(); // key: "AL/Autauga" lowercased → risk_score
+    const nriStateMedian = new Map<string, number>(); // key: "AL" lowercased → median risk_score
     try {
       const { data } = await supabase
         .from("risk_nri_county")
         .select("state_abbrv, county_name, risk_score")
         .not("risk_score", "is", null)
         .limit(5000);
+      // First pass: county-keyed map + per-state collection for median.
+      const stateRiskBuckets = new Map<string, number[]>();
       for (const r of data ?? []) {
         if (
           typeof r.state_abbrv === "string" &&
           typeof r.county_name === "string" &&
           typeof r.risk_score === "number"
         ) {
-          nriByCounty.set(
-            `${r.state_abbrv.toLowerCase()}/${r.county_name.toLowerCase()}`,
-            r.risk_score,
-          );
+          const st = r.state_abbrv.toLowerCase();
+          nriByCounty.set(`${st}/${r.county_name.toLowerCase()}`, r.risk_score);
+          const bucket = stateRiskBuckets.get(st) ?? [];
+          bucket.push(r.risk_score);
+          stateRiskBuckets.set(st, bucket);
         }
       }
-      logger.info("score.nri_loaded", { counties: nriByCounty.size });
+      // Second pass: compute median per state.
+      for (const [st, scores] of stateRiskBuckets) {
+        if (scores.length === 0) continue;
+        scores.sort((a, b) => a - b);
+        const mid = Math.floor(scores.length / 2);
+        const median = scores.length % 2 === 0
+          ? (scores[mid - 1] + scores[mid]) / 2
+          : scores[mid];
+        nriStateMedian.set(st, median);
+      }
+      logger.info("score.nri_loaded", {
+        counties: nriByCounty.size,
+        states_with_median: nriStateMedian.size,
+      });
     } catch (e) {
       logger.warn("score.nri_load_failed", {
         error: e instanceof Error ? e.message : String(e),
@@ -548,15 +678,29 @@ export async function GET(request: NextRequest) {
       return v != null ? v : null;
     }
 
-    /** NRI risk score for a permit's (state, city). NRI is keyed on
-     *  county_name, not city, so this is a heuristic — many cities
-     *  share their county name (e.g., "Sacramento" maps to Sacramento
-     *  County). When no match, returns null and the booster stays 0. */
+    /** NRI risk score for a permit's (state, city).
+     *
+     *  Lookup order:
+     *    1. county-level — city↔county_name match (works for "namesake"
+     *       cities like Sacramento, Austin, etc., ~7% of permits)
+     *    2. state-level — MEDIAN NRI risk_score across all counties in
+     *       the state (fallback for the other ~93%)
+     *    3. null — when state isn't on file
+     *
+     *  Median (not max) is the state-level fallback so high-risk states
+     *  don't all saturate at +3. Booster tiers fire at median > 50;
+     *  truly low-risk states (median < 50) stay at 0.
+     */
     function nriRiskScoreFor(state: string | null, city: string | null): number | null {
-      if (!state || !city) return null;
-      const k = `${state.toLowerCase()}/${city.toLowerCase()}`;
-      const v = nriByCounty.get(k);
-      return v != null ? v : null;
+      if (!state) return null;
+      const st = state.toLowerCase();
+      if (city) {
+        const k = `${st}/${city.toLowerCase()}`;
+        const countyVal = nriByCounty.get(k);
+        if (countyVal != null) return countyVal;
+      }
+      const stateMedian = nriStateMedian.get(st);
+      return stateMedian != null ? stateMedian : null;
     }
 
     /** NFIP claim count for a 5-digit ZIP. */
@@ -652,7 +796,59 @@ export async function GET(request: NextRequest) {
         recentQuakeCount: recentQuakeCountFor(permit.latitude, permit.longitude),
       });
 
-      const result = calculateScore(signals);
+      // Module 1 — classify opportunity_stage + reason_codes for this
+      // permit BEFORE scoring so the stage modifier (Module 13) can be
+      // looked up. Pure function; no I/O. The classifier reads many
+      // optional fields from the permit row + signals — anything
+      // missing falls through and the classifier still emits a
+      // best-effort stage.
+      const rawJsonForClassify = (permit.raw_json ?? {}) as Record<string, unknown>;
+      // Phase AA-3 — pull pre-computed ZIP aggregate for this permit's
+      // ZIP. Lights up the trio of pre-intent reason codes that depend
+      // on neighbourhood activity:
+      //   nearby_adu_activity_90d
+      //   nearby_remodel_activity_90d
+      //   neighborhood_upgrade_trend
+      // Falls through to null when the view is unpopulated or this
+      // permit's ZIP isn't in the map (no aggregate signal → no boost).
+      const zipAgg = permit.zip ? zipAggMap.get(permit.zip) : undefined;
+
+      const classified = classifyIntent({
+        permit_status: permit.status,
+        permit_type: permit.permit_type,
+        permit_description: permit.description,
+        permit_value: permit.estimated_value,
+        permit_age_days: signals.permitAge,
+        contractor_name:
+          (rawJsonForClassify.contractor_name as string | null) ?? null,
+        applicant_name: permit.applicant_name,
+        applicant_classification:
+          (rawJsonForClassify.applicant_classification as string | null) ?? null,
+        year_built: (rawJsonForClassify.year_built as number | null) ?? null,
+        owner_name: signals.hasOwnerName ? owner.full ?? permit.applicant_name : null,
+        owner_occupied: signals.ownerOccupied,
+        cascade_count: cascadeCount,
+        is_homeowner_intake: false, // homeowner intakes flow through /api/intake, not this cron
+        // Phase AA-3 ZIP-aggregate inputs (matview-backed)
+        zip_adu_permits_90d: zipAgg?.adu_90d ?? null,
+        zip_remodel_permits_90d: zipAgg?.remodel_180d ?? null,
+        // upgrade-trend code wants a boolean — treat ≥10% YoY growth as
+        // a positive upgrade trend, anything below as null/false.
+        zip_neighbor_upgrade_trend:
+          zipAgg?.yoy_growth != null && zipAgg.yoy_growth >= 0.1 ? true : null,
+      });
+
+      // Module 13 — look up per-trade weights and per-stage modifier.
+      // Both default to undefined when the row is missing; the
+      // calibration is then a safe no-op.
+      const calibration: ScoreCalibration = {
+        tradeWeights: tradeWeightMap.get(trade) ?? null,
+        stageModifier: classified.stage
+          ? stageModifierMap.get(classified.stage) ?? null
+          : null,
+      };
+
+      const result = calculateScore(signals, calibration);
       // Phase 0a — build structured per-signal breakdown alongside the
       // numeric totals. Written to `leads.score_signals` below; if the
       // column doesn't exist yet (pre-migration 00031) the upsert path
@@ -672,6 +868,8 @@ export async function GET(request: NextRequest) {
         conversion: result.conversion,
         factors: result.factors,
         score_signals: scoreSignals,
+        opportunity_stage: classified.stage,
+        reason_codes: classified.reason_codes,
       };
     });
 
@@ -897,6 +1095,13 @@ export async function GET(request: NextRequest) {
           // 00045 hasn't applied yet.
           cross_trade_suggestions:
             crossTradeSuggestions.length > 0 ? crossTradeSuggestions : null,
+          // Module 1 — opportunity_stage + reason_codes (migration 00087).
+          // Same retry-on-missing-column resilience pattern as
+          // score_signals + cross_trade_suggestions: when the column
+          // doesn't exist (pre-migration deploy), the catch path
+          // below strips them and re-tries the insert.
+          opportunity_stage: sl.opportunity_stage,
+          reason_codes: sl.reason_codes,
           notes: sl.factors.length > 0
             ? `Scoring factors: ${sl.factors.join(" | ")}`
             : null,
@@ -956,6 +1161,30 @@ export async function GET(request: NextRequest) {
         );
         const stripped = leadsToInsert.map((row) => {
           const { cross_trade_suggestions: _omit, ...rest } =
+            row as Record<string, unknown>;
+          return rest;
+        });
+        insertResult = await supabase
+          .from("leads")
+          .upsert(stripped, {
+            onConflict: "permit_id,contractor_id",
+            ignoreDuplicates: false,
+          })
+          .select("id, zip, permit_id, contractor_id, score, urgency");
+      }
+
+      // Module 1 resilience \u2014 `opportunity_stage` + `reason_codes` are
+      // only present after migration 00087 lands. Strip both and retry
+      // when either column is missing.
+      if (
+        insertResult.error &&
+        /(opportunity_stage|reason_codes)/i.test(insertResult.error.message)
+      ) {
+        logger.warn(
+          "opportunity_stage/reason_codes columns missing \u2014 stripping + retrying (migration 00087 pending)",
+        );
+        const stripped = leadsToInsert.map((row) => {
+          const { opportunity_stage: _o, reason_codes: _r, ...rest } =
             row as Record<string, unknown>;
           return rest;
         });
@@ -1035,24 +1264,101 @@ export async function GET(request: NextRequest) {
             if (assignment.contractor.phone && process.env.TWILIO_ACCOUNT_SID) {
               try {
                 const { sendLeadSMS } = await import("@/lib/twilio/sms");
-                await sendLeadSMS(assignment.contractor.phone, {
-                  permitType: assignment.scored.permit.permit_type ?? "Hot lead",
-                  address: `ZIP ${hl.zip ?? ""}`,
-                  city: assignment.scored.permit.city ?? "",
-                  state: assignment.scored.permit.state ?? "",
-                  description:
-                    assignment.scored.factors.slice(0, 3).join(". ") ??
-                    "New high-score permit lead in your territory",
-                  estimatedValue: assignment.scored.permit.estimated_value ?? null,
-                  score: hl.score,
-                  urgency: hl.urgency as "hot" | "warm" | "cool" | "cold",
-                });
+                await sendLeadSMS(
+                  assignment.contractor.phone,
+                  {
+                    permitType: assignment.scored.permit.permit_type ?? "Hot lead",
+                    address: `ZIP ${hl.zip ?? ""}`,
+                    city: assignment.scored.permit.city ?? "",
+                    state: assignment.scored.permit.state ?? "",
+                    description:
+                      assignment.scored.factors.slice(0, 3).join(". ") ??
+                      "New high-score permit lead in your territory",
+                    estimatedValue: assignment.scored.permit.estimated_value ?? null,
+                    score: hl.score,
+                    urgency: hl.urgency as "hot" | "warm" | "cool" | "cold",
+                  },
+                  // Module 7 wiring — permit-derived hot leads have no
+                  // intake; consent gate is naturally bypassed (returns
+                  // null homeowner_intake_id). Quiet-hours gate still
+                  // applies via the lead's ZIP.
+                  { homeownerIntakeId: null, zip: hl.zip ?? null },
+                );
               } catch (e) {
                 logger.error("SMS notification error", { error: String(e) });
               }
             }
           })
         ).catch((err) => logger.error("Hot lead SMS batch error", { error: String(err) }));
+      }
+
+      /* Module 14 — alert_rules evaluator (Phase AA).
+       *
+       * Fan-out: for each contractor that received an inserted lead,
+       * load their enabled alert_rules once + evaluate against the
+       * subset of leads that landed in their bucket. Hits dispatch
+       * via email (Resend) or SMS (sendLeadSMS, hygiene-gated). The
+       * evaluator is best-effort; a thrown error never blocks the
+       * cron's primary path. Cross-run dedupe via last_fired_at
+       * (24h window) lives inside dispatchAlertHits. */
+      try {
+        const leadsByContractor = new Map<string, typeof insertedLeads>();
+        for (const lead of insertedLeads ?? []) {
+          const arr = leadsByContractor.get(lead.contractor_id) ?? [];
+          arr.push(lead);
+          leadsByContractor.set(lead.contractor_id, arr);
+        }
+
+        if (leadsByContractor.size > 0) {
+          const { evaluateRules } = await import("@/lib/alerts/evaluate");
+          const { dispatchAlertHits } = await import("@/lib/alerts/dispatch");
+          const allHits: Awaited<ReturnType<typeof evaluateRules>> = [];
+
+          for (const [contractorId, contractorLeads] of leadsByContractor.entries()) {
+            const { data: rules } = await supabase
+              .from("alert_rules")
+              .select("id, contractor_id, kind, criteria, enabled, channel, last_fired_at, fire_count")
+              .eq("contractor_id", contractorId)
+              .eq("enabled", true);
+
+            if (!rules || rules.length === 0) continue;
+
+            // Project contractor's leads into the AlertEvaluationLead shape.
+            const evalLeads = (contractorLeads ?? []).map((l) => {
+              const key = `${l.permit_id}:${l.contractor_id}`;
+              const assignment = assignmentMap.get(key);
+              return {
+                id: l.id,
+                contractor_id: l.contractor_id,
+                score: l.score,
+                trade: assignment?.scored.permit.permit_type ?? null,
+                zip: l.zip,
+                address: assignment?.scored.permit.address ?? null,
+                permit_number: null,
+                permit_description: assignment?.scored.permit.description ?? null,
+                opportunity_stage: assignment?.scored.opportunity_stage ?? null,
+                is_homeowner_intake: false,
+                previous_stage: null,
+              };
+            });
+
+            const hits = evaluateRules(rules as Parameters<typeof evaluateRules>[0], evalLeads);
+            allHits.push(...hits);
+          }
+
+          if (allHits.length > 0) {
+            const summary = await dispatchAlertHits(allHits);
+            logger.info("alerts.dispatched", {
+              hits: allHits.length,
+              ...summary,
+            });
+          }
+        }
+      } catch (alertErr) {
+        // Best-effort — alerts never block the cron.
+        logger.warn("alerts.evaluator_failed", {
+          error: alertErr instanceof Error ? alertErr.message : String(alertErr),
+        });
       }
     }
 

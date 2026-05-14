@@ -86,6 +86,27 @@ function asDate(v: unknown): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Dedupe a batch of CanonicalRow by (state_code,license_number).
+ * Keeps the LAST occurrence so the most recent endorsement/category
+ * row wins (its `raw_json` is then upserted into the row).
+ *
+ * 2026-05-11 fix: needed because OR Socrata (g77e-6bhs) and AK CSV
+ * return one row per endorsement / per program. Within a 1000-row
+ * batch, ~24% of rows share a license_number with another row.
+ * Postgres's `ON CONFLICT DO UPDATE` errors with "cannot affect row
+ * a second time" when the same key appears twice in one statement,
+ * which silently caused every OR batch to produce 0 inserts despite
+ * pulling 55,715 upstream rows.
+ */
+function dedupeRowsByPk(rows: CanonicalRow[]): CanonicalRow[] {
+  const byKey = new Map<string, CanonicalRow>();
+  for (const r of rows) {
+    byKey.set(`${r.state_code}|${r.license_number}`, r);
+  }
+  return [...byKey.values()];
+}
+
 /** Apply a `field_map` (canonical → upstream) to one upstream record. */
 function mapRecord(
   source: SourceRow,
@@ -341,9 +362,14 @@ async function ingestState(
     const BATCH = 1000;
     for (let i = 0; i < upstream.length; i += BATCH) {
       const slice = upstream.slice(i, i + BATCH);
-      const rows = slice
+      const mapped = slice
         .map((u) => mapRecord(source, u))
         .filter((r): r is CanonicalRow => r !== null);
+      // 2026-05-11 fix: dedupe within batch by (state_code,license_number).
+      // AK CSV (one row per program per license) hits "cannot affect row a
+      // second time" on the upsert without this. See dedupeRowsByPk() for
+      // background.
+      const rows = dedupeRowsByPk(mapped);
       if (rows.length > 0) {
         const { error, count } = await supabase
           .from("state_license_rosters")
@@ -387,9 +413,15 @@ async function ingestState(
     }
     if (upstream.length === 0) break;
 
-    const rows = upstream
+    const mapped = upstream
       .map((u) => mapRecord(source, u))
       .filter((r): r is CanonicalRow => r !== null);
+    // 2026-05-11 fix: dedupe within batch by (state_code,license_number).
+    // OR Socrata (g77e-6bhs) returns 241 duplicate license_numbers per 1000
+    // upstream rows (one row per endorsement). Without dedupe, Postgres errors
+    // "cannot affect row a second time" on the upsert and the whole batch
+    // silently produces 0 inserts. See dedupeRowsByPk() for background.
+    const rows = dedupeRowsByPk(mapped);
 
     if (rows.length > 0) {
       const { error, count } = await supabase

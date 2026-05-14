@@ -65,6 +65,9 @@ export function ChatIntakeModal({
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [contactEmail, setContactEmail] = useState("");
+  // Module 5 (2026-05-09) — TCPA-style consent. Submit is gated on this.
+  // Persisted as `homeowner_intakes.consent_given_at` + `consent_text_version`.
+  const [consentGiven, setConsentGiven] = useState(false);
   const [contactErrors, setContactErrors] = useState<Record<string, string>>({});
   // `null` means "intake wasn't scored by the server" — render no score
   // in the UI rather than faking one (prior random-80s fallback removed).
@@ -139,6 +142,7 @@ export function ChatIntakeModal({
       setContactName("");
       setContactPhone("");
       setContactEmail("");
+      setConsentGiven(false);
       setContactErrors({});
       setScore(0);
       setIsComputing(false);
@@ -389,6 +393,11 @@ export function ChatIntakeModal({
             contact_phone: contactPhone,
             contact_email: contactEmail,
             henri_score: null, // Let server compute
+            // Module 5 — when this is true the API stamps consent_given_at +
+            // consent_text_version on the intake row. Without it, the
+            // outreach hygiene gate refuses every send for this intake.
+            consent_given: consentGiven,
+            consent_text_version: "v1.2026-05-09",
           }),
         });
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -435,7 +444,7 @@ export function ChatIntakeModal({
         setIsComputing(false);
       }
     })();
-  }, [validateContact, contactName, contactPhone, contactEmail, initialZip, initialTrade, address, selectedTrade, timeline, budget, description, refinementAnswers]);
+  }, [validateContact, contactName, contactPhone, contactEmail, initialZip, initialTrade, address, selectedTrade, timeline, budget, description, refinementAnswers, consentGiven]);
 
   /* ---- ESC to close ---- */
   useEffect(() => {
@@ -563,6 +572,8 @@ export function ChatIntakeModal({
               onContactNameChange={setContactName}
               onContactPhoneChange={setContactPhone}
               onContactEmailChange={setContactEmail}
+              consentGiven={consentGiven}
+              onConsentChange={setConsentGiven}
               onContactSubmit={handleContactSubmit}
               isComputing={isComputing}
               score={score}

@@ -1,0 +1,28 @@
+# Miami-Dade County, FL — building permits (last 2 years).
+# Verified-live ArcGIS Hub feed, ~100k rows / 2-year window.
+# Service includes Permit_Type_Description, structure use, parcel folio.
+
+loader: arcgis
+name: MIAMI-DADE-FL
+city: Miami-Dade County
+state: FL
+status: unverified
+
+url: https://services.arcgis.com/8Pc9XBTAsYuxx9Ny/arcgis/rest/services/miamidade_permit_data/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: ISSUEDATE
+
+fields:
+  permit_no:        PERMITNUMBER
+  issued_date:      ISSUEDATE
+  applied_date:     APPLIEDDATE
+  address:          STREETADDRESS
+  zip:              ZIPCODE
+  description:      PERMITDESCRIPTION
+  estimated_value:  CONSTRUCTIONVALUE
+  contractor:       CONTRACTORNAME
+  applicant:        APPLICANTNAME
+  permit_type_desc: PERMITTYPEDESCRIPTION
+  work_class:       WORKCLASSDESCRIPTION
+  status:           CURRENTSTATUS

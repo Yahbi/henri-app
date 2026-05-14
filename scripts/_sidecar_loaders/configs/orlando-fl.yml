@@ -1,0 +1,24 @@
+# Orlando, FL — Permit Applications, data.cityoforlando.net
+# Verified-live in Socrata catalog discovery (2026-05).
+
+loader: socrata
+name: ORLANDO-FL
+city: Orlando
+state: FL
+url: https://data.cityoforlando.net/resource/ryhf-m453.json
+limit: 100
+order_field: applieddate
+
+fields:
+  permit_no:        applicationnumber
+  applied_date:     applieddate
+  issued_date:      issueddate
+  address:          address
+  zip:              zipcode
+  description:      worksummary
+  estimated_value:  declaredvalue
+  applicant:        applicantname
+  contractor:       contractorname
+  permit_type_desc: applicationtype
+  work_class:       worktype
+  status:           status

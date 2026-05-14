@@ -1,12 +1,17 @@
 "use client";
 
 import { cn } from "@/lib/utils/cn";
+import { Bookmark } from "lucide-react";
 // 2026-04-30: ExclusivityBadge + WatchersBadge are no longer rendered.
 // The lock + watcher infrastructure exists in DB and API but no UI
 // path acquires a lock, so the badge surfaces were silent overclaims.
 // See ~/.claude/plans/whats-the-14-days-purring-papert.md.
 // The components themselves stay on disk (zero cost, easy to revive).
 import type { ExclusivityLeadSummary } from "@/lib/exclusivity/locks";
+// Module 22 (2026-05-09) — single-source palette for stage tinting in
+// the LeadCard left-border + inline chip dot. Same colors used by the
+// drawer chip, the map pin paint, and the popup chip.
+import { paletteFor } from "@/lib/intent/stage-colors";
 
 export interface LeadData {
   id: string;
@@ -96,6 +101,17 @@ export interface LeadData {
    * when the migration hasn't applied yet. */
   crossTradeSuggestions?: unknown;
 
+  /* Intent classification (migration 00087 / Module 1). Optional —
+   * pre-backfill rows render without the chip. */
+  opportunityStage?: string | null;
+  reasonCodes?: string[] | null;
+  tradeTags?: string[] | null;
+
+  /* Phase AA-3 provenance. When source = 'parcel_synthesis' the card
+   * surfaces a small "Pre-intent signal" indicator so the contractor
+   * knows this is a parcel-derived lead, not a permit-backed one. */
+  source?: string | null;
+
   /* Phase 1.3 DIY-vs-pro permit-applicant fields. Pulled directly from
    * `permits.applicant_name` + `permits.contractor_name` (migration
    * 00004 columns). Used by the ApplicantBadge component in the drawer
@@ -173,9 +189,14 @@ interface LeadCardProps {
    *  tell which row is which. Off by default — most leads have unique
    *  addresses in a typical territory. */
   disambiguate?: boolean;
+  /** Phase AA — true when this lead's id is in the contractor's
+   *  `saved_leads` table. Renders a small bookmark indicator in the
+   *  card header so saved leads are recognisable in the unfiltered
+   *  list, not only when the "Saved only" pill is active. */
+  isSaved?: boolean;
 }
 
-export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, disambiguate }: LeadCardProps) {
+export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, disambiguate, isSaved }: LeadCardProps) {
   const score = lead.score;
   const badge = tradeBadgeStyle(lead.trade);
   const dot = urgencyDot(lead.permitAge);
@@ -189,19 +210,44 @@ export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, dis
       ? lead.permitUuid.slice(-4).toUpperCase()
       : null;
 
+  /* Module 22 — stage palette for the left-border tint + inline dot. When
+   * a lead has been classified, the card carries a 3px coloured left
+   * border that matches the chip + map pin colour for that stage so the
+   * LeadsPanel becomes a visual histogram of intent at a glance. Pre-
+   * backfill rows fall through to the original transparent/active styles. */
+  const stagePalette = paletteFor(lead.opportunityStage);
+  const inlineBorderStyle = active
+    ? undefined
+    : stagePalette
+      ? { borderLeftColor: stagePalette.color }
+      : undefined;
+
   return (
     <button
       onClick={onClick}
+      style={inlineBorderStyle}
       className={cn(
         "w-full text-left px-4 py-3 border-l-3 transition-colors",
         active
           ? "border-l-primary bg-primary-04"
-          : "border-l-transparent hover:bg-bg-subtle"
+          : stagePalette
+            ? "hover:bg-bg-subtle"
+            : "border-l-transparent hover:bg-bg-subtle"
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-foreground truncate">
+            {/* Phase AA — saved indicator. Bookmark icon appears
+                inline ahead of the address so the contractor can
+                spot saved leads in the unfiltered list, not only
+                when the "Saved only" pill is on. */}
+            {isSaved && (
+              <Bookmark
+                className="inline-block h-3 w-3 text-primary mr-1 -mt-0.5 fill-current"
+                aria-label="Saved"
+              />
+            )}
             {lead.addr}
             {disambiguator && (
               <span
@@ -213,9 +259,45 @@ export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, dis
             )}
           </p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
+            {/* Phase AA-3 — pre-intent provenance badge. Only fires for
+                leads synthesised from parcel data (no permit backing).
+                Visually distinct from the stage chip so contractors
+                instantly know "this is a soft signal, not a filed
+                permit." Honest labeling — no fake "permit" framing on
+                a parcel-derived lead. */}
+            {lead.source === "parcel_synthesis" && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full leading-tight bg-bg-subtle text-muted-foreground border border-border"
+                title="Pre-intent signal from parcel data — no permit on file. The classifier surfaced this address based on property age, ownership, or recent transfer signals."
+              >
+                Pre-intent signal
+              </span>
+            )}
             {lead.cascade && (
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary-08 px-1.5 py-0.5 rounded">
                 <span className="text-xs">&#9670;</span> Cascade
+              </span>
+            )}
+            {/* Module 22 — stage indicator chip. Same palette as the drawer
+                IntentChip + map pin so the visual signal is consistent
+                everywhere. Renders only when the classifier has stamped
+                the row (unstamped rows fall back to the existing trade /
+                cascade chips). */}
+            {stagePalette && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full leading-tight"
+                style={{
+                  backgroundColor: `${stagePalette.color}1A`,
+                  color: stagePalette.color,
+                  border: `1px solid ${stagePalette.color}66`,
+                }}
+                title={stagePalette.label}
+              >
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-full"
+                  style={{ backgroundColor: stagePalette.color }}
+                />
+                {stagePalette.label}
               </span>
             )}
             {lead.trade && (

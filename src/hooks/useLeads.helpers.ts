@@ -38,7 +38,9 @@ export const COLUMNS_NARROW = `
   owner_name, owner_first, owner_last,
   year_built, home_sqft, lot_sqft,
   assessed_value, property_value, owner_occupied, owner_since,
-  pipeline_value, permit_history`;
+  pipeline_value, permit_history,
+  opportunity_stage, reason_codes, trade_tags,
+  source, parcel_sidecar_uid`;
 
 export const COLUMNS_EXTENDED = `,
   contact_source, contact_confidence,
