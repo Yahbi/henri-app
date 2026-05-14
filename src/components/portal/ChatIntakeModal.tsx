@@ -444,7 +444,7 @@ export function ChatIntakeModal({
         setIsComputing(false);
       }
     })();
-  }, [validateContact, contactName, contactPhone, contactEmail, initialZip, initialTrade, address, selectedTrade, timeline, budget, description, refinementAnswers]);
+  }, [validateContact, contactName, contactPhone, contactEmail, initialZip, initialTrade, address, selectedTrade, timeline, budget, description, refinementAnswers, consentGiven]);
 
   /* ---- ESC to close ---- */
   useEffect(() => {
