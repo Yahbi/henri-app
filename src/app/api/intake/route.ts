@@ -138,7 +138,10 @@ export async function POST(req: NextRequest) {
         contact_email: contact_email ?? null,
         henri_score: henri_score ?? null,
         matched_contractor_id: matchedContractorId,
-        status: matches.length > 0 ? "matched" : "pending",
+        // No contractor within range (even after the proximity widen) →
+        // 'awaiting_coverage' so ops can see who's waiting on us to expand;
+        // the founder also gets the manual-review notification below.
+        status: matches.length > 0 ? "matched" : "awaiting_coverage",
         match_type: matchType,
         // Module 5 — only stamp consent timestamps when the homeowner
         // affirmatively checked the box. NULL means "no consent yet"

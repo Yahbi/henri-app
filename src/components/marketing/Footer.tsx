@@ -23,7 +23,13 @@ export function Footer() {
   //   "Henri Inc, 123 Main St, Suite 400, City, ST 90210"
   // Stays hidden in dev until set so the page doesn't ship a fake
   // address. CAN-SPAM compliance is on the deploying entity.
-  const businessAddress = process.env.NEXT_PUBLIC_BUSINESS_ADDRESS?.trim();
+  // Defensive correction for the known "Los ANgeles" mis-capitalisation
+  // in the env var (the real fix is in Vercel, but this guarantees the
+  // site never renders it wrong). Targeted, not a general title-caser.
+  const businessAddress = process.env.NEXT_PUBLIC_BUSINESS_ADDRESS?.trim().replace(
+    /Los ANgeles/g,
+    "Los Angeles",
+  );
 
   return (
     <footer className="border-t border-border bg-card">
