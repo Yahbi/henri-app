@@ -21,15 +21,17 @@ import { requireContractor } from "@/lib/auth/requireContractor";
  */
 export async function POST(req: NextRequest) {
   try {
-    const raw = await req.json();
-    const parsed = parseBody(FinancingRequestBodySchema, raw);
-    if (parsed.response) return parsed.response;
-    const { lead_id: leadId, partner, partner_url: partnerUrl } = parsed.data;
-
+    // Auth before parse (2026-06-10): anonymous probes must not receive
+    // schema-shaped validation errors.
     const supabase = await createClient();
     const gate = await requireContractor(supabase);
     if (gate.response) return gate.response;
     const user = gate.user;
+
+    const raw = await req.json().catch(() => null);
+    const parsed = parseBody(FinancingRequestBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { lead_id: leadId, partner, partner_url: partnerUrl } = parsed.data;
 
     // Verify the lead belongs to this contractor before logging anything.
     const { data: lead } = await supabase

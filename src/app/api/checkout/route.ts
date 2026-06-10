@@ -16,7 +16,14 @@ const PLAN_PRICES: Record<string, string> = {
 /* POST /api/checkout — create a Stripe checkout session */
 export async function POST(req: NextRequest) {
   try {
-    const raw = await req.json();
+    // Auth before parse (2026-06-10): anonymous probes must not receive
+    // schema-shaped validation errors.
+    const supabase = await createClient();
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
+
+    const raw = await req.json().catch(() => null);
     const body = parseBody(CheckoutBodySchema, raw);
     if (body.response) return body.response;
     const { plan } = body.data;
@@ -24,11 +31,6 @@ export async function POST(req: NextRequest) {
     if (!PLAN_PRICES[plan]) {
       return NextResponse.json({ error: "Plan unavailable" }, { status: 400 });
     }
-
-    const supabase = await createClient();
-    const gate = await requireContractor(supabase);
-    if (gate.response) return gate.response;
-    const user = gate.user;
 
     /* Get or create Stripe customer ID */
     const { data: profile } = await supabase
