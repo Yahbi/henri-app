@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
 import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
+import { runCronWatchdog } from "@/lib/admin/cron-watchdog";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -36,6 +37,12 @@ async function handler(request: NextRequest): Promise<NextResponse> {
   const startedAt = Date.now();
   const supabase = createAdminClient();
 
+  // Piggyback the external-scheduler watchdog on this alive vercel.json
+  // cron. If the external cron fleet has gone silent, this surfaces it via
+  // Sentry + operator email — the only thing that would have caught the
+  // 2026-05 14-day silent outage. Independent of the refresh outcome.
+  const watchdog = await runCronWatchdog();
+
   try {
     // Try the named function first.
     const { error: rpcErr } = await supabase.rpc("refresh_zip_pre_intent_aggregates");
@@ -58,7 +65,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         error: rpcErr.message,
       });
       return NextResponse.json(
-        { error: "Refresh failed", detail: rpcErr.message },
+        { error: "Refresh failed", detail: rpcErr.message, watchdog },
         { status: 500 },
       );
     }
@@ -80,7 +87,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       summary: { row_count: count },
     });
 
-    return NextResponse.json({ success: true, row_count: count });
+    return NextResponse.json({ success: true, row_count: count, watchdog });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error("refresh-zip-aggregates.fatal", { error: msg });
