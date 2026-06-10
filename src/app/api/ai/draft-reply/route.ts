@@ -35,21 +35,23 @@ function sanitizeForDelimiter(s: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const raw = await req.json();
+    // Auth FIRST (2026-06-10 backtest finding): the Zod parse previously
+    // ran before the gate, so anonymous probes received schema-shaped 400s
+    // and could enumerate the expected payload. Contractor-facing
+    // reputation UI — homeowner sessions have no business drafting replies
+    // on Henri's dime.
+    const supabase = await createClient();
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const { user } = gate;
+
+    const raw = await req.json().catch(() => null);
     const parsed = parseBody(DraftReplyBodySchema, raw);
     if (parsed.response) return parsed.response;
     const { rating, text, platform: platformIn, reviewer_name: reviewerIn } = parsed.data;
     const reviewText = sanitizeForDelimiter(text);
     const platform = sanitizeForDelimiter(platformIn.trim());
     const reviewerName = sanitizeForDelimiter(reviewerIn.trim());
-
-    // Scope to authenticated contractor so the business context comes from
-    // their profile (trade, company name). Contractor-facing reputation UI —
-    // homeowner sessions have no business drafting replies on Henri's dime.
-    const supabase = await createClient();
-    const gate = await requireContractor(supabase);
-    if (gate.response) return gate.response;
-    const { user } = gate;
     const { data: profile } = await supabase
       .from("profiles")
       .select("full_name, company_name, trade")

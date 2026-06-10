@@ -41,6 +41,13 @@ const PLAN_RANK: Record<string, number> = {
 
 export async function POST(req: NextRequest) {
   try {
+    // Auth before parse (2026-06-10): anonymous probes must not receive
+    // schema-shaped validation errors.
+    const supabase = await createClient();
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
+
     const raw = await req.json().catch(() => ({}));
     const parsed = parseBody(ChangePlanBodySchema, raw);
     if (parsed.response) return parsed.response;
@@ -48,11 +55,6 @@ export async function POST(req: NextRequest) {
     if (!PLAN_PRICES[plan]) {
       return NextResponse.json({ error: "Plan price ID not configured" }, { status: 400 });
     }
-
-    const supabase = await createClient();
-    const gate = await requireContractor(supabase);
-    if (gate.response) return gate.response;
-    const user = gate.user;
 
     const { data: profile } = await supabase
       .from("profiles")

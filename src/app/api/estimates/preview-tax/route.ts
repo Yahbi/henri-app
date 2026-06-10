@@ -36,6 +36,12 @@ const PreviewTaxBody = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    // Auth before parse (2026-06-10): anonymous probes must not receive
+    // schema-shaped validation errors.
+    const supabase = await createClient();
+    const auth = await requireContractor(supabase);
+    if (auth.response) return auth.response;
+
     let parsed;
     try {
       parsed = PreviewTaxBody.parse(await req.json());
@@ -46,10 +52,6 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-
-    const supabase = await createClient();
-    const auth = await requireContractor(supabase);
-    if (auth.response) return auth.response;
 
     const result = await calculateTax(parsed);
     return NextResponse.json(result);

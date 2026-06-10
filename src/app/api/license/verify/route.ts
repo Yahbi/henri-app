@@ -8,15 +8,17 @@ import { requireContractor } from "@/lib/auth/requireContractor";
 /* POST /api/license/verify — verify a contractor license */
 export async function POST(req: NextRequest) {
   try {
-    const raw = await req.json();
-    const parsed = parseBody(LicenseVerifyBodySchema, raw);
-    if (parsed.response) return parsed.response;
-    const { license_number, state, license_type, holder_name } = parsed.data;
-
+    // Auth before parse (2026-06-10): anonymous probes must not receive
+    // schema-shaped validation errors.
     const supabase = await createClient();
     const gate = await requireContractor(supabase);
     if (gate.response) return gate.response;
     const user = gate.user;
+
+    const raw = await req.json().catch(() => null);
+    const parsed = parseBody(LicenseVerifyBodySchema, raw);
+    if (parsed.response) return parsed.response;
+    const { license_number, state, license_type, holder_name } = parsed.data;
 
     // Attempt verification
     const result = await verifyLicense(license_number, state, license_type);

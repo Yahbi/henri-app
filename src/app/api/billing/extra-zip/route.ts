@@ -19,6 +19,13 @@ import { requireContractor } from "@/lib/auth/requireContractor";
  */
 export async function POST(req: NextRequest) {
   try {
+    // Auth before parse (2026-06-10): anonymous probes must not receive
+    // schema-shaped validation errors.
+    const supabase = await createClient();
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
+
     const raw = await req.json().catch(() => ({}));
     const parsed = parseBody(ExtraZipBodySchema, raw);
     if (parsed.response) return parsed.response;
@@ -32,11 +39,6 @@ export async function POST(req: NextRequest) {
         { status: 500 },
       );
     }
-
-    const supabase = await createClient();
-    const gate = await requireContractor(supabase);
-    if (gate.response) return gate.response;
-    const user = gate.user;
 
     const { data: profile } = await supabase
       .from("profiles")
