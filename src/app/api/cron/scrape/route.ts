@@ -42,10 +42,28 @@ async function handler(request: NextRequest): Promise<NextResponse> {
   const dbSources = await getActiveSources(50);
   const useDbSources = dbSources.length > 0;
 
+  // Time budget (2026-06-10): high-volume sources (20k rows each) can push
+  // a 50-source run past Vercel's 300s wall — the function then gets
+  // hard-killed mid-batch and the cron reports HTTP 000 even though the
+  // completed sources persisted. Stop launching NEW batches at 230s so the
+  // run always returns a clean summary; unprocessed sources keep their
+  // old last_scraped_at and lead the next hourly rotation.
+  const startMs = Date.now();
+  const BUDGET_MS = 230_000;
+  let budgetExhausted = false;
+
   if (useDbSources) {
     // Process DB sources in batches of 5 concurrent
     const BATCH = 5;
     for (let i = 0; i < dbSources.length; i += BATCH) {
+      if (Date.now() - startMs > BUDGET_MS) {
+        budgetExhausted = true;
+        logger.warn("scrape.time_budget_exhausted", {
+          processed: results.length,
+          remaining: dbSources.length - i,
+        });
+        break;
+      }
       const batch = dbSources.slice(i, i + BATCH);
 
       await Promise.allSettled(
@@ -142,6 +160,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       totalUpdated,
       totalErrors,
       sourcesProcessed: results.length,
+      budgetExhausted,
     },
     results,
     timestamp: new Date().toISOString(),

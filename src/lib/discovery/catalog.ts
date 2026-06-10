@@ -135,7 +135,6 @@ interface ArcgisLayerMeta {
  */
 async function resolveArcgisLayer(
   serviceUrl: string,
-  title: string,
 ): Promise<{ endpoint: string; columns: string[] } | null> {
   const base = serviceUrl.replace(/\/+$/, "");
   // Only Feature/Map servers expose /<layer>/query.
@@ -175,7 +174,7 @@ export async function fetchArcgisPage(
     if (!serviceUrl) continue;
     if (!/Feature Service|Map Service/i.test(type)) continue;
 
-    const resolved = await resolveArcgisLayer(serviceUrl, title);
+    const resolved = await resolveArcgisLayer(serviceUrl);
     if (!resolved) continue;
 
     const domain = (() => {
