@@ -151,6 +151,30 @@ export function applyLeadFilters<Q extends LeadsQueryBuilder>(
   return q;
 }
 
+/** How many leads the `geocoded_only` filter is hiding from the caller.
+ *
+ *  The filter above is applied SERVER-side (PostgREST `.not("latitude",
+ *  "is", null)`), so the dropped rows never reach the client and can't be
+ *  counted from the fetched result. The honest count is derived from the
+ *  contractor's total vs. geocoded lead counts, which `/api/leads/count`
+ *  (via `useLeadCount`) already returns — no extra query needed.
+ *
+ *  Mirrors the capacity filter's "never silently drop rows" contract
+ *  (src/lib/capacity/types.ts): when the geocode filter is active and
+ *  hiding rows, the panel renders "N leads hidden (no map location yet)".
+ *
+ *  Returns 0 when the filter is inactive or counts haven't loaded yet
+ *  (both counts 0 during the count-fetch race) — callers can render
+ *  nothing in that case. Pure function, unit-testable. */
+export function countHiddenByGeocodeFilter(
+  geocodedOnlyActive: boolean,
+  totalLeads: number,
+  geocodedLeads: number,
+): number {
+  if (!geocodedOnlyActive) return 0;
+  return Math.max(0, totalLeads - geocodedLeads);
+}
+
 /** Apply ORDER BY clauses. Always pairs the user-chosen sort with `id ASC`
  *  as a stable tiebreaker — without it, two `.range()` calls paginating
  *  over rows that share a `score` (very common — thousands of leads at

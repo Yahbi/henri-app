@@ -73,6 +73,19 @@ export async function POST(request: NextRequest) {
       logger.warn("twilio-missed-call: invalid signature");
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
+  } else {
+    logger.warn("Twilio signature not validated — TWILIO_AUTH_TOKEN unset");
+    // In production, never process unsigned webhook payloads — anyone
+    // could forge missed-call events and trigger auto-reply SMS sends.
+    if (
+      process.env.NODE_ENV === "production" ||
+      process.env.VERCEL_ENV === "production"
+    ) {
+      return NextResponse.json(
+        { error: "Webhook signature validation unavailable" },
+        { status: 503 },
+      );
+    }
   }
 
   try {

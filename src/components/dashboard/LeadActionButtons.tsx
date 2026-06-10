@@ -2,6 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { Bookmark, BookmarkCheck, EyeOff, Loader2 } from "lucide-react";
+// Project logger — client-safe (console-backed; same import pattern as
+// useLeads.ts). Structured output in production, pretty in development.
+import { logger } from "@/lib/logger";
 
 /**
  * Save / Hide action buttons rendered in the lead drawer header next
@@ -10,7 +13,7 @@ import { Bookmark, BookmarkCheck, EyeOff, Loader2 } from "lucide-react";
  * Module 11 of the 18-module enhancement plan (2026-05-09 plan §9.13.D).
  *
  * Both actions optimistically toggle local state, then call the API
- * routes. On error the toggle reverts and a console.warn fires (no
+ * routes. On error the toggle reverts and a logger.warn fires (no
  * user-facing toast since these are tertiary actions).
  */
 
@@ -50,7 +53,10 @@ export function LeadActionButtons({
         });
         if (!res.ok) throw new Error(`save failed: ${res.status}`);
       } catch (e) {
-        console.warn("[LeadActionButtons] save toggle failed", e);
+        logger.warn("LeadActionButtons: save toggle failed", {
+          leadId,
+          error: e instanceof Error ? e.message : String(e),
+        });
         setSaved(!next);  // revert
       }
     });
@@ -69,7 +75,10 @@ export function LeadActionButtons({
         if (!res.ok) throw new Error(`hide failed: ${res.status}`);
         if (next && onHidden) onHidden();
       } catch (e) {
-        console.warn("[LeadActionButtons] hide toggle failed", e);
+        logger.warn("LeadActionButtons: hide toggle failed", {
+          leadId,
+          error: e instanceof Error ? e.message : String(e),
+        });
         setHidden(!next);
       }
     });

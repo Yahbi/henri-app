@@ -4,8 +4,13 @@
  * Loads active scraping configurations from the `permit_sources` table
  * instead of using the hardcoded PERMIT_SOURCES array.
  *
- * Sources are returned ordered by last_scraped_at ASC NULLS FIRST so
- * never-scraped sources are always prioritised.
+ * Two-lane rotation (2026-06-09 starvation fix): producers (last_count > 0)
+ * get 60% of each run's slots so proven city feeds stay fresh; explorers
+ * (never-produced) fill the rest so new endpoints still get probed. The old
+ * pure `last_scraped_at ASC NULLS FIRST` order let the ~50 never-scraped
+ * stubs that activate-arcgis-sources enables daily monopolize every run —
+ * verified feeds (e.g. Tampa, the only territory-holding market) starved
+ * for 7+ weeks behind 12k unverified hub stubs.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -20,20 +25,56 @@ export interface DBPermitSource extends PermitSource {
   layer_index: number;
 }
 
+const SOURCE_COLUMNS =
+  "source_key, city, jurisdiction, state, endpoint, source_type, auth, update_freq, layer_index, id_field, type_field, status_field, desc_field, address_field, date_field, value_field, lat_field, lng_field, enabled";
+
 export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
   const supabase = createAdminClient();
 
-  const { data, error } = await supabase
-    .from("permit_sources")
-    .select("source_key, city, jurisdiction, state, endpoint, source_type, auth, update_freq, layer_index, id_field, type_field, status_field, desc_field, address_field, date_field, value_field, lat_field, lng_field, enabled")
-    .eq("enabled", true)
-    .order("last_scraped_at", { ascending: true, nullsFirst: true })
-    .limit(limit);
+  const producerSlots = Math.ceil(limit * 0.6);
 
-  if (error) {
-    logger.error("Failed to load permit sources from DB", { error: error.message });
+  const [producersRes, explorersRes] = await Promise.all([
+    // Lane A: proven producers, oldest-scraped first.
+    supabase
+      .from("permit_sources")
+      .select(SOURCE_COLUMNS)
+      .eq("enabled", true)
+      .gt("last_count", 0)
+      .order("last_scraped_at", { ascending: true, nullsFirst: true })
+      .limit(producerSlots),
+    // Lane B: never-produced explorers (NULL or 0 last_count).
+    supabase
+      .from("permit_sources")
+      .select(SOURCE_COLUMNS)
+      .eq("enabled", true)
+      .or("last_count.is.null,last_count.eq.0")
+      .order("last_scraped_at", { ascending: true, nullsFirst: true })
+      .limit(limit),
+  ]);
+
+  if (producersRes.error && explorersRes.error) {
+    logger.error("Failed to load permit sources from DB", {
+      error: producersRes.error.message,
+    });
     return [];
   }
+  if (producersRes.error) {
+    logger.warn("Producer-lane query failed; running explorers only", {
+      error: producersRes.error.message,
+    });
+  }
+  if (explorersRes.error) {
+    logger.warn("Explorer-lane query failed; running producers only", {
+      error: explorersRes.error.message,
+    });
+  }
+
+  const producers = producersRes.data ?? [];
+  const seen = new Set(producers.map((r) => r.source_key));
+  const data = [
+    ...producers,
+    ...(explorersRes.data ?? []).filter((r) => !seen.has(r.source_key)),
+  ].slice(0, limit);
 
   return (data ?? []).map((row) => ({
     source_key:   row.source_key,

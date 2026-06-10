@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Loader2, Check } from "lucide-react";
 import { useCapacityPrefs } from "@/hooks/useCapacityPrefs";
 import { EMPTY_CAPACITY_PREFS, type CapacityPrefs } from "@/lib/capacity/types";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
 
 /**
@@ -101,7 +102,7 @@ export default function CapacitySettingsPage() {
         </div>
       ) : (
         <div className="space-y-6">
-          <Section title="Travel radius">
+          <Section title="Travel radius" badge={<NotYetActiveBadge />}>
             <NumberField
               label="Max miles from your primary ZIP"
               placeholder="e.g. 25"
@@ -134,7 +135,7 @@ export default function CapacitySettingsPage() {
             </p>
           </Section>
 
-          <Section title="Start window">
+          <Section title="Start window" badge={<NotYetActiveBadge />}>
             <div className="grid grid-cols-2 gap-3">
               <DateField
                 label="Earliest"
@@ -149,7 +150,7 @@ export default function CapacitySettingsPage() {
             </div>
           </Section>
 
-          <Section title="Active jobs cap">
+          <Section title="Active jobs cap" badge={<NotYetActiveBadge />}>
             <NumberField
               label="Max concurrent active jobs"
               placeholder="e.g. 6"
@@ -217,14 +218,46 @@ export default function CapacitySettingsPage() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  badge,
+  children,
+}: {
+  title: string;
+  /** Optional inline badge rendered next to the section title (e.g. the
+   *  "Not yet active" pill on dimensions Phase 0a doesn't enforce yet).
+   *  Lives OUTSIDE the h2 so the heading's `uppercase` transform doesn't
+   *  cascade into the badge copy. */
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div>
-      <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-        {title}
-      </h2>
+      <div className="flex items-center gap-2 mb-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {title}
+        </h2>
+        {badge}
+      </div>
       {children}
     </div>
+  );
+}
+
+/* Phase 0a honesty note — only the value band (min/max) is enforced
+ * client-side today (`src/lib/capacity/types.ts`). Radius, start window,
+ * and max-active-jobs land in Phase A when the scorer applies them
+ * server-side. Inputs stay editable so saved values take effect the day
+ * enforcement ships — but the contractor must not believe they're
+ * filtering anything yet. */
+function NotYetActiveBadge() {
+  return (
+    <Badge
+      variant="outline"
+      className="text-[10px] font-medium text-muted-foreground"
+    >
+      Not yet active &mdash; coming in a future update
+    </Badge>
   );
 }
 

@@ -139,9 +139,19 @@ function ChevronDown({ className = "" }: { className?: string }) {
 // 35 states active in 30d → "30+"). When permits crosses 1.5M,
 // bump "1.4M+" → "1.5M+" here AND in the Hero / TerritoryMapPreview
 // constants of `getLandingStats()` (it already auto-handles those).
+//
+// 2026-06-09 audit pass: stripped the "(vercel.json /api/cron/scrape,
+// 2 AM UTC)" parentheticals from the STATS + FEATURES strings below —
+// they leaked internal infrastructure and the word "scrape" into
+// user-facing copy, violating the never-reveal-sourcing rule. The
+// verifiability rationale lives in THIS comment, not in the UI.
+// Note on the states number: "30+" here is a COVERAGE claim (the DB
+// holds permits from 38 states); the homepage's live label counts
+// states with new permits in the last 30 days (a smaller, ingest-
+// dependent number). Both are true; they measure different things.
 const STATS = [
   { num: "1.4M+", label: "Live permits across major metro areas in 30+ US states" },
-  { num: "Daily", label: "Permits refreshed every day (vercel.json: /api/cron/scrape)" },
+  { num: "Daily", label: "Permits refreshed every day" },
   { num: "24 hrs", label: "Free trial to evaluate before any charge" },
 ];
 
@@ -203,7 +213,7 @@ const STEPS = [
   },
   {
     title: "You receive the lead",
-    desc: "The scored, enriched lead appears in your dashboard. You compose outreach from a per-trade template library (50 system defaults across roofing, HVAC, plumbing, electrical, solar, ADU, general remodel) or a saved template of your own.",
+    desc: "The scored, enriched lead appears in your dashboard. You compose outreach from a per-trade template library (40+ system defaults across roofing, HVAC, plumbing, electrical, solar, ADU, general remodel) or a saved template of your own.",
   },
   {
     title: "You close the job",
@@ -216,7 +226,7 @@ const FEATURES = [
     badge: "Core",
     icon: <PermitIcon />,
     title: "Permit intelligence",
-    desc: "Daily building-permit ingest across your territory ZIPs (vercel.json /api/cron/scrape, 2 AM UTC). New permits appear in your dashboard the next refresh after filing.",
+    desc: "Daily building-permit refresh across your territory ZIPs. New permits appear in your dashboard within 24 hours of filing.",
   },
   {
     badge: "Core",

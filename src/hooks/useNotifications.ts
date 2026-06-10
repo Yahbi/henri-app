@@ -26,24 +26,31 @@ export function useNotifications(pollIntervalMs = 30_000): UseNotificationsRetur
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Ref-cancelled pattern (mirrors useEnrichment): a polling fetch that is
+  // in flight when the component unmounts must not setState when its
+  // response lands. Set true in the effect cleanup; checked before every
+  // setState below.
+  const cancelledRef = useRef(false);
 
   const fetchNotifications = useCallback(async () => {
     try {
       const res = await fetch("/api/notifications?limit=30");
-      if (!res.ok) return;
+      if (cancelledRef.current || !res.ok) return;
 
       const data = await res.json();
+      if (cancelledRef.current) return;
       setNotifications(data.notifications ?? []);
       setUnreadCount(data.unreadCount ?? 0);
     } catch {
       /* Silent fail on polling */
     } finally {
-      setIsLoading(false);
+      if (!cancelledRef.current) setIsLoading(false);
     }
   }, []);
 
   /* Initial fetch + polling */
   useEffect(() => {
+    cancelledRef.current = false;
     fetchNotifications();
 
     if (pollIntervalMs > 0) {
@@ -51,7 +58,12 @@ export function useNotifications(pollIntervalMs = 30_000): UseNotificationsRetur
     }
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      // Cancel in-flight handling AND stop the poll loop on unmount.
+      cancelledRef.current = true;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     };
   }, [fetchNotifications, pollIntervalMs]);
 
@@ -63,6 +75,7 @@ export function useNotifications(pollIntervalMs = 30_000): UseNotificationsRetur
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids }),
         });
+        if (cancelledRef.current) return;
 
         /* Optimistic update */
         setNotifications((prev) =>
@@ -83,6 +96,7 @@ export function useNotifications(pollIntervalMs = 30_000): UseNotificationsRetur
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ markAllRead: true }),
       });
+      if (cancelledRef.current) return;
 
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
       setUnreadCount(0);

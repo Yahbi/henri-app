@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import {
+  checkRateLimit,
+  getClientIp,
+  rateLimitResponse,
+} from "@/lib/utils/rate-limit";
 import { generateResponseDraft } from "@/lib/reviews/response-generator";
 import { logger } from "@/lib/logger";
 import { ReviewSubmitBodySchema, parseBody } from "@/lib/schemas/api";
@@ -81,6 +86,16 @@ function detectSentiment(
  *  - An authenticated user session
  */
 export async function POST(req: NextRequest) {
+  /* IP rate limit — review submission is reachable without a session
+   * (token path), so cap unauthenticated spam the same way /api/intake
+   * does for homeowner submissions. */
+  const ip = getClientIp(req);
+  const rl = checkRateLimit(`reviews.submit:${ip}`, {
+    maxRequests: 10,
+    windowMs: 60 * 60 * 1000, // 1 hour
+  });
+  if (!rl.allowed) return rateLimitResponse(rl);
+
   try {
     const raw = await req.json().catch(() => ({}));
     const parsed = parseBody(ReviewSubmitBodySchema, raw);

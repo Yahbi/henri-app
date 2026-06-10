@@ -27,6 +27,14 @@ import { getLandingStats } from "@/lib/stats/landing";
 // Cache the rendered HTML for 1h. Stats fetched once per cache miss.
 export const revalidate = 3600;
 
+// Canonical for the home page only (2026-06-09 audit). Deliberately NOT
+// set in the root layout: metadata.alternates is inherited literally, so
+// a root-level canonical of "/" would mislabel every page that doesn't
+// override it.
+export const metadata = {
+  alternates: { canonical: "/" },
+};
+
 export default async function MarketingPage() {
   const stats = await getLandingStats();
 

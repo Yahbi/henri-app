@@ -412,10 +412,10 @@ export default function BillingPage() {
        *      been the next billing date.
        *   4. No refunds (digital product per Terms).
        *
-       * The earlier "Export your leads as JSON at Settings → Export"
-       * line was removed 2026-04-27 because the /settings/export
-       * route does not exist; the truthfulness contract requires
-       * we don't claim features we don't ship.
+       * The earlier "Export your leads as JSON" line was removed
+       * 2026-04-27 because the export route did not exist; restored
+       * 2026-06-09 when GET /api/settings/export shipped (JSON only —
+       * the no-CSV pricing rule stands).
        */}
       <div className="mt-10 border-t border-border pt-6 text-sm text-muted-foreground space-y-1.5">
         <p className="text-foreground font-medium">No lock-in, ever.</p>
@@ -427,6 +427,17 @@ export default function BillingPage() {
         <p>
           Flat monthly pricing. No per-lead fees, no annual contracts, no
           retention-desk phone tag.
+        </p>
+        <p>
+          Your data is yours: download your leads, territories, and estimates
+          anytime as JSON via{" "}
+          <a
+            href="/api/settings/export"
+            className="font-medium text-foreground underline underline-offset-2 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+          >
+            data export
+          </a>
+          .
         </p>
         <p>
           After cancellation, your account data is removed from active systems

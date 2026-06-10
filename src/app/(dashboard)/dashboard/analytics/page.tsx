@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { MetricGrid } from "@/components/analytics/MetricGrid";
 import { BenchmarkWidget } from "@/components/dashboard/BenchmarkWidget";
@@ -12,7 +13,8 @@ import { useFunnel } from "@/hooks/useFunnel";
 import { useForecast } from "@/hooks/useForecast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, ArrowRight } from "lucide-react";
+import { TrendingUp, TrendingDown, ArrowRight, MapPin } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const LeadTrendChart = dynamic(
   () => import("@/components/analytics/LeadTrendChart").then((m) => m.LeadTrendChart),
@@ -356,6 +358,36 @@ export default function AnalyticsPage() {
           Last 30 days &middot; {zipDisplay}
         </p>
       </div>
+
+      {/* Zero-leads explainer — a page full of zeros with no cause reads
+          as broken. One banner connects the zeros to "no territory yet"
+          and routes to the claim surface (/onboarding/territory — same
+          target as the dashboard empty state). All sections below stay
+          rendered so the layout is familiar when data arrives. */}
+      {!leadsLoading && leads.length === 0 && (
+        <Card className="p-4 border-primary/30 bg-primary-04">
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            <div className="w-9 h-9 rounded-lg bg-primary-08 flex items-center justify-center shrink-0">
+              <MapPin className="h-4 w-4 text-primary" aria-hidden="true" />
+            </div>
+            <div className="flex-1 min-w-[200px]">
+              <p className="text-sm font-medium text-foreground">
+                These metrics are zero because you have no leads yet
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Analytics fill in automatically once leads start flowing
+                into an active territory. Claim your first ZIP to begin.
+              </p>
+            </div>
+            <Button asChild className="shrink-0">
+              <Link href="/onboarding/territory">
+                <MapPin className="h-4 w-4" aria-hidden="true" />
+                Claim a territory
+              </Link>
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {/* KPI metrics */}
       <MetricGrid

@@ -177,11 +177,14 @@ function featureToLeadData(
 const STAGE_FILTER_OPTIONS = [
   { value: "all",                          label: "All stages" },
   // ─── Presets (founder-named) ───
-  { value: "preset:high_intent",           label: "★ High intent (score ≥75)" },
-  { value: "preset:no_contractor",         label: "★ Permit, no contractor" },
-  { value: "preset:stalled_expired",       label: "★ Stalled / expired" },
-  { value: "preset:pre_intent",            label: "★ Pre-intent only" },
-  { value: "preset:maintenance",           label: "★ Maintenance opportunities" },
+  // Rendered inside a native <select>, so labels are plain text only —
+  // no glyphs/icons (brand rule: no emoji/decorative characters). The
+  // "preset:" value prefix is what distinguishes presets in code.
+  { value: "preset:high_intent",           label: "High intent (score ≥75)" },
+  { value: "preset:no_contractor",         label: "Permit, no contractor" },
+  { value: "preset:stalled_expired",       label: "Stalled / expired" },
+  { value: "preset:pre_intent",            label: "Pre-intent only" },
+  { value: "preset:maintenance",           label: "Maintenance opportunities" },
   // ─── All 11 raw stage values ───
   { value: "pre_intent",                   label: "Pre-intent" },
   { value: "active_intent",                label: "Active intent" },
@@ -1155,6 +1158,10 @@ export default function MapPage() {
           permit timeline, etc. Closes via the drawer's internal X button. */}
       {selectedLead && (
         <LeadDetailDrawer
+          /* `key` forces a clean unmount + remount when switching leads —
+           * same rationale as the /dashboard usage (drag state, in-flight
+           * listeners, and stale closures must not leak across leads). */
+          key={selectedLead.id}
           lead={selectedLead}
           onClose={() => setSelectedLead(null)}
           height={drawerHeight}

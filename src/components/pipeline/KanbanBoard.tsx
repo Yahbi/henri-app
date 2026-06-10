@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
-import { Plus, Loader2, CalendarDays } from "lucide-react";
+import { Plus, Loader2, CalendarDays, Inbox } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useLeads, useUpdateLeadStatus } from "@/hooks/useLeads";
 import { STAGE_LABEL_MAP } from "@/lib/intent/stage-colors";
 import { formatCurrency } from "@/types/lead";
@@ -342,6 +344,31 @@ function KanbanCard({
   );
 }
 
+/** Zero-leads empty state — without it the board renders seven bare
+ *  "Drop here" columns that read as broken. Mirrors the dashboard's
+ *  EmptyLeadsState visual pattern (icon circle + headline + hint + CTA)
+ *  and routes the contractor to the Leads tab where pipeline entries
+ *  originate. */
+function EmptyPipelineState() {
+  return (
+    <div className="flex flex-col h-full items-center justify-center p-8 text-center">
+      <div className="w-14 h-14 rounded-full bg-primary-08 flex items-center justify-center mb-4">
+        <Inbox className="h-6 w-6 text-primary" aria-hidden="true" />
+      </div>
+      <p className="text-sm font-semibold text-foreground">
+        Your pipeline is empty
+      </p>
+      <p className="text-xs text-muted-foreground mt-1 max-w-[280px]">
+        Leads you save or contact appear here as they move through your
+        pipeline &mdash; from first contact to won.
+      </p>
+      <Button asChild className="mt-4">
+        <Link href="/dashboard/leads">Browse your leads</Link>
+      </Button>
+    </div>
+  );
+}
+
 function ColumnSkeleton() {
   return (
     <div className="w-[270px] shrink-0 flex flex-col bg-bg-subtle rounded-xl">
@@ -544,8 +571,14 @@ export function KanbanBoard() {
         </div>
       </div>
 
-      {/* Columns */}
+      {/* Columns — or the explanatory empty state when the contractor has
+          zero leads overall (NOT when a stage filter merely matches none;
+          filtered-to-zero still shows the columns so the active filter
+          stays visible and adjustable). */}
       <div className="flex-1 overflow-x-auto p-4">
+        {!isLoading && (leads ?? []).length === 0 ? (
+          <EmptyPipelineState />
+        ) : (
         <div className="flex gap-4 h-full min-w-max">
           {isLoading
             ? COLUMNS.map((col) => <ColumnSkeleton key={col.id} />)
@@ -636,6 +669,7 @@ export function KanbanBoard() {
                 );
               })}
         </div>
+        )}
       </div>
 
       <AddLeadDialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} />

@@ -54,11 +54,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "yearly",
       priority: 0.5,
     },
-    {
-      url: `${BASE_URL}/forgot-password`,
-      lastModified: now,
-      changeFrequency: "yearly",
-      priority: 0.2,
-    },
+    // /forgot-password removed 2026-06-09: the route does not exist (404)
+    // and Henri is passwordless — a password-flow URL in the sitemap was
+    // both a crawl error and a brand-rule smell.
   ];
 }

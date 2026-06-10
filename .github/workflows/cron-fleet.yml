@@ -1,0 +1,132 @@
+# Cron fleet — scheduler of record for every Vercel cron endpoint that
+# vercel.json cannot hold (Hobby plan caps native crons at 2: the Sunday
+# refresh-zip-aggregates + synthesize-pre-intent pair stays in vercel.json).
+#
+# WHY THIS EXISTS: the previous external scheduler (Hetzner crontab) went
+# silent on 2026-05-14, freezing scoring, ingest, licensing checks, digests
+# and every sidecar refresh. GitHub Actions replaces it: free, observable
+# (failed runs email the repo owner), and versioned with the code.
+#
+# The schedule table below reproduces the last full vercel.json cron map
+# (commit 9bc76b3, 2026-05-02) verbatim, minus:
+#   - score                → cron-score.yml (every 20 min)
+#   - refresh-zip-aggregates / synthesize-pre-intent → still native in vercel.json
+#   - cdc-svi / census-acs / hmda-rotate / hud-zipxw / code-violations /
+#     nifc-wildfires      → intentionally parked (migration 00079 prune)
+#
+# Mechanics: the workflow wakes hourly at :00 and :30 and fires whichever
+# endpoints are due at that UTC slot. GH Actions schedules can drift by
+# minutes under load — fine for daily jobs. Each endpoint is idempotent
+# and CRON_SECRET-gated; a non-200 marks the workflow run failed (which
+# doubles as the outage alert that was missing when the old scheduler died).
+#
+# Manual runs: workflow_dispatch with `endpoints` (comma-separated route
+# names, e.g. "scrape,enrich") fires those immediately regardless of slot.
+
+name: cron-fleet
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+    - cron: "30 * * * *"
+  workflow_dispatch:
+    inputs:
+      endpoints:
+        description: "Comma-separated cron route names to fire now (e.g. scrape,enrich,license-check)"
+        required: false
+        default: ""
+
+concurrency:
+  group: cron-fleet
+  cancel-in-progress: false
+
+jobs:
+  fleet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Fire due endpoints
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          FORCED: ${{ github.event.inputs.endpoints }}
+        run: |
+          set -uo pipefail
+          BASE="https://meethenri.com/api/cron"
+          HH=$(date -u +%H)
+          MM_RAW=$(date -u +%M)
+          DOW=$(date -u +%w)   # 0 = Sunday
+          # Snap actual start minute to the intended :00 / :30 slot
+          # (GH Actions drifts; a 00:07 start still means the :00 slot).
+          if [ "$MM_RAW" -lt 30 ]; then MM=00; else MM=30; fi
+          SLOT="$HH:$MM"
+          echo "UTC slot $SLOT dow=$DOW (actual $(date -u +%H:%M))"
+
+          due=()
+          if [ -n "$FORCED" ]; then
+            IFS=',' read -ra parts <<< "$FORCED"
+            for p in "${parts[@]}"; do due+=("$(echo "$p" | xargs)"); done
+          else
+            case "$SLOT" in
+              00:00) due+=(openfema-ia) ;;
+              00:30) due+=(state-licenses-rotate) ;;
+              02:00) due+=(cron-runs-cleanup) ;;
+              02:30) ;;
+              03:00) due+=(engagement) ;;
+              03:30) due+=(re-enrich) ;;
+              04:00) due+=(zip-demand) ;;
+              04:30) due+=(market-intel) ;;
+              05:00) due+=(billing-sync)
+                     [ "$DOW" = "0" ] && due+=(predictive-refresh) ;;
+              06:00) due+=(license-check) ;;
+              07:00) due+=(digest activate-arcgis-sources) ;;
+              08:00) [ "$DOW" = "1" ] && due+=(weekly-digest weekly-briefing) ;;
+              09:00) due+=(storm-events) ;;
+              10:00) due+=(review-requests) ;;
+              11:00) due+=(follow-ups) ;;
+              12:00) due+=(permits) ;;
+              13:00) due+=(enrich) ;;
+              13:30) due+=(enrich) ;;
+              14:00) due+=(enrich) ;;
+              14:30) due+=(enrich geocode-backfill) ;;
+              15:00) due+=(blast-worker) ;;
+              16:30) due+=(courtlistener-liens) ;;
+              17:00) due+=(usgs-quakes) ;;
+              18:00) [ "$DOW" = "0" ] && due+=(hud-reo) ;;
+              19:00) due+=(census-geocode) ;;
+              20:00) [ "$DOW" = "0" ] && due+=(fema-nri) ;;
+              22:00) due+=(openfema-declarations) ;;
+              22:30) due+=(gdelt-triggers) ;;
+              23:00) due+=(swdi-events) ;;
+              23:30) due+=(openfema-nfip) ;;
+            esac
+
+            # Permit ingest runs EVERY hour at :30 (2026-06-09 starvation
+            # fix): 24 runs/day x 50 sources = 1,200 source-scrapes/day,
+            # paired with the two-lane producer/explorer rotation in
+            # sources-db.ts. The old daily run at 02:00 gave a 240-day
+            # full rotation across ~12k enabled sources.
+            if [ "$MM" = "30" ]; then due+=(scrape); fi
+          fi
+
+          if [ "${#due[@]}" -eq 0 ]; then
+            echo "Nothing due this slot."
+            exit 0
+          fi
+
+          failed=0
+          for ep in "${due[@]}"; do
+            echo "── $ep ──"
+            code=$(curl -sS -o /tmp/body.json -w "%{http_code}" \
+              --max-time 290 --retry 2 --retry-delay 10 \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$BASE/$ep") || code="000"
+            echo "HTTP $code"
+            head -c 600 /tmp/body.json || true
+            echo
+            if [ "$code" != "200" ]; then
+              echo "::error::$ep returned HTTP $code"
+              failed=1
+            fi
+            sleep 3
+          done
+          exit "$failed"

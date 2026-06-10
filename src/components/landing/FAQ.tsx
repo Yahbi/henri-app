@@ -31,7 +31,7 @@ function buildFaqs({
     {
       question: "How fast do I get leads?",
       answer:
-        "The permit catalog refreshes daily (vercel.json /api/cron/scrape, 2 AM UTC). New permits filed during a given day appear in the dashboard the next refresh — typically within 24 hours of the source jurisdiction publishing them.",
+        "The permit catalog refreshes daily. New permits filed during a given day appear in the dashboard the next refresh — typically within 24 hours of the source jurisdiction publishing them.",
     },
     {
       question: "Can I change my territories?",
