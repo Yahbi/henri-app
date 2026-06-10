@@ -6,6 +6,7 @@ import { formatCurrency } from "@/types/lead";
 import type { Lead, LeadStatus } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
 import { Loader2, CalendarDays } from "lucide-react";
 
@@ -104,11 +105,8 @@ function JobCard({ lead, onMoveStage, isMoving }: {
             {trade}
           </span>
         )}
-        {lead.permit_id && (
-          <span className="text-[10px] font-mono text-muted-foreground bg-[rgba(107,114,128,0.08)] px-1.5 py-0.5 rounded">
-            {lead.permit_id}
-          </span>
-        )}
+        {/* permit_id (a raw UUID) removed 2026-06-10 — developer noise on a
+            customer surface; the trade badge + description identify the job. */}
       </div>
 
       {/* Permit description */}
@@ -185,7 +183,7 @@ function StatsSkeleton() {
 }
 
 export default function JobsPage() {
-  const { data: leads, isLoading } = useLeads({ filters: { status: ["won"] } });
+  const { data: leads, isLoading, error, refetch } = useLeads({ filters: { status: ["won"] } });
   const updateStatus = useUpdateLeadStatus();
   const [movingId, setMovingId] = useState<string | null>(null);
 
@@ -265,6 +263,21 @@ export default function JobsPage() {
       )}
 
       <div className="flex-1 overflow-x-auto p-4">
+        {error ? (
+          /* Fetch failed — alert-with-retry INSTEAD of five empty columns,
+           * so a DB hiccup doesn't read as "no active jobs". */
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-bg-subtle p-4"
+          >
+            <p className="text-sm text-muted-foreground">
+              Couldn&apos;t load your jobs &mdash; check your connection and retry.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Retry
+            </Button>
+          </div>
+        ) : (
         <div className="flex gap-4 h-full min-w-max">
           {isLoading
             ? JOB_COLUMNS.map((col) => <ColSkeleton key={col.id} />)
@@ -300,6 +313,7 @@ export default function JobsPage() {
                 );
               })}
         </div>
+        )}
       </div>
     </div>
   );

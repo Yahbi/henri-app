@@ -7,6 +7,7 @@ import { useLeads } from "@/hooks/useLeads";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExpandableBanner } from "@/components/ui/expandable-banner";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { StageHistogram } from "@/components/analytics/StageHistogram";
 
 /* ─── Helpers ─── */
@@ -151,7 +152,7 @@ export default function StormPage() {
   // alongside the active weather alerts. `isLoading` from useStorm is
   // independent of `useLeads` — render the histogram with its own
   // loading state.
-  const { data: leadsForStage, isLoading: leadsLoading } = useLeads();
+  const { data: leadsForStage, isLoading: leadsLoading, error: leadsError, refetch: refetchLeads } = useLeads();
 
   // Restoration-trade subset — the stages that matter most for
   // storm-driven outreach (permit stages where the homeowner is still
@@ -380,10 +381,23 @@ export default function StormPage() {
         <h2 className="text-lg font-heading font-normal text-foreground mb-3">
           {restorationLeads.length > 0 ? "Restoration-trade pipeline by stage" : "Pipeline by stage"}
         </h2>
-        <StageHistogram
-          leads={restorationLeads.length > 0 ? restorationLeads : leadsForStage}
-          isLoading={leadsLoading}
-        />
+        {leadsError ? (
+          /* Fetch failed — alert-with-retry INSTEAD of an empty histogram,
+           * so a DB hiccup doesn't read as "no pipeline". */
+          <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+            <p className="text-sm text-muted-foreground">
+              Couldn&apos;t load your pipeline &mdash; check your connection and retry.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => refetchLeads()}>
+              Retry
+            </Button>
+          </Card>
+        ) : (
+          <StageHistogram
+            leads={restorationLeads.length > 0 ? restorationLeads : leadsForStage}
+            isLoading={leadsLoading}
+          />
+        )}
       </div>
 
       {/* Historical Timeline */}

@@ -33,7 +33,7 @@ export function LeadDrawerScoreColumn({
   urgencyBadge,
 }: LeadDrawerScoreColumnProps) {
   return (
-    <div className="flex flex-col items-center justify-start shrink-0 w-[100px] pt-1">
+    <div className="flex flex-col items-center justify-start shrink-0 w-full sm:w-[100px] pt-1">
       <div
         className={cn(
           "w-14 h-14 rounded-full border-[3px] flex items-center justify-center text-lg font-bold",

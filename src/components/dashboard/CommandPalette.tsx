@@ -75,7 +75,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export function CommandPalette() {
   const router = useRouter();
-  const { data: leads = [] } = useLeads();
+  const { data: leads = [], isLoading: leadsLoading } = useLeads();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -219,7 +219,7 @@ export function CommandPalette() {
         >
           {flat.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-              No results for &ldquo;{query}&rdquo;
+              {leadsLoading ? "Loading leads..." : <>No results for &ldquo;{query}&rdquo;</>}
             </div>
           ) : (
             Object.entries(grouped).map(([category, items]) => (
@@ -261,6 +261,19 @@ export function CommandPalette() {
                 })}
               </div>
             ))
+          )}
+          {/* Leads still fetching — show a placeholder row under its own
+              category header so the palette doesn't look like the account
+              has zero leads while the query is in flight. */}
+          {leadsLoading && flat.length > 0 && !grouped.lead && (
+            <div>
+              <div className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                {CATEGORY_LABELS.lead}
+              </div>
+              <div className="px-4 py-2 text-sm text-muted-foreground" aria-live="polite">
+                Loading leads...
+              </div>
+            </div>
           )}
         </div>
 

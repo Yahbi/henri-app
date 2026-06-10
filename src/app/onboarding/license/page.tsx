@@ -49,6 +49,21 @@ interface VerifyResult {
   available_states?: string[];
 }
 
+/** Existing contractor_licenses row (onboarding-resume support). */
+interface ExistingLicense {
+  id: string;
+  license_number: string;
+  license_state: string;
+  verification_status: string;
+  verified: boolean;
+}
+
+/** Mask a license number to its last 4 characters (e.g. "***4321"). */
+function maskLicense(num: string): string {
+  if (num.length <= 4) return num;
+  return "*".repeat(num.length - 4) + num.slice(-4);
+}
+
 function LicenseVerificationContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -65,6 +80,46 @@ function LicenseVerificationContent() {
   const [error, setError] = useState<string | null>(null);
   const [verify, setVerify] = useState<VerifyResult>({ status: "idle" });
   const verifyTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Onboarding resume — if the contractor already submitted a license,
+  // show a "License on file" card instead of the blank form.
+  const [existingLicense, setExistingLicense] = useState<ExistingLicense | null>(null);
+  const [showReplaceForm, setShowReplaceForm] = useState(false);
+
+  // Forward the pricing-page plan selection through to the plan step.
+  const planParam = searchParams?.get("plan");
+  const planHref = planParam
+    ? `/onboarding/plan?plan=${encodeURIComponent(planParam)}`
+    : "/onboarding/plan";
+
+  // Fetch the caller's existing contractor_licenses row on mount (own
+  // RLS). Cancellation-safe via the cancelled flag.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user || cancelled) return;
+        const { data } = await supabase
+          .from("contractor_licenses")
+          .select("id, license_number, license_state, verification_status, verified")
+          .eq("contractor_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!cancelled && data) {
+          setExistingLicense(data as ExistingLicense);
+        }
+      } catch {
+        // Best-effort — fall back to the blank form.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const {
     register,
@@ -143,8 +198,7 @@ function LicenseVerificationContent() {
               ? "missing_in_roster"
               : "pending_verification";
 
-      const { error: licenseErr } = await supabase.from("contractor_licenses").insert({
-        contractor_id: user.id,
+      const licensePayload = {
         license_number: data.license_number,
         license_state: data.state,
         license_type:
@@ -158,7 +212,18 @@ function LicenseVerificationContent() {
         last_checked_at: new Date().toISOString(),
         expiry_date: (verify.match?.expire_date as string | undefined) || null,
         raw_response: verify as unknown as Record<string, unknown>,
-      });
+      };
+
+      // Onboarding resume — when a row already exists for this contractor,
+      // UPDATE it instead of inserting a duplicate.
+      const { error: licenseErr } = existingLicense
+        ? await supabase
+            .from("contractor_licenses")
+            .update(licensePayload)
+            .eq("contractor_id", user.id)
+        : await supabase
+            .from("contractor_licenses")
+            .insert({ contractor_id: user.id, ...licensePayload });
       if (licenseErr) throw licenseErr;
 
       // Mirror the license state + number onto profiles so the middleware
@@ -211,7 +276,50 @@ function LicenseVerificationContent() {
         </CardHeader>
 
         <CardContent>
-          {!submitted ? (
+          {!submitted && existingLicense && !showReplaceForm ? (
+            /* Onboarding resume — license already on file */
+            <div className="flex flex-col items-center py-6 text-center">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(61,153,112,0.12)]">
+                <ShieldCheck className="h-7 w-7 text-[#3D9970]" />
+              </div>
+              <h3 className="font-heading font-normal text-lg text-foreground mb-1">
+                License on file
+              </h3>
+              <div className="rounded-lg border border-border bg-bg-subtle px-4 py-3 text-sm text-foreground my-4 w-full max-w-xs">
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-muted-foreground">Number</span>
+                  <span className="font-medium">{maskLicense(existingLicense.license_number)}</span>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-muted-foreground">State</span>
+                  <span className="font-medium">{existingLicense.license_state}</span>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-muted-foreground">Status</span>
+                  <span className="font-medium">
+                    {existingLicense.verified
+                      ? "Verified"
+                      : existingLicense.verification_status.replace(/_/g, " ")}
+                  </span>
+                </div>
+              </div>
+              <Button
+                variant="primary"
+                size="lg"
+                className="w-full max-w-xs"
+                onClick={() => router.push(planHref)}
+              >
+                Continue to plan selection
+              </Button>
+              <button
+                type="button"
+                onClick={() => setShowReplaceForm(true)}
+                className="mt-3 text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+              >
+                Replace license
+              </button>
+            </div>
+          ) : !submitted ? (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               {/* License Number */}
               <div>
@@ -390,7 +498,7 @@ function LicenseVerificationContent() {
                 variant="primary"
                 size="lg"
                 className="w-full max-w-xs"
-                onClick={() => router.push("/onboarding/plan")}
+                onClick={() => router.push(planHref)}
               >
                 Continue to plan selection
               </Button>

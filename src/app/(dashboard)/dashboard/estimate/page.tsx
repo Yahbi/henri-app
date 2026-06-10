@@ -199,7 +199,7 @@ function SendModal({ id, total, address, onClose }: { id: string; total: number;
 
 /* ─── Estimate Builder Modal ─── */
 function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSaved: () => void; onSave: (data: EstimateCreateInput) => Promise<{ success: boolean; error?: string }> }) {
-  const { data: leads } = useLeads();
+  const { data: leads, isLoading: leadsLoading } = useLeads();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [selectedLeadId, setSelectedLeadId] = useState("");
@@ -330,10 +330,19 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
           {/* Lead selector */}
           <div>
             <label htmlFor="est-lead" className="block text-xs font-medium text-muted-foreground mb-1.5">Link to lead (optional)</label>
+            {/* Disabled-while-loading so the picker doesn't flash an empty
+                list before the fetch lands. */}
             <select id="est-lead" value={selectedLeadId} onChange={(e) => setSelectedLeadId(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring">
-              <option value="">— No lead linked —</option>
-              {(leads ?? []).map((l) => <option key={l.id} value={l.id}>{l.address}</option>)}
+              disabled={leadsLoading}
+              className="w-full px-3 py-2 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60 disabled:cursor-not-allowed">
+              {leadsLoading ? (
+                <option value="">Loading leads...</option>
+              ) : (
+                <>
+                  <option value="">— No lead linked —</option>
+                  {(leads ?? []).map((l) => <option key={l.id} value={l.id}>{l.address}</option>)}
+                </>
+              )}
             </select>
           </div>
 

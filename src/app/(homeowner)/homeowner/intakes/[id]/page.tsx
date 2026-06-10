@@ -5,7 +5,7 @@
  * chat intake flow. Replaces the previous "Done button closes the modal
  * into the void" UX. Shows:
  *
- *  - Intake summary (trade, address, description, photos, score, budget, timeline)
+ *  - Intake summary (trade, address, description, score, budget, timeline)
  *  - Matched contractor card with real fields from /api/intake/[id]/matches
  *  - Expected contact window
  *  - Status timeline (submitted → matched → call scheduled → in progress)
@@ -39,7 +39,6 @@ type IntakeDetail = {
   budget_range: string | null;
   description: string | null;
   refinement_answers: Array<{ q: string; a: string }> | null;
-  photos: string[];
   henri_score: number | null;
   status: string;
   created_at: string;
@@ -382,24 +381,10 @@ export default function HomeownerIntakePage() {
             ))}
           </div>
         )}
-        {intake.photos && intake.photos.length > 0 && (
-          <div className="mt-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Photos ({intake.photos.length})
-            </p>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {intake.photos.slice(0, 8).map((src, i) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={i}
-                  src={src}
-                  alt={`Project photo ${i + 1}`}
-                  className="aspect-square w-full rounded-md object-cover"
-                />
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Photos section removed 2026-06-10 — the intake flow never
+            persisted photo files (names were collected then dropped), so
+            this section could never populate. The photo step itself was
+            removed from ChatIntakeModal in the same change. */}
       </section>
 
       {/* Withdraw / opt-out — appears unless already withdrawn or completed.

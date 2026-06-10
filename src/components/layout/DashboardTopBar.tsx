@@ -30,7 +30,7 @@ import { NotificationDropdown } from "@/components/dashboard/NotificationDropdow
 import { useLeads } from "@/hooks/useLeads";
 import { useUser } from "@/hooks/useUser";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 // Tab order groups tabs by the verb the contractor is doing:
@@ -254,6 +254,15 @@ export function DashboardTopBar() {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
   }, []);
 
+  // Mobile: keep the active tab in view inside the horizontally-scrolling
+  // strip. Desktop (md+) shows all tabs at once — skip so we never touch
+  // scroll positions there.
+  const activeTabRef = useRef<HTMLAnchorElement | null>(null);
+  useEffect(() => {
+    if (window.matchMedia("(min-width: 768px)").matches) return;
+    activeTabRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [pathname]);
+
   return (
     <header className="sticky top-0 z-40 bg-card border-b border-border">
       {/* Top row: logo + controls */}
@@ -312,7 +321,9 @@ export function DashboardTopBar() {
         </div>
       </div>
 
-      {/* Tab strip */}
+      {/* Tab strip — wrapped in a relative container so the mobile-only
+       * right-edge fade can sit outside the scrolling element. */}
+      <div className="relative">
       <nav
         className="flex items-center gap-0.5 px-4 overflow-x-auto scrollbar-none"
         role="tablist"
@@ -333,6 +344,7 @@ export function DashboardTopBar() {
             <Link
               key={tab.href}
               href={tab.href}
+              ref={active ? activeTabRef : undefined}
               role="tab"
               aria-selected={active}
               data-tour={`dashboard-nav-${tourKey}`}
@@ -349,6 +361,13 @@ export function DashboardTopBar() {
           );
         })}
       </nav>
+      {/* Mobile-only right-edge fade — hints that more tabs scroll
+       * off-screen. pointer-events-none so taps pass through. */}
+      <div
+        aria-hidden="true"
+        className="md:hidden pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-card to-transparent"
+      />
+      </div>
     </header>
   );
 }

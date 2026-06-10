@@ -169,8 +169,10 @@ export function LeadDetailDrawer({
         onKeyDown={drawer.onKeyDown}
       />
 
-      {/* Content */}
-      <div className="flex px-5 pb-4 pt-1 gap-5 flex-1 min-h-0 overflow-hidden">
+      {/* Content — stacks vertically below sm (phones), 3-column row at
+       * sm+. When stacked, the container scrolls so the middle score-
+       * breakdown column stays fully reachable (wedge contract). */}
+      <div className="flex flex-col sm:flex-row px-5 pb-4 pt-1 gap-5 flex-1 min-h-0 overflow-y-auto sm:overflow-hidden">
         {/* Column 1: Score + Urgency — extracted */}
         <LeadDrawerScoreColumn lead={lead} urgencyBadge={urgencyBadge} />
 
