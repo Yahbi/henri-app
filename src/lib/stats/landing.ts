@@ -82,7 +82,9 @@ export function formatStatesLabel(n: number): string {
  * the cached HTML reflects real numbers. This branch keeps `pnpm build`
  * green when secrets aren't available.
  */
-const FALLBACK_PERMITS = 1_400_000;
+// 2026-06-10: bumped 1.4M → 1.5M after the clean count (junk-state rows
+// excluded) crossed 1,553,689 — keep this at the last verified floor.
+const FALLBACK_PERMITS = 1_500_000;
 const FALLBACK_LEADS = 260_000;
 const FALLBACK_COVERED_STATES: ReadonlyArray<UsState> = [
   "AL", "AZ", "CA", "CT", "DC", "FL", "GA", "HI", "ID", "IL",

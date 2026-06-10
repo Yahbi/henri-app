@@ -32,8 +32,12 @@ test.describe("contractor flow", () => {
     // (CLAUDE.md truthfulness rule, rounded DOWN to nearest 0.1M).
     // "1 / ZIP" was retired with the 14-day-window cleanup
     // (~/.claude/plans/whats-the-14-days-purring-papert.md).
+    //
+    // 2026-06-10: the permit count keeps climbing (1.4M+ → 1.5M+ at the
+    // crossover) — assert the SHAPE of the rounded-down stat label, not
+    // a pinned value, so the test stops going stale on every 0.1M tick.
     await expect(page.getByText(/Permit Intelligence/i).first()).toBeVisible();
-    await expect(page.getByText(/1\.4M\+/).first()).toBeVisible();
+    await expect(page.getByText(/\d\.\dM\+/).first()).toBeVisible();
     await expect(page.getByText(/Licensed contractors only/i).first()).toBeVisible();
 
     // Signup CTA present — destination is /signup?role=contractor per
