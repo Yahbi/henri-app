@@ -27,6 +27,17 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isGodModeEmail } from "@/lib/auth/god-mode";
+import { SOURCE_SPECS, periodKey } from "@/lib/enrichment/quota";
+
+interface QuotaRow {
+  source: string;
+  class: string;
+  used: number;
+  budget: number;
+  window: "month" | "day" | null;
+  period: string;
+  pct: number;
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -232,6 +243,43 @@ export async function GET() {
     enrichment = null;
   }
 
+  // Per-source enrichment API quota (WS6, migration 00109). Best-effort:
+  // any failure (missing table, missing module) degrades to null so the
+  // panel never breaks. Built from SOURCE_SPECS — one row per source with
+  // a budget, matched to the current period for its rolling window.
+  let quota: QuotaRow[] | null = null;
+  try {
+    const admin = createAdminClient();
+    const now = new Date();
+    const budgeted = Object.entries(SOURCE_SPECS).filter(
+      ([, spec]) => spec.budget != null,
+    );
+    // Distinct period keys across the budgeted sources' windows.
+    const periods = Array.from(
+      new Set(budgeted.map(([, spec]) => periodKey(spec.window, now))),
+    );
+    const { data: usageRows } = await admin
+      .from("enrichment_quota_usage")
+      .select("source, period, used")
+      .in("period", periods);
+    const usageByKey = new Map<string, number>();
+    for (const r of (usageRows ?? []) as Array<Record<string, unknown>>) {
+      usageByKey.set(`${r.source}|${r.period}`, Number(r.used) || 0);
+    }
+    const rows: QuotaRow[] = budgeted.map(([source, spec]) => {
+      const period = periodKey(spec.window, now);
+      const budget = spec.budget as number;
+      const used = usageByKey.get(`${source}|${period}`) ?? 0;
+      const pct = budget > 0 ? Math.round((used / budget) * 100) : 0;
+      return { source, class: spec.class, used, budget, window: spec.window, period, pct };
+    });
+    // Lowest remaining headroom first — near-exhausted sources at the top.
+    rows.sort((a, b) => b.pct - a.pct);
+    quota = rows;
+  } catch {
+    quota = null;
+  }
+
   const results = await Promise.all(TABLES.map(probeTable));
   // Order: errors → stale → empty → ok, then by wave.
   const statusOrder: Record<HealthRow["status"], number> = {
@@ -251,6 +299,7 @@ export async function GET() {
       ok: true,
       generated_at: new Date().toISOString(),
       enrichment,
+      quota,
       tables: results,
     },
     { headers: { "Cache-Control": "private, max-age=30" } },

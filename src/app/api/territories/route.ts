@@ -8,6 +8,25 @@ import { fetchAllTerritories } from "@/lib/territories/fetch-all";
 import { PLAN_ZIP_LIMITS } from "@/lib/plans/constants";
 import { isGodModeEmail } from "@/lib/auth/god-mode";
 
+/** Enrichment-on-claim (WS3). Fire-and-forget kick of the enrich cron so a
+ *  newly-claimed (now tier-1) ZIP's corpus leads get the full source stack
+ *  immediately instead of waiting for the next scheduled drain. The enrich
+ *  cron already prioritises claimed ZIPs, so this run processes them first.
+ *  Never awaited; never throws into the claim path. No-op without the cron
+ *  secret (e.g. local dev). */
+function triggerClaimEnrichment(zip: string): void {
+  const secret = process.env.CRON_SECRET;
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? "https://meethenri.com";
+  if (!secret) return;
+  void fetch(`${base}/api/cron/enrich`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${secret}`, "x-claim-zip": zip },
+    signal: AbortSignal.timeout(3000), // don't hold a serverless invocation open
+  }).catch(() => {
+    /* best-effort: the scheduled cron will pick the ZIP up regardless */
+  });
+}
+
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -112,6 +131,14 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
+
+    // Enrichment-on-claim (WS3): the just-claimed ZIP is now a paid
+    // (tier-1) territory, so the enrich cron will process its corpus leads
+    // first with the full source stack. Kick that run NOW — fire-and-forget,
+    // server-to-server, with the cron secret — so the contractor's dashboard
+    // warms on day one instead of waiting up to 6h for the next scheduled
+    // drain. Never blocks the claim response; a failure is logged, not fatal.
+    triggerClaimEnrichment(zip);
 
     return NextResponse.json({ message: result.message }, { status: 201 });
   } catch (err) {
