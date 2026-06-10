@@ -20,6 +20,7 @@ import {
   deriveState,
   parseCoord,
   parseMoney,
+  BROWSER_UA,
 } from "./normalizer";
 import type { ScrapeResult } from "@/types/permits";
 
@@ -58,7 +59,7 @@ async function fetchArcGISPage(
   for (let attempt = 0; attempt <= 3; attempt++) {
     try {
       const res = await fetch(url, {
-        headers: { "User-Agent": "Henri/1.0 permit-data-scraper" },
+        headers: { "User-Agent": BROWSER_UA },
       });
       if (!res.ok) {
         if (res.status >= 500 || res.status === 429) {
