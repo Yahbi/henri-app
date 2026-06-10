@@ -110,20 +110,35 @@ export async function scrapeSocrataSource(
         const lat = parseCoord(record[source.latField]);
         const lng = parseCoord(record[source.lngField]);
 
+        // ZIP resolution: prefer one parsed from the address, else fall
+        // back to a dedicated zip column. BLDS-shaped Socrata datasets
+        // (Seattle, Cincinnati, ...) keep the street in `originaladdress1`
+        // and the ZIP in a separate column — without this fallback those
+        // permits land with no ZIP and can never become leads.
+        const resolvedZip = (rawAddress ? extractZip(rawAddress) : null) ?? (() => {
+          for (const k of ["zip", "zip_code", "zipcode", "originalzip", "zip5", "postal_code", "postalcode", "site_zip", "property_zip"]) {
+            const raw = record[k];
+            if (raw == null) continue;
+            const m = String(raw).match(/\b(\d{5})\b/);
+            if (m) return m[1];
+          }
+          return null;
+        })();
+
         return {
           source_id:       `${source.city.toLowerCase().replace(/\s+/g, "_")}_${rawId}`,
           source_city:     source.city,
           city:            source.city,
           // Derive state from the address/ZIP so a source with a junk
           // 'US' state (e.g. auto-discovered) still yields correct rows.
-          state:           deriveState(rawAddress || null, rawAddress ? extractZip(rawAddress) : null, source.state),
+          state:           deriveState(rawAddress || null, resolvedZip, source.state),
           source_type:     "socrata",
           permit_number:   rawId || null,
           permit_type:     classifyPermitType(rawType),
           status:          normalizeStatus(rawStatus),
           description:     record[source.descField] ? String(record[source.descField]) : null,
           address:         rawAddress || null,
-          zip:             rawAddress ? extractZip(rawAddress) : null,
+          zip:             resolvedZip,
           // Validate WGS84 bounds — skip state-plane projected coordinates
           latitude:        lat !== null && Math.abs(lat) <= 90 ? lat : null,
           longitude:       lng !== null && Math.abs(lng) <= 180 ? lng : null,

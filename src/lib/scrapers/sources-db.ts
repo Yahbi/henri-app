@@ -33,13 +33,18 @@ export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
 
   const producerSlots = Math.ceil(limit * 0.6);
 
+  // priority DESC first in BOTH lanes so human-verified / high-value
+  // sources (priority=10, e.g. the Tampa territory feed + GOLD contact
+  // feeds) always scrape before the long tail, then last_scraped_at
+  // rotates within each priority band.
   const [producersRes, explorersRes] = await Promise.all([
-    // Lane A: proven producers, oldest-scraped first.
+    // Lane A: proven producers, highest priority + oldest-scraped first.
     supabase
       .from("permit_sources")
       .select(SOURCE_COLUMNS)
       .eq("enabled", true)
       .gt("last_count", 0)
+      .order("priority", { ascending: false })
       .order("last_scraped_at", { ascending: true, nullsFirst: true })
       .limit(producerSlots),
     // Lane B: never-produced explorers (NULL or 0 last_count).
@@ -48,6 +53,7 @@ export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
       .select(SOURCE_COLUMNS)
       .eq("enabled", true)
       .or("last_count.is.null,last_count.eq.0")
+      .order("priority", { ascending: false })
       .order("last_scraped_at", { ascending: true, nullsFirst: true })
       .limit(limit),
   ]);
