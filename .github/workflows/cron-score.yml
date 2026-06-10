@@ -27,15 +27,34 @@ concurrency:
 jobs:
   score:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 28
     steps:
-      - name: Trigger /api/cron/score
+      # Drain loop (2026-06-10): GitHub throttles scheduled workflows hard
+      # on this repo (observed 2-6 fires/day despite */20), so each run
+      # that DOES fire drains as much backlog as it can: call the endpoint
+      # repeatedly until a batch scores 0 (queue empty) or ~22 min elapse.
+      # Each call is an independent ~1k-permit batch on the Vercel side.
+      - name: Drain /api/cron/score
         run: |
-          set -euo pipefail
-          code=$(curl -sS -o /tmp/body.json -w "%{http_code}" \
-            --max-time 290 --retry 2 --retry-delay 5 \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "https://meethenri.com/api/cron/score")
-          echo "HTTP $code"
-          cat /tmp/body.json
-          test "$code" = "200"
+          set -uo pipefail
+          deadline=$(( $(date +%s) + 1320 ))
+          runs=0; fails=0
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            code=$(curl -sS -o /tmp/body.json -w "%{http_code}" \
+              --max-time 290 --retry 1 --retry-delay 5 \
+              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+              "https://meethenri.com/api/cron/score") || code="000"
+            runs=$((runs+1))
+            scored=$(python3 -c "import json;print(json.load(open('/tmp/body.json')).get('summary',{}).get('scored',-1))" 2>/dev/null || echo "-1")
+            echo "batch $runs: HTTP $code scored=$scored"
+            if [ "$code" != "200" ]; then
+              fails=$((fails+1))
+              [ "$fails" -ge 3 ] && { echo "::error::3 consecutive failures"; exit 1; }
+              sleep 20
+              continue
+            fi
+            fails=0
+            [ "$scored" = "0" ] && { echo "Queue empty."; break; }
+            sleep 3
+          done
+          echo "Drained $runs batches."
