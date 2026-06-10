@@ -48,10 +48,21 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { enrichLead } from "@/lib/enrichment/orchestrator";
+import {
+  enrichLead,
+  getTelemetry,
+  resetTelemetry,
+} from "@/lib/enrichment/orchestrator";
 import { classifyApplicant } from "@/lib/permits/applicant-classifier";
 import { logger } from "@/lib/logger";
 import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
+import { getPriorityZipSets, leadTier } from "@/lib/enrichment/priority";
+import {
+  loadQuotaRemaining,
+  recordSpend,
+  SOURCE_SPECS,
+  type QuotaRemaining,
+} from "@/lib/enrichment/quota";
 import { buildEnrichmentPatch } from "./helpers";
 
 export const runtime = "nodejs";
@@ -72,6 +83,13 @@ export async function GET(request: NextRequest) {
 
   const supabase = createAdminClient();
   const t0 = Date.now();
+
+  // Territory-scoped tier-gating + per-source budgets (WS2). Free in-DB
+  // sources run for every lead; keyed/quota sources only fire on paid /
+  // target-metro tiers and skip once the budget is exhausted.
+  resetTelemetry();
+  const sets = await getPriorityZipSets(supabase);
+  const quotaRemaining: QuotaRemaining = await loadQuotaRemaining(supabase);
 
   // Cutoff: 30 days ago in ISO format. The .or() clause matches NULL OR < cutoff.
   const cutoff = new Date(
@@ -180,6 +198,8 @@ export async function GET(request: NextRequest) {
       permit_text: [permitRow?.description as string | null | undefined],
       applicant_classification: classification?.type ?? null,
       supabase,
+      tier: leadTier(lead.zip as string | null, sets),
+      quotaRemaining,
     });
 
     // Build the patch — only fields whose value CHANGED. Audit B7 fix
@@ -264,6 +284,15 @@ export async function GET(request: NextRequest) {
     elapsedMs: Date.now() - t0,
     hitDeadline: Date.now() >= deadline,
   };
+
+  // Persist keyed-source spend from telemetry (WS2).
+  const spentBySource: Record<string, number> = {};
+  for (const [source, t] of Object.entries(getTelemetry())) {
+    if (SOURCE_SPECS[source]?.budget != null && t.calls > 0) {
+      spentBySource[source] = t.calls;
+    }
+  }
+  await recordSpend(supabase, spentBySource);
 
   // Surface re-enrich in cron_runs (2026-06-10). `inserted` = real-field
   // changes; the GH drain workflow halts when a batch returns 0 scanned.

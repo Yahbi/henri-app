@@ -84,6 +84,12 @@ import { lookupOSMContact } from "./osm-contact";
 import { lookupGooglePlaces } from "./google-places";
 import { lookupYelp } from "./yelp-fusion";
 import { mineMultiple } from "./description-miner";
+import {
+  SOURCE_SPECS,
+  tierAllows,
+  type EnrichTier,
+  type QuotaRemaining,
+} from "./quota";
 
 /** Input to the orchestrator. All fields optional except address — we
  *  can't enrich without a street at minimum. */
@@ -123,6 +129,21 @@ export interface EnrichmentContext {
   /** Optional Supabase admin client for the same-address DB lookup.
    *  If omitted, that pass is skipped. */
   supabase?: SupabaseClient | null;
+
+  /** Drain priority for this lead (territory-scoped enrichment, WS2).
+   *   1 = paid-territory   → full source stack
+   *   2 = trial-territory  → FREE in-DB sources only
+   *   3 = target metro     → free + high-volume-free APIs
+   *   4 = rest (default)   → FREE in-DB sources only
+   *  Free sources always run regardless of tier; only keyed / high-volume
+   *  sources are gated. Defaults to 4 so any caller that doesn't set a
+   *  tier never accidentally drains quota across the corpus. */
+  tier?: EnrichTier;
+
+  /** Remaining per-source budget snapshot for the current period (loaded
+   *  by the cron once per run). A source whose remaining budget is 0 is
+   *  skipped. Soft-decremented in-memory to cap within-run overspend. */
+  quotaRemaining?: QuotaRemaining;
 }
 
 /** What the orchestrator returns. All fields may be null. `sources`
@@ -357,6 +378,24 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
   if (ctx.phone) result.sources.phone = "upstream";
   if (ctx.email) result.sources.email = "upstream";
 
+  // Territory-scoped + quota policy gate (WS2). Returns true only when this
+  // lead's tier is allowed to spend the source's class AND the source has
+  // remaining budget this period. Free sources always pass. The in-memory
+  // soft-decrement caps within-run overspend on scarce keyed sources; the
+  // cron persists the real spend from telemetry afterward.
+  const tier: EnrichTier = ctx.tier ?? 4;
+  const allow = (source: string): boolean => {
+    const spec = SOURCE_SPECS[source];
+    if (!spec || spec.class === "free") return true;
+    if (!tierAllows(tier, spec.class)) return false;
+    if (spec.budget == null) return true;
+    const rem = ctx.quotaRemaining?.[source];
+    if (rem == null) return true; // no snapshot — let the cron account post-hoc
+    if (rem <= 0) return false;
+    ctx.quotaRemaining![source] = rem - 1;
+    return true;
+  };
+
   /* ── Phase A: sequential DB-only + in-memory passes ────────────────
    *
    * All zero-cost. No network, no API key. Run before any external
@@ -475,10 +514,10 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
       ),
       // Regrid — gated on initial thinness. queryRegrid itself no-ops
       // without the API key, so the cost when disabled is 0.
-      thinEnoughForRegrid
+      thinEnoughForRegrid && allow("regrid")
         ? trace("regrid", () => queryRegrid(ctx.address, ctx.zip ?? null))
         : Promise.resolve(null),
-      // Contractor license board — gated on business name + state.
+      // Contractor license board (free) — gated on business name + state.
       businessName && ctx.state && !result.phone
         ? trace("contractor_license", () =>
             lookupContractorLicense(businessName, ctx.state!),
@@ -486,7 +525,7 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
         : Promise.resolve(null),
       // OpenCorporates — gated on business name. Gate strictly on
       // owner_name still-null (500/day free tier is precious).
-      businessName && !result.owner_name
+      businessName && !result.owner_name && allow("opencorporates")
         ? trace("opencorporates", () =>
             lookupCompanyPrincipal(businessName, ctx.state),
           )
@@ -494,7 +533,7 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
       // Google Places — gated on business-name-needing-phone. Prefer
       // Google over Yelp (broader dataset, newer). Skips automatically
       // when no API key or quota exhausted.
-      needsBizPhone
+      needsBizPhone && allow("google_places")
         ? trace("google_places", () =>
             lookupGooglePlaces({
               businessName: businessName!,
@@ -508,7 +547,7 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
       // this parallel bundle. Can't know in advance, so we run it
       // concurrently; it's cheap, and Yelp sometimes has phones
       // Google doesn't.
-      needsBizPhone
+      needsBizPhone && allow("yelp")
         ? trace("yelp", () =>
             lookupYelp({
               businessName: businessName!,
@@ -616,7 +655,7 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
   }
 
   /* ── Pass 7: FEC contributor (gated) ───────────────────────────── */
-  if (result.owner_first && result.owner_last) {
+  if (result.owner_first && result.owner_last && allow("fec")) {
     const fec: FECContributorResult | null = await lookupFECContributor({
       firstName: result.owner_first,
       lastName: result.owner_last,
@@ -662,7 +701,8 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
   const hunterShouldFire =
     !result.email &&
     ctx.applicant_classification === "contractor" &&
-    !!ctx.contractor_name;
+    !!ctx.contractor_name &&
+    allow("hunter_io");
   const [voterHit, emailHit] = await Promise.all([
     !result.phone && ctx.state && result.owner_last && ctx.zip
       ? trace("voter_reg_vendor", () =>
@@ -708,24 +748,25 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
   const apolloShouldFire =
     ctx.applicant_classification === "contractor" &&
     !!apolloBusinessName &&
-    (!result.email || !result.phone);
+    (!result.email || !result.phone) &&
+    allow("apollo");
 
   if (result.phone || ctx.zip || ctx.address || apolloShouldFire) {
     const [phoneNumverify, phoneCloudmersive, addressNormalized, weather, apollo] =
       await Promise.all([
-        result.phone
+        result.phone && allow("numverify")
           ? trace("numverify", () =>
               import("./numverify").then((m) => m.lookupPhoneMetadata(result.phone!)),
             )
           : Promise.resolve(null),
-        result.phone
+        result.phone && allow("cloudmersive_phone")
           ? trace("cloudmersive_phone", () =>
               import("./cloudmersive").then((m) =>
                 m.lookupPhoneCloudmersive(result.phone!),
               ),
             )
           : Promise.resolve(null),
-        ctx.address
+        ctx.address && allow("cloudmersive_address")
           ? trace("cloudmersive_address", () =>
               import("./cloudmersive").then((m) =>
                 m.lookupAddressCloudmersive(
@@ -734,7 +775,7 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
               ),
             )
           : Promise.resolve(null),
-        ctx.zip
+        ctx.zip && allow("weatherstack")
           ? trace("weatherstack", () =>
               import("./weatherstack").then((m) => m.lookupWeatherByZip(ctx.zip!)),
             )
