@@ -69,7 +69,7 @@ jobs:
             case "$SLOT" in
               00:00) due+=(openfema-ia) ;;
               00:30) due+=(state-licenses-rotate) ;;
-              02:00) due+=(scrape cron-runs-cleanup) ;;
+              02:00) due+=(cron-runs-cleanup) ;;
               02:30) ;;
               03:00) due+=(engagement) ;;
               03:30) due+=(re-enrich) ;;
@@ -99,6 +99,13 @@ jobs:
               23:00) due+=(swdi-events) ;;
               23:30) due+=(openfema-nfip) ;;
             esac
+
+            # Permit ingest runs EVERY hour at :30 (2026-06-09 starvation
+            # fix): 24 runs/day x 50 sources = 1,200 source-scrapes/day,
+            # paired with the two-lane producer/explorer rotation in
+            # sources-db.ts. The old daily run at 02:00 gave a 240-day
+            # full rotation across ~12k enabled sources.
+            if [ "$MM" = "30" ]; then due+=(scrape); fi
           fi
 
           if [ "${#due[@]}" -eq 0 ]; then
