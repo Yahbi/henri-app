@@ -350,7 +350,7 @@ interface SendModalProps {
 }
 
 function SendModal({ templateName, channel, message, onClose, onSend }: SendModalProps) {
-  const { data: leads = [] } = useLeads({ filters: { status: ["new", "contacted"] } });
+  const { data: leads = [], isLoading: leadsLoading } = useLeads({ filters: { status: ["new", "contacted"] } });
   const [selectedLead, setSelectedLead] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -435,18 +435,27 @@ function SendModal({ templateName, channel, message, onClose, onSend }: SendModa
               <label className="text-xs font-medium text-muted-foreground mb-1 block" htmlFor="send-lead">
                 Select Lead
               </label>
+              {/* Disabled-while-loading so the picker doesn't flash an
+                  empty "Choose a lead..." list before the fetch lands. */}
               <select
                 id="send-lead"
                 value={selectedLead}
                 onChange={(e) => setSelectedLead(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                disabled={leadsLoading}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <option value="">Choose a lead...</option>
-                {leads.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.address ?? "Unknown address"}
-                  </option>
-                ))}
+                {leadsLoading ? (
+                  <option value="">Loading leads...</option>
+                ) : (
+                  <>
+                    <option value="">Choose a lead...</option>
+                    {leads.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.address ?? "Unknown address"}
+                      </option>
+                    ))}
+                  </>
+                )}
               </select>
             </div>
             <div className="flex justify-end gap-2">

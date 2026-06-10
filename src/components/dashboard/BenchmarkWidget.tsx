@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Minus, Award } from "lucide-react";
 import { useLeads } from "@/hooks/useLeads";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /* ─── Tier System ─── */
 type TierName = "Bronze" | "Silver" | "Gold" | "Platinum";
@@ -69,7 +70,7 @@ function MetricRow({ label, yours, peer, unit, lowerIsBetter = false }: {
 
 /* ─── Component ─── */
 export function BenchmarkWidget() {
-  const { data: leadsRaw } = useLeads();
+  const { data: leadsRaw, isLoading } = useLeads();
   const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
 
   // Mount-time reference so the 30-day window is stable across renders
@@ -115,7 +116,16 @@ export function BenchmarkWidget() {
         </div>
       </div>
 
-      {myStats ? (
+      {isLoading ? (
+        /* Skeleton rows while the leads fetch is in flight — previously
+         * this fell into the "Processing..." copy, which read as a stuck
+         * compute step rather than a loading state. */
+        <div className="space-y-2 py-2">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-1.5 w-full rounded-full" />
+        </div>
+      ) : myStats ? (
         <>
           <div className="divide-y divide-border">
             {/* Peer column is only rendered when we have a real peer-

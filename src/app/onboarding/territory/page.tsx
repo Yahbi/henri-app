@@ -7,6 +7,7 @@ import { Search, MapPin, Check, X, Loader2 } from "lucide-react";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
 import { useUser } from "@/hooks/useUser";
 import { createClient } from "@/lib/supabase/client";
+import { isGodModeEmail } from "@/lib/auth/god-mode";
 import { cn } from "@/lib/utils/cn";
 
 /* ── Plan ZIP limits ── */
@@ -156,7 +157,9 @@ const CITY_OPTIONS = Object.keys(CITY_ZIPS);
 export default function TerritoryPage() {
   const router = useRouter();
   const { profile } = useUser();
-  const [searchMode, setSearchMode] = useState<"city" | "zip">("city");
+  // ZIP entry is the PRIMARY mode — city search only covers a few pilot
+  // metros, while direct ZIP entry works anywhere in the US.
+  const [searchMode, setSearchMode] = useState<"city" | "zip">("zip");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [selectedZips, setSelectedZips] = useState<string[]>([]);
@@ -170,6 +173,8 @@ export default function TerritoryPage() {
   const [zipInput, setZipInput] = useState("");
   const [zipCheckResult, setZipCheckResult] = useState<{ available: boolean; zip: string } | null>(null);
   const [zipCheckLoading, setZipCheckLoading] = useState(false);
+  // Waitlist status per ZIP — "joining" | "joined" | "error"
+  const [waitlistStatus, setWaitlistStatus] = useState<Record<string, "joining" | "joined" | "error">>({});
 
   // Load plan from user profile
   useEffect(() => {
@@ -265,11 +270,74 @@ export default function TerritoryPage() {
     }
   }, [zipInput]);
 
+  // Join the waitlist for a taken ZIP via /api/territories/waitlist
+  // (wraps joinWaitlist() in src/lib/territory/ziplock.ts).
+  const handleJoinWaitlist = useCallback(async (zip: string) => {
+    setWaitlistStatus((prev) => ({ ...prev, [zip]: "joining" }));
+    try {
+      const r = await fetch("/api/territories/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zip }),
+      });
+      const body = await r.json().catch(() => ({}));
+      const alreadyOn =
+        typeof body?.error === "string" && body.error.includes("Already on the waitlist");
+      setWaitlistStatus((prev) => ({
+        ...prev,
+        [zip]: r.ok || alreadyOn ? "joined" : "error",
+      }));
+    } catch {
+      setWaitlistStatus((prev) => ({ ...prev, [zip]: "error" }));
+    }
+  }, []);
+
   const handleConfirm = async () => {
     if (selectedZips.length === 0) return;
     setSaving(true);
     setClaimError(null);
     try {
+      // Validate prereqs FIRST (license + plan + payment) so a failure
+      // here never leaves orphaned territory rows. Previously the claims
+      // fired before this check, claiming ZIPs for accounts that then
+      // got bounced back to an earlier onboarding step.
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setClaimError("Not signed in. Please log in again.");
+        setSaving(false);
+        return;
+      }
+      // Payment fact (2026-06-10 fix): check stripe_subscription_id, not
+      // stripe_customer_id — the customer id is stamped when a checkout
+      // SESSION is created (before any payment), so a user who cancelled
+      // at Stripe passed the old check. The subscription id is written
+      // only by the checkout.session.completed webhook. The server
+      // enforces the same fact (402 from /api/territories + inside the
+      // claim_territory RPC, migration 00106); this client check just
+      // routes the user to the right step with a clear message.
+      const { data: profileCheck } = await supabase
+        .from("profiles")
+        .select("stripe_subscription_id, plan, license_state")
+        .eq("id", user.id)
+        .single();
+      const hasPrereqs =
+        isGodModeEmail(user.email) ||
+        (!!profileCheck?.stripe_subscription_id &&
+          !!profileCheck?.plan &&
+          !!profileCheck?.license_state);
+      if (!hasPrereqs) {
+        setClaimError(
+          "Your account is missing required setup. Please complete license, plan, and payment first.",
+        );
+        setSaving(false);
+        // Re-route to the earliest unmet step so the user can finish.
+        if (!profileCheck?.license_state) router.push("/onboarding/license");
+        else if (!profileCheck?.plan) router.push("/onboarding/plan");
+        else router.push("/onboarding/payment");
+        return;
+      }
+
       // Claim each ZIP via the real API (enforces exclusivity via claim_territory RPC)
       const claimResults = await Promise.all(
         selectedZips.map(async (zip) => {
@@ -294,39 +362,12 @@ export default function TerritoryPage() {
         return;
       }
 
-      // Mark onboarding complete — but only after verifying the user
-      // actually has a Stripe customer attached (i.e., the payment step
-      // actually ran). Previously this flip happened unconditionally,
-      // which combined with the payment-step dev-bypass let users land
-      // on /dashboard without paying.
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profileCheck } = await supabase
-          .from("profiles")
-          .select("stripe_customer_id, plan, license_state")
-          .eq("id", user.id)
-          .single();
-        const hasPrereqs =
-          !!profileCheck?.stripe_customer_id &&
-          !!profileCheck?.plan &&
-          !!profileCheck?.license_state;
-        if (!hasPrereqs) {
-          setClaimError(
-            "Your account is missing required setup. Please complete license, plan, and payment first.",
-          );
-          setSaving(false);
-          // Re-route to the earliest unmet step so the user can finish.
-          if (!profileCheck?.license_state) router.push("/onboarding/license");
-          else if (!profileCheck?.plan) router.push("/onboarding/plan");
-          else router.push("/onboarding/payment");
-          return;
-        }
-        await supabase
-          .from("profiles")
-          .update({ onboarding_completed: true })
-          .eq("id", user.id);
-      }
+      // Mark onboarding complete — prereqs were verified above, before
+      // any territory was claimed.
+      await supabase
+        .from("profiles")
+        .update({ onboarding_completed: true })
+        .eq("id", user.id);
 
       router.push("/dashboard");
     } catch (err) {
@@ -371,17 +412,6 @@ export default function TerritoryPage() {
           <div className="px-6 pt-3 pb-0 border-b border-border">
             <div className="flex gap-1 mb-3">
               <button
-                onClick={() => setSearchMode("city")}
-                className={cn(
-                  "flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors",
-                  searchMode === "city"
-                    ? "bg-primary text-white"
-                    : "bg-muted text-muted-foreground hover:bg-accent"
-                )}
-              >
-                Search by city
-              </button>
-              <button
                 onClick={() => setSearchMode("zip")}
                 className={cn(
                   "flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors",
@@ -392,19 +422,36 @@ export default function TerritoryPage() {
               >
                 Enter ZIP code
               </button>
+              <button
+                onClick={() => setSearchMode("city")}
+                className={cn(
+                  "flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors",
+                  searchMode === "city"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-accent"
+                )}
+              >
+                Search by city
+              </button>
             </div>
 
             {searchMode === "city" ? (
               <div className="relative mb-3">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => { setSearchQuery(e.target.value); setShowDropdown(true); }}
-                  onFocus={() => setShowDropdown(true)}
-                  placeholder="Search for a city..."
-                  className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
+                <p className="text-[11px] text-muted-foreground mb-2">
+                  City search covers a few pilot metros - enter your ZIP
+                  directly for anywhere in the US.
+                </p>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => { setSearchQuery(e.target.value); setShowDropdown(true); }}
+                    onFocus={() => setShowDropdown(true)}
+                    placeholder="Search for a city..."
+                    className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
                 {showDropdown && searchQuery.length > 0 && (
                   <div className="absolute left-0 right-0 top-full mt-1 bg-card border border-border rounded-lg shadow-lg z-20 max-h-48 overflow-y-auto">
                     {filteredCities.length > 0 ? filteredCities.map((city) => (
@@ -472,6 +519,25 @@ export default function TerritoryPage() {
                     {selectedZips.includes(zipCheckResult.zip) && (
                       <span className="text-xs text-primary font-semibold ml-2">Added</span>
                     )}
+                    {!zipCheckResult.available && (
+                      waitlistStatus[zipCheckResult.zip] === "joined" ? (
+                        <span className="text-xs font-semibold text-[#3D9970] ml-2 text-right">
+                          On the waitlist - we&apos;ll email you when it opens
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleJoinWaitlist(zipCheckResult.zip)}
+                          disabled={waitlistStatus[zipCheckResult.zip] === "joining"}
+                          className="text-xs font-semibold text-primary hover:underline ml-2 disabled:opacity-50"
+                        >
+                          {waitlistStatus[zipCheckResult.zip] === "joining"
+                            ? "Joining..."
+                            : waitlistStatus[zipCheckResult.zip] === "error"
+                              ? "Retry waitlist"
+                              : "Join waitlist"}
+                        </button>
+                      )
+                    )}
                   </div>
                 )}
               </div>
@@ -482,7 +548,11 @@ export default function TerritoryPage() {
           <div className="px-6 py-2.5 border-b border-border bg-bg-subtle">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                {selectedCity ? `ZIPs in ${cityData?.city}` : "Select a city to see ZIPs"}
+                {selectedCity
+                  ? `ZIPs in ${cityData?.city}`
+                  : searchMode === "zip"
+                    ? "Check a ZIP above to add it"
+                    : "Select a city to see ZIPs"}
               </span>
               <span className={cn(
                 "text-xs font-bold px-2 py-0.5 rounded-full",
@@ -503,20 +573,26 @@ export default function TerritoryPage() {
                   const isSelected = selectedZips.includes(z.zip);
                   const isFull = selectedZips.length >= maxZips && !isSelected;
                   const disabled = z.loading || !z.available || isFull;
+                  const isTaken = !z.available && !z.loading;
+                  const wl = waitlistStatus[z.zip];
                   return (
-                    <button
+                    <div
                       key={z.zip}
-                      onClick={() => z.available && !z.loading && toggleZip(z.zip)}
-                      disabled={disabled}
                       className={cn(
-                        "w-full text-left px-6 py-3 flex items-center justify-between transition-colors",
+                        "w-full px-6 py-3 flex items-center justify-between gap-2 transition-colors",
                         isSelected && "bg-primary-04",
-                        !z.available && !z.loading && "opacity-50 cursor-not-allowed",
                         isFull && z.available && "opacity-40",
                         z.available && !isSelected && !isFull && !z.loading && "hover:bg-bg-subtle"
                       )}
                     >
-                      <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => z.available && !z.loading && toggleZip(z.zip)}
+                        disabled={disabled}
+                        className={cn(
+                          "flex-1 text-left flex items-center gap-3 min-w-0",
+                          isTaken && "opacity-50 cursor-not-allowed"
+                        )}
+                      >
                         <div className={cn(
                           "w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors",
                           isSelected
@@ -526,32 +602,60 @@ export default function TerritoryPage() {
                               : "border-destructive/30 bg-destructive/5"
                         )}>
                           {isSelected && <Check className="h-3 w-3 text-white" />}
-                          {!z.available && !z.loading && <X className="h-3 w-3 text-destructive/50" />}
+                          {isTaken && <X className="h-3 w-3 text-destructive/50" />}
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <span className="text-sm font-medium text-foreground">{z.zip}</span>
                           <span className="text-xs text-muted-foreground ml-2">{z.name}</span>
                         </div>
-                      </div>
-                      <span className={cn(
-                        "text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full",
-                        isSelected && "bg-primary text-white",
-                        z.loading && "bg-muted text-muted-foreground",
-                        !z.loading && !z.available && "bg-destructive/10 text-destructive",
-                        !z.loading && z.available && !isSelected && "bg-[rgba(61,153,112,0.1)] text-[#3D9970]"
-                      )}>
-                        {z.loading ? "Checking..." : isSelected ? "Selected" : z.available ? "Available" : "Taken"}
-                      </span>
-                    </button>
+                      </button>
+                      {isTaken ? (
+                        wl === "joined" ? (
+                          <span className="text-[10px] font-semibold text-[#3D9970] text-right leading-tight">
+                            On the waitlist - we&apos;ll email you when it opens
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-destructive/10 text-destructive">
+                              Taken
+                            </span>
+                            <button
+                              onClick={() => handleJoinWaitlist(z.zip)}
+                              disabled={wl === "joining"}
+                              className="text-[11px] font-semibold text-primary hover:underline disabled:opacity-50"
+                            >
+                              {wl === "joining"
+                                ? "Joining..."
+                                : wl === "error"
+                                  ? "Retry waitlist"
+                                  : "Join waitlist"}
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <span className={cn(
+                          "shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full",
+                          isSelected && "bg-primary text-white",
+                          z.loading && "bg-muted text-muted-foreground",
+                          !z.loading && z.available && !isSelected && "bg-[rgba(61,153,112,0.1)] text-[#3D9970]"
+                        )}>
+                          {z.loading ? "Checking..." : isSelected ? "Selected" : "Available"}
+                        </span>
+                      )}
+                    </div>
                   );
                 })}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-full py-16 text-center px-6">
                 <MapPin className="h-10 w-10 text-muted-foreground/30 mb-3" />
-                <p className="text-sm font-medium text-foreground">Search for your city</p>
+                <p className="text-sm font-medium text-foreground">
+                  {searchMode === "zip" ? "Enter your ZIP code above" : "Search for your city"}
+                </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  We&apos;ll show you every available ZIP code in that area.
+                  {searchMode === "zip"
+                    ? "Direct ZIP entry works anywhere in the US."
+                    : "City search covers a few pilot metros - enter your ZIP directly for anywhere in the US."}
                 </p>
               </div>
             )}

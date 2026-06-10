@@ -7,6 +7,7 @@ import { formatCurrency } from "@/types/lead";
 import type { LeadStatus } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 /* ── Constants ── */
 
@@ -117,7 +118,7 @@ function TableRowSkeleton() {
 
 export default function PermitsPage() {
   const router = useRouter();
-  const { data: leads, isLoading } = useLeads();
+  const { data: leads, isLoading, error, refetch } = useLeads();
 
   const [tradeFilter, setTradeFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState<"all" | LeadStatus>("all");
@@ -310,6 +311,17 @@ export default function PermitsPage() {
               ))}
             </tbody>
           </table>
+        </Card>
+      ) : error ? (
+        /* Fetch failed — alert-with-retry INSTEAD of the empty state, so a
+         * DB hiccup doesn't read as "no permits in your territory". */
+        <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+          <p className="text-sm text-muted-foreground">
+            Couldn&apos;t load permits &mdash; check your connection and retry.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            Retry
+          </Button>
         </Card>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">

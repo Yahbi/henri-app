@@ -61,7 +61,11 @@ export const BUDGETS = [
   "$100K+",
 ] as const;
 
-export const TOTAL_STEPS = 8;
+/* Photo step removed 2026-06-10 (truthfulness): photos were collected as
+ * filenames only and POSTed as an empty array — silently discarded. Don't
+ * collect what we drop. Flow is now 7 steps:
+ * trade → address → timeline → budget → description → contact → result. */
+export const TOTAL_STEPS = 7;
 
 export const HENRI_MESSAGES: Record<number, string> = {
   0: "Hi! I'm Henri AI. Let's find the perfect contractor for your project. What type of work do you need?",
@@ -69,9 +73,8 @@ export const HENRI_MESSAGES: Record<number, string> = {
   2: "Got it. When do you need this done?",
   3: "And what's your approximate budget?",
   4: "Tell me a bit more about your project. What work needs to be done?",
-  5: "Do you have any photos of the project area? This helps contractors give better estimates. You can skip this step.",
-  6: "Almost done! Just need your contact info so the contractor can reach you.",
-  7: "Analyzing your project...",
+  5: "Almost done! Just need your contact info so the contractor can reach you.",
+  6: "Analyzing your project...",
 };
 
 /* ------------------------------------------------------------------ */

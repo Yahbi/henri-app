@@ -305,11 +305,6 @@ function KanbanCard({
             {lead.trade}
           </span>
         )}
-        {lead.permitId && (
-          <span className="text-[10px] font-mono text-muted-foreground bg-[rgba(107,114,128,0.08)] px-1.5 py-0.5 rounded">
-            {lead.permitId}
-          </span>
-        )}
       </div>
 
       {/* Row 3: Permit description snippet */}
@@ -393,7 +388,7 @@ function ColumnSkeleton() {
 }
 
 export function KanbanBoard() {
-  const { data: leads, isLoading } = useLeads();
+  const { data: leads, isLoading, error, refetch } = useLeads();
   const updateStatus = useUpdateLeadStatus();
   const [draggedLead, setDraggedLead] = useState<{ lead: KanbanLead; fromCol: string } | null>(null);
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
@@ -576,7 +571,23 @@ export function KanbanBoard() {
           filtered-to-zero still shows the columns so the active filter
           stays visible and adjustable). */}
       <div className="flex-1 overflow-x-auto p-4">
-        {!isLoading && (leads ?? []).length === 0 ? (
+        {error ? (
+          /* Fetch failed — render an alert-with-retry INSTEAD of the empty
+           * state. Without this, a DB hiccup leaves data === undefined and
+           * the board shows "Your pipeline is empty", which reads as data
+           * loss. Mirrors the Leads tab's error banner pattern. */
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-bg-subtle p-4"
+          >
+            <p className="text-sm text-muted-foreground">
+              Couldn&apos;t load your pipeline &mdash; check your connection and retry.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Retry
+            </Button>
+          </div>
+        ) : !isLoading && (leads ?? []).length === 0 ? (
           <EmptyPipelineState />
         ) : (
         <div className="flex gap-4 h-full min-w-max">

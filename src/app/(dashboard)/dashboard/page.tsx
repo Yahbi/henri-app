@@ -4,8 +4,9 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRef, useState, useMemo, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { MapPin } from "lucide-react";
+import { MapPin, Map as MapIcon, List as ListIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils/cn";
 import { MapStyleSwitcher } from "@/components/map/MapStyleSwitcher";
 import { OverlayControls } from "@/components/map/OverlayControls";
 import type { OverlayState } from "@/components/map/OverlayControls";
@@ -295,6 +296,13 @@ function DashboardContent() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const COLLAPSED_WIDTH = LEFT_PANEL_COLLAPSED;
 
+  /* ── Mobile list/map toggle (below md only) ──
+   * Phones can't fit the side-by-side split, so below `md:` we stack:
+   * a full-width list OR a full-screen map, switched by the floating
+   * toggle button. Desktop (md+) ignores this state entirely — every
+   * class it drives is gated behind the md: breakpoint. */
+  const [mobileView, setMobileView] = useState<"list" | "map">("list");
+
   // Hydrate from localStorage on mount. Runs once; deliberate empty
   // deps. Wrapped in try/catch because storage access can throw in
   // private-browsing modes or when quota is exceeded — we never want
@@ -491,6 +499,11 @@ function DashboardContent() {
   const handleSelectLead = useCallback(
     (lead: LeadData) => {
       setActiveLead(lead);
+      // Mobile: the detail drawer renders inside the map container, so
+      // selecting a lead from the full-width list flips to map view —
+      // otherwise the drawer would open inside a hidden element. No-op
+      // on desktop (the state only drives md-gated classes).
+      setMobileView("map");
       if (lead.lat != null && lead.lng != null && mapInstance) {
         mapInstance.flyTo({
           center: [lead.lng, lead.lat],
@@ -527,7 +540,7 @@ function DashboardContent() {
       const t = setTimeout(() => mapInstance.resize(), 220);
       return () => clearTimeout(t);
     }
-  }, [leftWidth, bottomHeight, leftCollapsed, mapInstance]);
+  }, [leftWidth, bottomHeight, leftCollapsed, mobileView, mapInstance]);
 
   return (
     <div className="relative flex-1 flex flex-col overflow-hidden">
@@ -558,8 +571,14 @@ function DashboardContent() {
       {/* Leads panel — left side, resizable (or collapsed to rail) */}
       <div
         data-tour="leads-panel"
-        className="shrink-0 h-full transition-[width] duration-200 ease-out"
-        style={{ width: leftCollapsed ? COLLAPSED_WIDTH : leftWidth }}
+        className={cn(
+          // Mobile (<md): full-width list, hidden when the map view is
+          // active. Desktop (md+): the resizable split, width driven by
+          // the CSS var (inline styles can't be breakpoint-gated).
+          "shrink-0 h-full w-full transition-[width] duration-200 ease-out md:block md:w-[var(--left-w)]",
+          mobileView === "map" && "hidden",
+        )}
+        style={{ "--left-w": `${leftCollapsed ? COLLAPSED_WIDTH : leftWidth}px` } as React.CSSProperties}
       >
         {/* Render priority:
          *   1. Leads exist → show panel even while `isLoading=true`. The
@@ -594,12 +613,19 @@ function DashboardContent() {
           onPointerMove={onLeftHandleMove}
           onPointerUp={onLeftHandleUp}
           onDoubleClick={onLeftHandleDblClick}
-          className="w-1 shrink-0 cursor-col-resize bg-border hover:bg-primary/30 active:bg-primary/50 transition-colors touch-none select-none z-10"
+          className="hidden md:block w-1 shrink-0 cursor-col-resize bg-border hover:bg-primary/30 active:bg-primary/50 transition-colors touch-none select-none z-10"
         />
       )}
 
-      {/* Map area — fills remaining space */}
-      <div data-tour="lead-map" className="relative flex-1 min-h-0">
+      {/* Map area — fills remaining space. Mobile: hidden while the
+       * list view is active (the toggle swaps them full-screen). */}
+      <div
+        data-tour="lead-map"
+        className={cn(
+          "relative flex-1 min-h-0",
+          mobileView === "list" && "hidden md:block",
+        )}
+      >
         <div className="absolute inset-0">
           <MapDashboard
             ref={mapRef}
@@ -628,7 +654,7 @@ function DashboardContent() {
           {overlayState.weatherAlerts && weatherAlerts.length > 0 && (
             <WeatherAlertBanner
               alerts={weatherAlerts}
-              className="absolute top-4 left-72 right-72 z-20"
+              className="absolute top-4 left-4 right-4 md:left-72 md:right-72 z-20"
             />
           )}
 
@@ -701,6 +727,22 @@ function DashboardContent() {
           )}
         </div>
       </div>
+
+      {/* Mobile-only floating list/map toggle — bottom-right, above the
+       * drawer (z-20). Desktop keeps the resizable split; hidden md+. */}
+      <Button
+        type="button"
+        onClick={() => setMobileView((v) => (v === "list" ? "map" : "list"))}
+        className="md:hidden absolute bottom-4 right-4 z-30 h-11 shadow-lg"
+        aria-label={mobileView === "list" ? "Show map" : "Show list"}
+      >
+        {mobileView === "list" ? (
+          <MapIcon className="h-4 w-4" aria-hidden="true" />
+        ) : (
+          <ListIcon className="h-4 w-4" aria-hidden="true" />
+        )}
+        {mobileView === "list" ? "Map" : "List"}
+      </Button>
       </div>
     </div>
   );

@@ -61,9 +61,27 @@ export async function POST(request: NextRequest) {
     if (!isGodModeEmail(user.email)) {
       const { data: profile } = await supabase
         .from("profiles")
-        .select("plan")
+        .select("plan, stripe_subscription_id")
         .eq("id", user.id)
         .maybeSingle();
+
+      // Payment gate (2026-06-10 audit): `stripe_customer_id` is stamped
+      // when a checkout SESSION is created — before any payment — so it
+      // proved nothing. `stripe_subscription_id` is written only by the
+      // `checkout.session.completed` webhook, i.e. after Stripe actually
+      // started the subscription (incl. the 24h trial). Without this, a
+      // user who cancelled at the Stripe page could claim territories and
+      // use the dashboard with a self-asserted plan and no card on file.
+      if (!profile?.stripe_subscription_id) {
+        return NextResponse.json(
+          {
+            error: "payment_required",
+            message:
+              "Start your free trial to claim territories — complete checkout first.",
+          },
+          { status: 402 },
+        );
+      }
 
       const plan = profile?.plan ?? "starter";
       const maxZips = PLAN_ZIP_LIMITS[plan] ?? 5;

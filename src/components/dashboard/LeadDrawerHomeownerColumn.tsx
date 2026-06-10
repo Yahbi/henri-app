@@ -54,7 +54,7 @@ export function LeadDrawerHomeownerColumn({
   enrichLoading,
 }: LeadDrawerHomeownerColumnProps) {
   return (
-    <div className="shrink-0 w-[220px] flex flex-col justify-between border-l border-border pl-4 overflow-y-auto scrollbar-thin">
+    <div className="shrink-0 w-full sm:w-[220px] flex flex-col justify-between border-t pt-3 sm:border-t-0 sm:pt-0 sm:border-l border-border sm:pl-4 overflow-y-auto scrollbar-thin">
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">
           <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">

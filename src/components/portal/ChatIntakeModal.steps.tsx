@@ -14,7 +14,9 @@ import {
 /**
  * ChatIntakeModal.steps.tsx
  *
- * Audit-04-29 priority D step 2: extracts the 8-step JSX state machine
+ * Audit-04-29 priority D step 2: extracts the step JSX state machine
+ * (7 steps since the 2026-06-10 photo-step removal — photos were collected
+ * as filenames only and silently discarded, so the step was cut)
  * out of `ChatIntakeModal.tsx` so the parent file becomes a thin owner of
  * state + handlers, and the per-step input UI lives in one place.
  *
@@ -27,7 +29,7 @@ import {
  *     own state. They take controlled-input values + setters + a primary
  *     submit handler from the parent.
  *
- * Why one file, not 8: the steps share the same prop dictionary (parent
+ * Why one file, not 7: the steps share the same prop dictionary (parent
  * state lives in one component), and React's bundler can't tree-shake
  * individual step components anyway. One file with named exports is
  * the same shipped JS, fewer imports for the parent. If a single step
@@ -72,15 +74,7 @@ export interface IntakeStepAreaProps {
   onRefinementInputChange: (value: string) => void;
   onRefinementAnswer: () => void;
 
-  // Step 5 — Photos
-  photos: string[];
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
-  onPhotoUpload: () => void;
-  onPhotoSkip: () => void;
-  onPhotoContinue: () => void;
-  onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-
-  // Step 6 — Contact
+  // Step 5 — Contact
   contactName: string;
   contactPhone: string;
   contactEmail: string;
@@ -93,11 +87,16 @@ export interface IntakeStepAreaProps {
   consentGiven: boolean;
   onConsentChange: (value: boolean) => void;
 
-  // Step 7 — Result
+  // Step 6 — Result
   isComputing: boolean;
   score: number | null;
   matchedContractor: MatchContractor | null;
   intakeId: string | null;
+  /* True when the /api/intake POST failed. Renders a Retry button that
+   * re-POSTs the already-collected payload — the answers are all still in
+   * the parent's state, so the homeowner never redoes the steps. */
+  submitFailed: boolean;
+  onRetrySubmit: () => void;
   onClose: () => void;
 }
 
@@ -114,9 +113,8 @@ export function IntakeStepArea(props: IntakeStepAreaProps) {
       {step === 3 && <Step3Budget {...props} />}
       {step === 4 && <Step4Description {...props} />}
       {props.isRefinement && <RefinementInput {...props} />}
-      {step === 5 && <Step5Photos {...props} />}
-      {step === 6 && <Step6Contact {...props} />}
-      {step === 7 && <Step7Result {...props} />}
+      {step === 5 && <Step5Contact {...props} />}
+      {step === 6 && <Step6Result {...props} />}
     </>
   );
 }
@@ -124,7 +122,7 @@ export function IntakeStepArea(props: IntakeStepAreaProps) {
 /* ── BackLink ─────────────────────────────────────────────────────────────
  *
  * Tiny shared component for the "← Back" affordance. Rendered in every
- * step except Step0 (no previous step) and Step7 (terminal — submission
+ * step except Step0 (no previous step) and Step6 (terminal — submission
  * already fired, going back would be confusing). Refinement input also
  * skips it: the refinement loop is server-driven and rewinding mid-loop
  * has no clean state. */
@@ -343,75 +341,9 @@ function RefinementInput({
   );
 }
 
-/* ── Step 5: Photos ──────────────────────────────────────────────────── */
+/* ── Step 5: Contact info ────────────────────────────────────────────── */
 
-function Step5Photos({
-  photos,
-  fileInputRef,
-  onPhotoUpload,
-  onPhotoSkip,
-  onPhotoContinue,
-  onFileChange,
-  onBack,
-}: IntakeStepAreaProps) {
-  return (
-    <div className="flex flex-col gap-3 pt-2">
-      <BackLink onBack={onBack} />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        className="hidden"
-        onChange={onFileChange}
-      />
-      <button
-        onClick={onPhotoUpload}
-        className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-card px-6 py-8 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary-04"
-      >
-        <svg
-          className="h-6 w-6"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={1.5}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
-          />
-        </svg>
-        Click to upload photos
-      </button>
-      {photos.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {photos.length} file(s) selected
-        </p>
-      )}
-      <div className="flex gap-2">
-        <button
-          onClick={onPhotoSkip}
-          className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
-        >
-          Skip this step
-        </button>
-        {photos.length > 0 && (
-          <button
-            onClick={onPhotoContinue}
-            className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
-          >
-            Continue
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ── Step 6: Contact info ────────────────────────────────────────────── */
-
-function Step6Contact({
+function Step5Contact({
   contactName,
   contactPhone,
   contactEmail,
@@ -513,13 +445,15 @@ function Step6Contact({
   );
 }
 
-/* ── Step 7: Score + Match ───────────────────────────────────────────── */
+/* ── Step 6: Score + Match ───────────────────────────────────────────── */
 
-function Step7Result({
+function Step6Result({
   isComputing,
   score,
   matchedContractor,
   intakeId,
+  submitFailed,
+  onRetrySubmit,
   onClose,
 }: IntakeStepAreaProps) {
   if (isComputing) {
@@ -535,13 +469,27 @@ function Step7Result({
     );
   }
 
-  // Two render paths after submit:
+  // Three render paths after submit:
   //   1. Score + match card + "Go to project" CTA (real match)
   //   2. Just the "Go to project" CTA (submit succeeded but no contractor
   //      matched yet — intake is still persisted so the homeowner can
   //      revisit the page later)
-  // A third path (submit failed) leaves both null and the chat-bubble
-  // error message renders without this section.
+  //   3. Submit failed → Retry button. The error chat bubble explains;
+  //      this button re-POSTs the in-memory payload so the homeowner
+  //      never redoes the steps.
+  if (submitFailed) {
+    return (
+      <div className="pt-2">
+        <button
+          onClick={onRetrySubmit}
+          className="w-full rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+        >
+          Retry submission
+        </button>
+      </div>
+    );
+  }
+
   if (score == null && !intakeId) return null;
 
   return (

@@ -80,14 +80,48 @@ function PlanSelectionContent() {
   const [selected, setSelected] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Onboarding resume — when the pre-selection came from profiles.plan
+  // (not the URL), show a small "previously selected" hint.
+  const [resumedPlan, setResumedPlan] = useState<string | null>(null);
 
-  // Pre-select plan from URL param (e.g. ?plan=pro passed from pricing page)
+  // Pre-select plan from URL param (e.g. ?plan=pro passed from pricing page).
+  // When no URL param, fall back to the previously saved profiles.plan so a
+  // returning contractor resumes where they left off.
   useEffect(() => {
     const planParam = searchParams.get("plan");
     const validPlans = plans.map((p) => p.id);
     if (planParam && validPlans.includes(planParam)) {
       setSelected(planParam);
+      return;
     }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user || cancelled) return;
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("plan")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (cancelled) return;
+        const savedPlan = profile?.plan as string | undefined;
+        if (savedPlan && validPlans.includes(savedPlan)) {
+          // Don't clobber a click the user made while we were fetching.
+          setSelected((current) => current ?? savedPlan);
+          setResumedPlan(savedPlan);
+        }
+      } catch {
+        // Best-effort — fall back to no pre-selection.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [searchParams]);
 
   async function handleContinue() {
@@ -146,6 +180,15 @@ function PlanSelectionContent() {
           <p className="text-sm text-muted-foreground mt-1">
             Step 2 of 4 &mdash; All plans include a 24-hour free trial.
           </p>
+          {resumedPlan && selected === resumedPlan && (
+            <p className="text-xs text-muted-foreground mt-2">
+              You previously selected{" "}
+              <span className="font-medium text-foreground">
+                {plans.find((p) => p.id === resumedPlan)?.name ?? resumedPlan}
+              </span>
+              .
+            </p>
+          )}
         </div>
 
         {/* Plan Grid */}

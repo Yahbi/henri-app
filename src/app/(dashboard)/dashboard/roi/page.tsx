@@ -7,6 +7,7 @@ import { useUser } from "@/hooks/useUser";
 import { useIntelligence } from "@/hooks/useIntelligence";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { TrendingUp, TrendingDown, MapPin, Zap, BarChart3, Loader2 } from "lucide-react";
 import { formatCurrency } from "@/types/lead";
 
@@ -57,7 +58,7 @@ function SourceBar({ data, planPrice }: { data: { source: string; count: number 
 
 export default function ROIPage() {
   const { profile } = useUser();
-  const { data: leadsRaw, isLoading: leadsLoading } = useLeads();
+  const { data: leadsRaw, isLoading: leadsLoading, error: leadsError, refetch: refetchLeads } = useLeads();
   const { data: intel, isLoading: intelLoading } = useIntelligence();
   const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
 
@@ -407,6 +408,17 @@ export default function ROIPage() {
                   })}
                 </tbody>
               </table>
+            </Card>
+          ) : leadsError ? (
+            /* Fetch failed — alert-with-retry INSTEAD of the empty state,
+             * so a DB hiccup doesn't read as "no territory data". */
+            <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+              <p className="text-sm text-muted-foreground">
+                Couldn&apos;t load territory performance &mdash; check your connection and retry.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => refetchLeads()}>
+                Retry
+              </Button>
             </Card>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 border border-dashed border-border rounded-xl text-center">

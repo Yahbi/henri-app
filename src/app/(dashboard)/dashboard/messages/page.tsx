@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { Send } from "lucide-react";
+import Link from "next/link";
+import { Send, ArrowLeft } from "lucide-react";
 import { useLeads } from "@/hooks/useLeads";
 import { useAddLeadNote } from "@/hooks/useLeads";
 import { useUser } from "@/hooks/useUser";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils/cn";
 import type { Lead } from "@/types/lead";
 
 interface Message {
@@ -51,9 +54,15 @@ export default function MessagesPage() {
   const selected = contactedLeads.find((l) => l.id === selectedId) ?? null;
   const messages = useMemo(() => parseNotes(selected?.notes), [selected]);
 
+  // Auto-select fires once per mount only — the mobile back button clears
+  // the selection to return to the list, and re-running this effect would
+  // instantly re-select and trap the user in the thread view. Desktop
+  // behavior is unchanged (it has no deselect path).
+  const autoSelected = useRef(false);
   useEffect(() => {
     // Init selection once leads fetch settles; derived state depends on async data
-    if (contactedLeads.length > 0 && !selectedId) {
+    if (contactedLeads.length > 0 && !selectedId && !autoSelected.current) {
+      autoSelected.current = true;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedId(contactedLeads[0].id);
     }
@@ -79,8 +88,14 @@ export default function MessagesPage() {
           visible <h2> stays where it was. Plugs a11y gap G8. */}
       <h1 className="sr-only">Messages — Lead conversations</h1>
 
-      {/* Conversation list */}
-      <div className="w-[260px] shrink-0 border-r border-border bg-card flex flex-col">
+      {/* Conversation list — mobile: full-width and only when no thread
+       * is open. Desktop (md+): always-visible fixed column. */}
+      <div
+        className={cn(
+          "w-full md:w-[260px] shrink-0 border-r border-border bg-card flex-col",
+          selected ? "hidden md:flex" : "flex",
+        )}
+      >
         <div className="px-4 py-3 border-b border-border shrink-0">
           <h2 className="text-sm font-semibold text-foreground">Messages</h2>
           <p className="text-xs text-muted-foreground mt-0.5">Lead conversations</p>
@@ -122,21 +137,47 @@ export default function MessagesPage() {
         </div>
       </div>
 
-      {/* Thread */}
-      <div className="flex-1 flex flex-col bg-background">
+      {/* Thread — mobile: full-width and only when a thread is open
+       * (the back button returns to the list). Desktop: always visible. */}
+      <div
+        className={cn(
+          "flex-1 flex-col bg-background",
+          selected ? "flex" : "hidden md:flex",
+        )}
+      >
         {!selected ? (
-          <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-            Select a conversation
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              {contactedLeads.length === 0
+                ? "No conversations yet. Contact a lead to start a conversation."
+                : "Select a conversation"}
+            </p>
+            {contactedLeads.length === 0 && (
+              <Button asChild>
+                <Link href="/dashboard/leads">Browse your leads</Link>
+              </Button>
+            )}
           </div>
         ) : (
           <>
             {/* Header */}
-            <div className="px-5 py-3 border-b border-border shrink-0">
-              <p className="text-sm font-semibold text-foreground">{selected.address}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {selected.owner_name ?? [selected.owner_first, selected.owner_last].filter(Boolean).join(" ")}
-                {selected.phone ? ` · ${selected.phone}` : ""}
-              </p>
+            <div className="px-5 py-3 border-b border-border shrink-0 flex items-center gap-2">
+              {/* Mobile-only back to the conversation list */}
+              <button
+                type="button"
+                onClick={() => setSelectedId(null)}
+                className="md:hidden -ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                aria-label="Back to conversations"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              </button>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground truncate">{selected.address}</p>
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                  {selected.owner_name ?? [selected.owner_first, selected.owner_last].filter(Boolean).join(" ")}
+                  {selected.phone ? ` · ${selected.phone}` : ""}
+                </p>
+              </div>
             </div>
 
             {/* Messages */}

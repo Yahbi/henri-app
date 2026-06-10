@@ -45,8 +45,8 @@ function makeMessage(from: Message["from"], text: string): Message {
  *   - Constants + presentational primitives → ./ChatIntakeModal.parts
  *     (TRADES, TIMELINES, BUDGETS, ProgressDots, HenriBubble,
  *      UserBubble, OptionCard, ScoreResult, MatchCard, StarIcon)
- *   - 8-step input UI dispatcher           → ./ChatIntakeModal.steps
- *     (Step0Trade … Step7Result, RefinementInput)
+ *   - 7-step input UI dispatcher           → ./ChatIntakeModal.steps
+ *     (Step0Trade … Step6Result, RefinementInput)
  *
  * What's left in this file: the modal shell (FocusTrap + scrim + header
  * with ProgressDots), the chat bubble log, and the state machine
@@ -74,7 +74,6 @@ export function ChatIntakeModal({
   const [timeline, setTimeline] = useState("");
   const [budget, setBudget] = useState("");
   const [description, setDescription] = useState("");
-  const [photos, setPhotos] = useState<string[]>([]);
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -86,13 +85,17 @@ export function ChatIntakeModal({
   // in the UI rather than faking one (prior random-80s fallback removed).
   const [score, setScore] = useState<number | null>(0);
   const [isComputing, setIsComputing] = useState(false);
+  // True when the /api/intake POST failed — gates the Retry button so the
+  // user can re-submit the already-collected payload without redoing the
+  // whole flow (all answers are still in state).
+  const [submitFailed, setSubmitFailed] = useState(false);
   const [matchedContractor, setMatchedContractor] = useState<MatchContractor | null>(null);
   // Captured from the /api/intake POST response so the "Done" button can
   // redirect the homeowner to their persistent project page rather than
   // closing the modal into the void.
   const [intakeId, setIntakeId] = useState<string | null>(null);
 
-  // Refinement state (between description step 4 and photos step 5)
+  // Refinement state (between description step 4 and contact step 5)
   const [isRefinement, setIsRefinement] = useState(false);
   const [refinementIndex, setRefinementIndex] = useState(0);
   const [refinementAnswers, setRefinementAnswers] = useState<string[]>([]);
@@ -100,7 +103,6 @@ export function ChatIntakeModal({
   const [refinementLoading, setRefinementLoading] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   /* ---- auto-scroll ---- */
   useEffect(() => {
@@ -151,7 +153,6 @@ export function ChatIntakeModal({
       setTimeline("");
       setBudget("");
       setDescription("");
-      setPhotos([]);
       setContactName("");
       setContactPhone("");
       setContactEmail("");
@@ -159,6 +160,7 @@ export function ChatIntakeModal({
       setContactErrors({});
       setScore(0);
       setIsComputing(false);
+      setSubmitFailed(false);
       setIsRefinement(false);
       setRefinementIndex(0);
       setRefinementAnswers([]);
@@ -338,29 +340,6 @@ export function ChatIntakeModal({
     }
   }, [refinementInput, refinementAnswers, refinementIndex, selectedTrade, initialTrade, refinementLoading]);
 
-  const handlePhotoSkip = useCallback(() => {
-    advance("Skipped photos", 6);
-  }, [advance]);
-
-  const handlePhotoUpload = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
-
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-      const names = Array.from(files).map((f) => f.name);
-      setPhotos(names);
-      advance(`Uploaded ${names.length} photo(s)`, 6);
-    },
-    [advance],
-  );
-
-  const handlePhotoContinue = useCallback(() => {
-    advance(`Uploaded ${photos.length} photo(s)`, 6);
-  }, [advance, photos.length]);
-
   const validateContact = useCallback(() => {
     const errors: Record<string, string> = {};
     if (!contactName.trim()) errors.name = "Name is required";
@@ -378,86 +357,91 @@ export function ChatIntakeModal({
     return Object.keys(errors).length === 0;
   }, [contactName, contactPhone, contactEmail]);
 
+  /* Submit intake to API → match contractor → notify.
+   * Extracted from handleContactSubmit so the Retry button on the failure
+   * path can re-POST the already-collected payload without making the
+   * homeowner redo the whole flow. */
+  const submitIntake = useCallback(async () => {
+    setIsComputing(true);
+    setSubmitFailed(false);
+    try {
+      const res = await fetch("/api/intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          zip: initialZip || address || "",
+          trade: initialTrade || selectedTrade || "",
+          timeline: timeline || null,
+          budget_range: budget || null,
+          description: description || null,
+          refinement_answers: refinementAnswers,
+          contact_name: contactName,
+          contact_phone: contactPhone,
+          contact_email: contactEmail,
+          henri_score: null, // Let server compute
+          // Module 5 — when this is true the API stamps consent_given_at +
+          // consent_text_version on the intake row. Without it, the
+          // outreach hygiene gate refuses every send for this intake.
+          consent_given: consentGiven,
+          consent_text_version: "v1.2026-05-09",
+        }),
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const result = await res.json();
+      // Server computes the real score via the deterministic scoring
+      // engine. If it's missing for any reason, omit the score from
+      // the UI rather than faking one with Math.random — the prior
+      // `85 + random(0-15)` fallback misled homeowners into thinking
+      // they had a real scored match when we silently failed.
+      const computed: number | null =
+        typeof result.henri_score === "number" ? result.henri_score : null;
+      setScore(computed);
+      if (result.intake_id) setIntakeId(result.intake_id);
+      // The API returns `contractors[]` (array); the first entry is the
+      // primary match.
+      const primary = Array.isArray(result.contractors)
+        ? result.contractors[0]
+        : result.contractor;
+      if (primary) setMatchedContractor(primary);
+      setMessages((prev) => [
+        ...prev,
+        makeMessage(
+          "henri",
+          computed != null
+            ? (result.matched
+                ? `Your project scored ${computed}/100. We found a great contractor for you.`
+                : `Your project scored ${computed}/100. We're matching the best contractor in your area — you'll hear back shortly.`)
+            : "Your project is in. We're matching you with a local contractor now — you'll hear back shortly.",
+        ),
+      ]);
+    } catch {
+      // Submission failed entirely. Don't fake a score; tell the user
+      // and surface a Retry button (the answers are all still in state,
+      // so retrying re-POSTs without redoing the steps).
+      setScore(null);
+      setSubmitFailed(true);
+      setMessages((prev) => [
+        ...prev,
+        makeMessage(
+          "henri",
+          "Something went wrong submitting your project. Please check your connection and retry — we don't want to lose your details.",
+        ),
+      ]);
+    } finally {
+      setIsComputing(false);
+    }
+  }, [initialZip, initialTrade, address, selectedTrade, timeline, budget, description, refinementAnswers, contactName, contactPhone, contactEmail, consentGiven]);
+
   const handleContactSubmit = useCallback(() => {
     if (!validateContact()) return;
     setMessages((prev) => [
       ...prev,
       makeMessage("user", `${contactName} | ${contactPhone} | ${contactEmail}`),
-      makeMessage("henri", HENRI_MESSAGES[7]),
+      makeMessage("henri", HENRI_MESSAGES[6]),
     ]);
-    setStep(7);
-    setIsComputing(true);
-
-    /* Submit intake to API → match contractor → notify */
-    (async () => {
-      try {
-        const res = await fetch("/api/intake", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            zip: initialZip || address || "",
-            trade: initialTrade || selectedTrade || "",
-            timeline: timeline || null,
-            budget_range: budget || null,
-            description: description || null,
-            refinement_answers: refinementAnswers,
-            photos: [],
-            contact_name: contactName,
-            contact_phone: contactPhone,
-            contact_email: contactEmail,
-            henri_score: null, // Let server compute
-            // Module 5 — when this is true the API stamps consent_given_at +
-            // consent_text_version on the intake row. Without it, the
-            // outreach hygiene gate refuses every send for this intake.
-            consent_given: consentGiven,
-            consent_text_version: "v1.2026-05-09",
-          }),
-        });
-        if (!res.ok) throw new Error(`Server returned ${res.status}`);
-        const result = await res.json();
-        // Server computes the real score via the deterministic scoring
-        // engine. If it's missing for any reason, omit the score from
-        // the UI rather than faking one with Math.random — the prior
-        // `85 + random(0-15)` fallback misled homeowners into thinking
-        // they had a real scored match when we silently failed.
-        const computed: number | null =
-          typeof result.henri_score === "number" ? result.henri_score : null;
-        setScore(computed);
-        if (result.intake_id) setIntakeId(result.intake_id);
-        // The API returns `contractors[]` (array); the first entry is the
-        // primary match.
-        const primary = Array.isArray(result.contractors)
-          ? result.contractors[0]
-          : result.contractor;
-        if (primary) setMatchedContractor(primary);
-        setMessages((prev) => [
-          ...prev,
-          makeMessage(
-            "henri",
-            computed != null
-              ? (result.matched
-                  ? `Your project scored ${computed}/100. We found a great contractor for you.`
-                  : `Your project scored ${computed}/100. We're matching the best contractor in your area — you'll hear back shortly.`)
-              : "Your project is in. We're matching you with a local contractor now — you'll hear back shortly.",
-          ),
-        ]);
-      } catch {
-        // Submission failed entirely. Don't fake a score; tell the user
-        // the intake was received and we'll follow up (the record is
-        // written server-side only on success, so they may need to retry).
-        setScore(null);
-        setMessages((prev) => [
-          ...prev,
-          makeMessage(
-            "henri",
-            "Something went wrong submitting your project. Please check your connection and retry — we don't want to lose your details.",
-          ),
-        ]);
-      } finally {
-        setIsComputing(false);
-      }
-    })();
-  }, [validateContact, contactName, contactPhone, contactEmail, initialZip, initialTrade, address, selectedTrade, timeline, budget, description, refinementAnswers, consentGiven]);
+    setStep(6);
+    void submitIntake();
+  }, [validateContact, contactName, contactPhone, contactEmail, submitIntake]);
 
   /* ---- ESC to close ---- */
   useEffect(() => {
@@ -572,12 +556,6 @@ export function ChatIntakeModal({
               refinementLoading={refinementLoading}
               onRefinementInputChange={setRefinementInput}
               onRefinementAnswer={handleRefinementAnswer}
-              photos={photos}
-              fileInputRef={fileInputRef}
-              onPhotoUpload={handlePhotoUpload}
-              onPhotoSkip={handlePhotoSkip}
-              onPhotoContinue={handlePhotoContinue}
-              onFileChange={handleFileChange}
               contactName={contactName}
               contactPhone={contactPhone}
               contactEmail={contactEmail}
@@ -592,6 +570,8 @@ export function ChatIntakeModal({
               score={score}
               matchedContractor={matchedContractor}
               intakeId={intakeId}
+              submitFailed={submitFailed}
+              onRetrySubmit={submitIntake}
               onClose={onClose}
             />
 

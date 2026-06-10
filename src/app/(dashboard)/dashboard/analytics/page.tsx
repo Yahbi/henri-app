@@ -302,7 +302,7 @@ export default function AnalyticsPage() {
   // the full account so the chart reflects the real year_built
   // distribution, not a score-ordered slice.
   const godMode = useGodMode();
-  const { data: leadsRaw, isLoading: leadsLoading } = useLeads({
+  const { data: leadsRaw, isLoading: leadsLoading, error: leadsError, refetch: refetchLeads } = useLeads({
     // God-mode: no soft cap so year_built distribution reflects the full
     // account, not a score-ordered slice. 500k = server hard ceiling.
     limit: godMode ? 500_000 : 2000,
@@ -364,7 +364,21 @@ export default function AnalyticsPage() {
           and routes to the claim surface (/onboarding/territory — same
           target as the dashboard empty state). All sections below stay
           rendered so the layout is familiar when data arrives. */}
-      {!leadsLoading && leads.length === 0 && (
+      {/* Fetch failed — alert-with-retry INSTEAD of the zero-leads
+          explainer. A DB hiccup leaves data === undefined, which would
+          otherwise render "you have no leads yet" over a page of zeros. */}
+      {leadsError && (
+        <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+          <p className="text-sm text-muted-foreground">
+            Couldn&apos;t load your leads &mdash; check your connection and retry.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => refetchLeads()}>
+            Retry
+          </Button>
+        </Card>
+      )}
+
+      {!leadsError && !leadsLoading && leads.length === 0 && (
         <Card className="p-4 border-primary/30 bg-primary-04">
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
             <div className="w-9 h-9 rounded-lg bg-primary-08 flex items-center justify-center shrink-0">
