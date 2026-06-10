@@ -7,6 +7,7 @@ import {
   normalizeStatus,
   parseDate,
   extractZip,
+  deriveState,
   parseCoord,
   parseMoney,
 } from "./normalizer";
@@ -60,7 +61,12 @@ export async function scrapeSocrataSource(
 
   for (let page = 0; page < maxPages; page++) {
     const offset = page * pageSize;
-    const url = `${source.endpoint}?$limit=${pageSize}&$offset=${offset}`;
+    // Freshness fix (2026-06-10): order by the Socrata system field `:id`
+    // DESC so each run pulls the NEWEST rows first. Without this, paging
+    // from offset 0 in default order only ever saw the oldest ~20k rows
+    // of large datasets, so new permits were never ingested. `:id` is a
+    // universal system column — safe on every Socrata dataset.
+    const url = `${source.endpoint}?$limit=${pageSize}&$offset=${offset}&$order=:id+DESC`;
 
     let records: Record<string, unknown>[];
     try {
@@ -108,7 +114,9 @@ export async function scrapeSocrataSource(
           source_id:       `${source.city.toLowerCase().replace(/\s+/g, "_")}_${rawId}`,
           source_city:     source.city,
           city:            source.city,
-          state:           source.state,
+          // Derive state from the address/ZIP so a source with a junk
+          // 'US' state (e.g. auto-discovered) still yields correct rows.
+          state:           deriveState(rawAddress || null, rawAddress ? extractZip(rawAddress) : null, source.state),
           source_type:     "socrata",
           permit_number:   rawId || null,
           permit_type:     classifyPermitType(rawType),

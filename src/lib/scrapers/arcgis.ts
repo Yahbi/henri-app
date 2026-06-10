@@ -17,6 +17,7 @@ import {
   normalizeStatus,
   parseDate,
   extractZip,
+  deriveState,
   parseCoord,
   parseMoney,
 } from "./normalizer";
@@ -198,25 +199,29 @@ export async function scrapeArcGISSource(
             if (attrLng !== null && Math.abs(attrLng) <= 180) lng = attrLng;
           }
 
+          const resolvedZip = (rawAddress ? extractZip(rawAddress) : null) ?? (() => {
+            // Fallback to explicit ZIPCODE / ZIP attributes when the
+            // address field doesn't carry one (Louisville etc.).
+            const raw = attr.ZIPCODE ?? attr.ZIP ?? attr.zipcode ?? attr.zip;
+            if (raw == null) return null;
+            const m = String(raw).match(/\b(\d{5})\b/);
+            return m ? m[1] : null;
+          })();
+
           return {
             source_id:       `${source.city.toLowerCase().replace(/\s+/g, "_")}_${rawId}`,
             source_city:     source.city,
             city:            source.city,
-            state:           source.state,
+            // Derive state from address/ZIP so junk 'US' source states
+            // (e.g. auto-discovered sources) still yield correct rows.
+            state:           deriveState(rawAddress || null, resolvedZip, source.state),
             source_type:     "arcgis",
             permit_number:   rawId,
             permit_type:     classifyPermitType(getField(attr, source.type_field) ?? ""),
             status:          normalizeStatus(getField(attr, source.status_field) ?? ""),
             description:     getField(attr, source.desc_field),
             address:         rawAddress || null,
-            zip:             (rawAddress ? extractZip(rawAddress) : null) ?? (() => {
-              // Fallback to explicit ZIPCODE / ZIP attributes when the
-              // address field doesn't carry one (Louisville etc.).
-              const raw = attr.ZIPCODE ?? attr.ZIP ?? attr.zipcode ?? attr.zip;
-              if (raw == null) return null;
-              const m = String(raw).match(/\b(\d{5})\b/);
-              return m ? m[1] : null;
-            })(),
+            zip:             resolvedZip,
             latitude:        lat,
             longitude:       lng,
             issued_date:     parseDate(rawDate),

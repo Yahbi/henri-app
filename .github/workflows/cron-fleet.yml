@@ -106,6 +106,14 @@ jobs:
             # sources-db.ts. The old daily run at 02:00 gave a 240-day
             # full rotation across ~12k enabled sources.
             if [ "$MM" = "30" ]; then due+=(scrape); fi
+
+            # Nationwide source discovery runs EVERY hour at :00 — walks
+            # one page of the Socrata Discovery + ArcGIS Hub catalogs per
+            # run, auto-maps and ingests new permit datasets, and re-sweeps
+            # forever (see /api/cron/discover-sources). This is the loop
+            # that grows coverage toward every municipality that publishes
+            # open permit data, then keeps watching for new ones.
+            if [ "$MM" = "00" ]; then due+=(discover-sources); fi
           fi
 
           if [ "${#due[@]}" -eq 0 ]; then
