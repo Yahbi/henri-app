@@ -149,8 +149,10 @@ function ChevronDown({ className = "" }: { className?: string }) {
 // holds permits from 38 states); the homepage's live label counts
 // states with new permits in the last 30 days (a smaller, ingest-
 // dependent number). Both are true; they measure different things.
+// 2026-06-10: crossed 1.5M clean permits (1,553,689 = 1,800,380 raw minus
+// 246,691 junk-state rows; live query). Bumped per the truthfulness rule.
 const STATS = [
-  { num: "1.4M+", label: "Live permits across major metro areas in 30+ US states" },
+  { num: "1.5M+", label: "Live permits across major metro areas in 30+ US states" },
   { num: "Daily", label: "Permits refreshed every day" },
   { num: "24 hrs", label: "Free trial to evaluate before any charge" },
 ];

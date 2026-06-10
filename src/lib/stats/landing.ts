@@ -149,6 +149,8 @@ export async function getLandingStats(): Promise<LandingStats> {
   // numbers come back on the next revalidate (1h cache window).
   let permitsResult: { count: number | null };
   let leadsResult: { count: number | null };
+  let junkStateCount = 0;
+  let junkNullCount = 0;
   try {
     const results = await withTimeout(
       Promise.all([
@@ -158,12 +160,28 @@ export async function getLandingStats(): Promise<LandingStats> {
         supabase
           .from("leads")
           .select("*", { count: "planned", head: true }),
+        // Junk-row subtraction (2026-06-09 truthfulness fix): loader bugs
+        // left rows with state='US' / state='' / state IS NULL. They have
+        // no ZIP, can never become leads, and inflating the headline with
+        // them violates the round-DOWN rule (audit found raw 1.80M vs
+        // clean 1.55M — the raw label would overclaim by 250k). Both
+        // probes are index-assisted on (state, ...) and cheap.
+        supabase
+          .from("permits")
+          .select("*", { count: "exact", head: true })
+          .in("state", ["US", ""]),
+        supabase
+          .from("permits")
+          .select("*", { count: "exact", head: true })
+          .is("state", null),
       ]),
       STATS_FETCH_TIMEOUT_MS,
       "getLandingStats counts",
     );
     permitsResult = { count: results[0].count };
     leadsResult = { count: results[1].count };
+    junkStateCount = results[2].count ?? 0;
+    junkNullCount = results[3].count ?? 0;
   } catch (err) {
     console.warn(
       "[landing-stats] count fetch failed, using fallback:",
@@ -172,7 +190,10 @@ export async function getLandingStats(): Promise<LandingStats> {
     return buildFallback();
   }
 
-  const permitsCount = permitsResult.count ?? 0;
+  const permitsCount = Math.max(
+    0,
+    (permitsResult.count ?? 0) - junkStateCount - junkNullCount,
+  );
   const leadsCount = leadsResult.count ?? 0;
 
   // Active states list. Two server-side aggregation paths were tried
