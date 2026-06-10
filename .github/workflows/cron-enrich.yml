@@ -1,0 +1,91 @@
+# Enrichment drain — runs the lead-enrichment pipeline aggressively.
+#
+# WHY A DEDICATED WORKFLOW: enrichment is the single biggest lever on lead
+# quality (live audit 2026-06-10: phone 1%, email 0%, score caps at 69 with
+# ZERO "Hot" leads — because contact_completeness is ~0 for every lead). The
+# 14-source orchestrator was fully built but starved: it sat in the shared
+# cron-fleet at 13:00-14:30 UTC, and GitHub throttles that fleet to ~2-6
+# fires/day, so enrich had 0 cron_runs rows. This workflow gives it its own
+# schedule + a drain loop so each fire does real work.
+#
+# WHICH ROUTE: the loop drains `/api/cron/re-enrich`, NOT `/api/cron/enrich`.
+# re-enrich stamps `last_enriched_at` on every processed lead (hit or miss),
+# so its eligibility filter is genuinely self-advancing and the corpus
+# terminates. (enrich's `year_built IS NULL` filter re-pulls un-enrichable
+# leads forever — fine for ongoing inflow on the fleet, wrong for a drain.)
+# A handful of `enrich` calls run first to sweep fresh inflow.
+#
+# Most fields fill from FREE in-DB sources (voter FL/NC/OH, county-GIS,
+# same-address permits, PPP, description mining) with no keys. The big
+# phone/email jump arrives once the operator provisions the free-tier API
+# keys (Numverify/Cloudmersive/Google/Hunter/OpenCorporates/FEC) — re-running
+# this same workflow then lifts phone toward ~10% and pushes leads past the
+# 75 Hot threshold.
+#
+# Requires the CRON_SECRET repo secret (already set).
+
+name: cron-enrich
+
+on:
+  schedule:
+    - cron: "20 */6 * * *" # every 6h at :20 (offset from scrape :30 / discover :00)
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long to drain (minutes, default 22)"
+        required: false
+        default: "22"
+
+concurrency:
+  group: cron-enrich
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Drain enrichment
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          MINUTES: ${{ github.event.inputs.minutes || '22' }}
+        run: |
+          set -uo pipefail
+          BASE="https://meethenri.com/api/cron"
+          deadline=$(( $(date +%s) + MINUTES*60 ))
+
+          fire() { # $1 = route
+            curl -sS -o /tmp/body.json -w "%{http_code}" \
+              --max-time 290 --retry 1 --retry-delay 5 \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$BASE/$1" || echo "000"
+          }
+
+          # 1) Sweep fresh inflow (year_built IS NULL) a few times.
+          for i in 1 2 3; do
+            code=$(fire enrich)
+            enr=$(python3 -c "import json;print(json.load(open('/tmp/body.json')).get('summary',{}).get('enriched',-1))" 2>/dev/null || echo "-1")
+            echo "enrich $i: HTTP $code enriched=$enr"
+            [ "$code" = "200" ] || { echo "::warning::enrich HTTP $code"; }
+            sleep 3
+          done
+
+          # 2) Drain the corpus via re-enrich until a batch scans 0 (queue
+          #    empty) or the time budget runs out. re-enrich self-advances.
+          runs=0; fails=0
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            code=$(fire re-enrich)
+            runs=$((runs+1))
+            scanned=$(python3 -c "import json;print(json.load(open('/tmp/body.json')).get('summary',{}).get('scanned',-1))" 2>/dev/null || echo "-1")
+            enr=$(python3 -c "import json;print(json.load(open('/tmp/body.json')).get('summary',{}).get('enriched',-1))" 2>/dev/null || echo "-1")
+            echo "re-enrich $runs: HTTP $code scanned=$scanned enriched=$enr"
+            if [ "$code" != "200" ]; then
+              fails=$((fails+1))
+              [ "$fails" -ge 3 ] && { echo "::error::3 consecutive re-enrich failures"; exit 1; }
+              sleep 20; continue
+            fi
+            fails=0
+            [ "$scanned" = "0" ] && { echo "Corpus drained."; break; }
+            sleep 2
+          done
+          echo "Done: $runs re-enrich batches."

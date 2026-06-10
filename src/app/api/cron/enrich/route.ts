@@ -6,6 +6,7 @@ import {
   resetTelemetry,
 } from "@/lib/enrichment/orchestrator";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -159,6 +160,11 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     logger.error("Enrich cron scan error", { error: error.message });
+    await logCronRun("enrich", t0, {
+      status: "error",
+      error: error.message,
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -333,6 +339,17 @@ export async function GET(request: NextRequest) {
   // Structured log lets us alert on "Hunter.io hit_rate dropped to 0%
   // overnight" or "OpenCorporates calls=0 for 24h => key revoked".
   logger.info("enrich cron complete", summary);
+
+  // Audit-2026-06-10: surface enrich in cron_runs so the operator + the
+  // data-health page can see fill-rate progress. `inserted` = rows whose
+  // enrichment actually changed a field; the GH drain workflow stops when
+  // a batch returns 0 processed (queue empty).
+  await logCronRun("enrich", t0, {
+    pulled: summary.scanned,
+    inserted: enriched,
+    summary,
+    trigger: detectTrigger(request),
+  });
 
   return NextResponse.json({ success: true, summary });
 }
