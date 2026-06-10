@@ -59,11 +59,18 @@ export async function POST(req: NextRequest) {
     // (prevents attacker-set Origin redirecting post-payment to malicious domain).
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    // Return URLs (2026-06-10 journey fix): both previously pointed at
+    // /dashboard, but middleware bounces not-yet-onboarded contractors
+    // from /dashboard back to /onboarding/license — so a user who had
+    // just paid landed on a blank license form with their progress
+    // apparently lost, and never reached the territory step. Success now
+    // continues the actual flow (territory claim); cancel returns to the
+    // payment step so they can retry or pick another plan.
     const session = await createCheckoutSession(
       PLAN_PRICES[plan],
       customerId,
-      `${appUrl}/dashboard?checkout=success`,
-      `${appUrl}/dashboard?checkout=cancelled`,
+      `${appUrl}/onboarding/territory?checkout=success`,
+      `${appUrl}/onboarding/payment?checkout=cancelled`,
       { user_id: user.id, plan }
     );
 

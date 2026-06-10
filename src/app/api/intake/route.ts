@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { findMatches, incrementAssignment } from "@/lib/matching/engine";
 import { notifyAllMatches } from "@/lib/matching/notify";
 import { sendIntakeConfirmation } from "@/lib/resend/intake-confirmation-email";
@@ -96,7 +96,16 @@ export async function POST(req: NextRequest) {
       consent_given, consent_text_version,
     } = parsed;
 
-    const supabase = await createClient();
+    // Service-role client (2026-06-10 funnel fix). This endpoint is public
+    // by design (anonymous homeowner intake) and is already guarded by the
+    // 5/hr/IP rate limit + Zod + consent gating above. Under the caller's
+    // RLS the whole pipeline was structurally dead: INSERT..RETURNING on
+    // homeowner_intakes failed (no SELECT lane for anon), the matching
+    // engine saw zero territories/profiles, and the notifications insert
+    // was service-role-only — so EVERY homeowner submission 500'd
+    // (verified live). The admin client is the documented pattern for
+    // validated public writes (same as /api/reviews).
+    const supabase = createAdminClient();
 
     /* ── 1. Run the matching engine ── */
     const matches = await findMatches(supabase, {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
@@ -30,11 +30,39 @@ export default function LoginPage() {
   const [magicSending, setMagicSending] = useState(false);
   const [magicSent, setMagicSent] = useState(false);
 
+  /* 2026-06-10 journey fix: middleware sends users here with
+   * ?redirect=<original destination> and the OAuth callback reports
+   * failures with ?error=... — both were previously ignored, so users
+   * lost their destination (e.g. a homeowner's project link) and failed
+   * code exchanges looked like a silent bounce. Only same-origin
+   * relative paths are honored (open-redirect guard). */
+  const getNextTarget = (): string => {
+    const r = new URLSearchParams(window.location.search).get("redirect");
+    return r && r.startsWith("/") && !r.startsWith("//") ? r : "/dashboard";
+  };
+
+  useEffect(() => {
+    const err = new URLSearchParams(window.location.search).get("error");
+    if (!err) return;
+    // Microtask defer keeps the effect body setState-free (React 19 lint);
+    // cancellation-guarded like the other hooks in this codebase.
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setAuthError(
+        "Sign-in didn't complete — please try again. If it keeps happening, request a fresh link.",
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const signInWithGoogle = async () => {
     setAuthError(null);
     const supabase = createClient();
     const callback = new URL("/auth/callback", window.location.origin);
-    callback.searchParams.set("next", "/dashboard");
+    callback.searchParams.set("next", getNextTarget());
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: callback.toString() },
@@ -57,7 +85,7 @@ export default function LoginPage() {
     setMagicSending(true);
     const supabase = createClient();
     const callback = new URL("/auth/callback", window.location.origin);
-    callback.searchParams.set("next", "/dashboard");
+    callback.searchParams.set("next", getNextTarget());
 
     const { error } = await supabase.auth.signInWithOtp({
       email: trimmed,
