@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { X, Hash, Calendar, FileText, TrendingUp, Zap, Clock, Target } from "lucide-react";
 import { useEnrichment } from "@/hooks/useEnrichment";
 import { usePermitHistory } from "@/hooks/usePermitHistory";
@@ -125,6 +126,25 @@ export function LeadDetailDrawer({
     lead?.id ?? null,
     lead?.permitUuid ?? lead?.permitNumber ?? fetchedPermit?.id ?? null,
   );
+
+  /* ── WS7: contact-view analytics (invisible to the contractor) ──
+   * When the drawer opens for a lead that actually carries contact info
+   * (phone / email / owner present), log a single best-effort view event.
+   * PURE ANALYTICS — no counter, no gating, no reveal UI. Fire-and-forget,
+   * cancellation-safe, errors swallowed. One POST per drawer-open per lead. */
+  const leadId = lead?.id ?? null;
+  const hasContact = !!(lead?.phone || lead?.email || lead?.owner);
+  useEffect(() => {
+    if (!leadId || !hasContact) return;
+    let cancelled = false;
+    void fetch(`/api/leads/${leadId}/view-contact`, { method: "POST" }).catch(
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+      void cancelled;
+    };
+  }, [leadId, hasContact]);
 
   if (!lead) return null;
 

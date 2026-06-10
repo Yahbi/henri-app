@@ -51,10 +51,21 @@ interface EnrichmentFill {
   hot_count: number | null;
 }
 
+interface QuotaRow {
+  source: string;
+  class: string;
+  used: number;
+  budget: number;
+  window: string;
+  period: string;
+  pct: number;
+}
+
 interface HealthResponse {
   ok: true;
   generated_at: string;
   enrichment?: EnrichmentFill | null;
+  quota?: QuotaRow[] | null;
   tables: HealthRow[];
 }
 
@@ -295,6 +306,24 @@ export default function DataHealthPage() {
         </div>
       )}
 
+      {data?.quota && data.quota.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-4 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-[13px] font-semibold text-foreground">
+              Enrichment API quota (this period)
+            </h2>
+            <span className="text-[11px] text-fg-subtle">
+              {data.quota.length} budgeted source{data.quota.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="space-y-3">
+            {data.quota.map((q) => (
+              <QuotaStat key={q.source} q={q} />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[12px]">
@@ -462,6 +491,32 @@ function FillStat({ label, pct }: { label: string; pct: number | null }) {
       <div className="text-[10px] uppercase tracking-wider text-fg-subtle">{label}</div>
       <div className={`text-lg font-semibold tabular-nums ${tone}`}>
         {pct == null ? "—" : `${pct}%`}
+      </div>
+    </div>
+  );
+}
+
+function QuotaStat({ q }: { q: QuotaRow }) {
+  // Bar colour by consumption: green <60%, amber 60-89%, rose >=90% so
+  // near-exhausted budgets read hot before they hard-stop enrichment.
+  const bar =
+    q.pct >= 90 ? "bg-rose-500" : q.pct >= 60 ? "bg-amber-500" : "bg-emerald-500";
+  const width = Math.min(100, Math.max(0, q.pct));
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[12px] mb-1">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[11px] text-foreground">{q.source}</span>
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border border-border bg-muted/40 text-fg-subtle">
+            {q.class}
+          </span>
+        </div>
+        <span className="tabular-nums text-fg-subtle">
+          {q.used.toLocaleString()} / {q.budget.toLocaleString()}
+        </span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-muted/50 overflow-hidden">
+        <div className={`h-full rounded-full ${bar}`} style={{ width: `${width}%` }} />
       </div>
     </div>
   );
