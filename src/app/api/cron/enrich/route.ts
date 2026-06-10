@@ -7,6 +7,17 @@ import {
 } from "@/lib/enrichment/orchestrator";
 import { logger } from "@/lib/logger";
 import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
+import {
+  getPriorityZipSets,
+  leadTier,
+  allPriorityZips,
+} from "@/lib/enrichment/priority";
+import {
+  loadQuotaRemaining,
+  recordSpend,
+  SOURCE_SPECS,
+  type QuotaRemaining,
+} from "@/lib/enrichment/quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -149,14 +160,51 @@ export async function GET(request: NextRequest) {
   //   - Pass 0 below (same-address lookup — runs inline for leads this
   //     cron DOES touch, since the guard `!lead.owner_name` means it
   //     only fires when needed).
-  const { data: leads, error } = await supabase
-    .from("leads")
-    .select(
-      "id, address, city, state, zip, year_built, home_sqft, assessed_value, owner_name, owner_first, owner_last, phone, email, score, permits(contractor_name, applicant_name, description)",
-    )
-    .is("year_built", null)
-    .not("address", "is", null)
-    .limit(BATCH_SIZE);
+  // Territory-scoped drain (WS2): pull leads in CLAIMED / target-metro ZIPs
+  // to the front of the batch, then fill the remainder from the general
+  // pool (tier 4). Each lead's tier gates which keyed/quota sources may
+  // run, and a per-source budget snapshot caps spend. Free in-DB sources
+  // run for every lead regardless.
+  const sets = await getPriorityZipSets(supabase);
+  const quotaRemaining: QuotaRemaining = await loadQuotaRemaining(supabase);
+  const SELECT_COLS =
+    "id, address, city, state, zip, year_built, home_sqft, assessed_value, owner_name, owner_first, owner_last, phone, email, score, permits(contractor_name, applicant_name, description)";
+
+  const priorityZips = allPriorityZips(sets);
+  const collected: Array<Record<string, unknown>> = [];
+  const seenIds = new Set<string>();
+  let error: { message: string } | null = null;
+
+  if (priorityZips.length > 0) {
+    const { data: pri, error: priErr } = await supabase
+      .from("leads")
+      .select(SELECT_COLS)
+      .in("zip", priorityZips)
+      .is("year_built", null)
+      .not("address", "is", null)
+      .order("score", { ascending: false })
+      .limit(BATCH_SIZE);
+    if (priErr) error = priErr;
+    for (const l of (pri ?? []) as Array<Record<string, unknown>>) {
+      if (!seenIds.has(l.id as string)) { seenIds.add(l.id as string); collected.push(l); }
+    }
+  }
+
+  // Fill the rest of the batch from the general pool (tier 4).
+  if (!error && collected.length < BATCH_SIZE) {
+    const { data: rest, error: restErr } = await supabase
+      .from("leads")
+      .select(SELECT_COLS)
+      .is("year_built", null)
+      .not("address", "is", null)
+      .limit(BATCH_SIZE - collected.length);
+    if (restErr) error = restErr;
+    for (const l of (rest ?? []) as Array<Record<string, unknown>>) {
+      if (!seenIds.has(l.id as string)) { seenIds.add(l.id as string); collected.push(l); }
+    }
+  }
+
+  const leads = collected;
 
   if (error) {
     logger.error("Enrich cron scan error", { error: error.message });
@@ -223,6 +271,10 @@ export async function GET(request: NextRequest) {
       // fetch it lazily in a targeted update pass.
       permit_text: [permitRow?.description as string | null | undefined],
       supabase,
+      // Territory-scoped tier + shared quota snapshot (WS2). Free sources
+      // always run; keyed/quota sources gate on tier + remaining budget.
+      tier: leadTier(lead.zip as string | null, sets),
+      quotaRemaining,
     });
 
     // Build a patch from the orchestrator result. Only write fields
@@ -335,6 +387,16 @@ export async function GET(request: NextRequest) {
     hitDeadline: Date.now() >= deadline,
     sources: perSource,
   };
+
+  // Persist actual keyed-source spend (from telemetry call-counts) so the
+  // next run's quota snapshot reflects it (WS2). Best-effort.
+  const spentBySource: Record<string, number> = {};
+  for (const s of perSource) {
+    if (SOURCE_SPECS[s.source]?.budget != null && s.calls > 0) {
+      spentBySource[s.source] = s.calls;
+    }
+  }
+  await recordSpend(supabase, spentBySource);
 
   // Structured log lets us alert on "Hunter.io hit_rate dropped to 0%
   // overnight" or "OpenCorporates calls=0 for 24h => key revoked".
