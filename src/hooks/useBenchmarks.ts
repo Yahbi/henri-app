@@ -38,6 +38,19 @@ export function useBenchmarks(
   /* Track the latest request to avoid stale responses */
   const requestIdRef = useRef(0);
 
+  /* requestIdRef only guards staleness BETWEEN requests — the latest
+   * request's response can still land after unmount and setState on an
+   * unmounted component. Track unmount explicitly (ref-cancelled pattern,
+   * mirrors useEnrichment) and check it before every setState. */
+  const unmountedRef = useRef(false);
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
   const fetchBenchmarks = useCallback(
     async (searchZip: string, searchTrade?: string, searchProjectType?: string) => {
       /* Require at least a partial ZIP to search */
@@ -59,23 +72,24 @@ export function useBenchmarks(
 
         const res = await fetch(`/api/benchmarks?${params.toString()}`);
 
-        /* Discard if a newer request was issued */
-        if (currentId !== requestIdRef.current) return;
+        /* Discard if a newer request was issued or we unmounted */
+        if (unmountedRef.current || currentId !== requestIdRef.current) return;
 
         if (!res.ok) {
           throw new Error("Failed to fetch benchmarks");
         }
 
         const data = await res.json();
+        if (unmountedRef.current || currentId !== requestIdRef.current) return;
         setBenchmarks(data.benchmarks ?? []);
         setZipPrefix(data.zip_prefix ?? searchZip.slice(0, 3));
       } catch (err) {
-        if (currentId !== requestIdRef.current) return;
+        if (unmountedRef.current || currentId !== requestIdRef.current) return;
         logger.error("useBenchmarks error", { error: err instanceof Error ? err.message : String(err) });
         setError(err instanceof Error ? err.message : "Unknown error");
         setBenchmarks([]);
       } finally {
-        if (currentId === requestIdRef.current) {
+        if (!unmountedRef.current && currentId === requestIdRef.current) {
           setIsLoading(false);
         }
       }

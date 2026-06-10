@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { hasStripe, hasTwilio, hasResend, hasOpenAI, hasSupabase } from "@/lib/env";
+import { logger } from "@/lib/logger";
 
 /**
  * GET /api/health
@@ -60,14 +61,21 @@ async function checkDatabase(): Promise<HealthCheck> {
       .select("*", { count: "estimated", head: true });
     const latency_ms = Date.now() - t0;
     if (error) {
-      return { status: "fail", latency_ms, error: error.message };
+      // Log the real error server-side; the public response gets a
+      // generic string so DB internals (schema names, connection
+      // details) never leak through an unauthenticated endpoint.
+      logger.error("health: database probe failed", { error: error.message });
+      return { status: "fail", latency_ms, error: "database unreachable" };
     }
     return { status: "ok", latency_ms };
   } catch (e) {
+    logger.error("health: database probe threw", {
+      error: e instanceof Error ? e.message : String(e),
+    });
     return {
       status: "fail",
       latency_ms: Date.now() - t0,
-      error: e instanceof Error ? e.message : String(e),
+      error: "database unreachable",
     };
   }
 }

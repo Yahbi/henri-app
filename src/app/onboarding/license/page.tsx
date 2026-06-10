@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ShieldCheck, CheckCircle2, AlertCircle, Loader2, Info } from "lucide-react";
+import { ShieldCheck, Check, CheckCircle2, AlertCircle, Loader2, Info } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -308,8 +308,11 @@ function LicenseVerificationContent() {
                     )}
                     {verify.status === "found" && verify.match && (
                       <>
-                        <div className="font-medium">
-                          ✓ Verified against the {state} licensing roster
+                        <div className="font-medium flex items-center gap-1">
+                          {/* lucide Check icon — never raw unicode glyphs
+                              (brand rule: SVG icons or text labels only). */}
+                          <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          Verified against the {state} licensing roster
                         </div>
                         <div className="text-[12px] mt-0.5 opacity-90">
                           {verify.match.business_name}

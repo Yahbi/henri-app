@@ -49,8 +49,13 @@ export async function POST(req: NextRequest) {
       // Table may not exist on all installs yet — surface a clear 501
       // rather than a 500 so the client can degrade gracefully.
       if (error.message?.includes("relation") || error.code === "42P01") {
+        // Operator breadcrumb stays server-side only: run migration
+        // 00026_review_responses.sql. Don't leak schema details to clients.
+        logApiError("reviews.respond.table_missing", error, {
+          hint: "Run migration 00026_review_responses.sql",
+        });
         return NextResponse.json(
-          { error: "review_responses table not yet migrated", hint: "Run migration 00026_review_responses.sql" },
+          { error: "review_responses table not yet migrated" },
           { status: 501 },
         );
       }

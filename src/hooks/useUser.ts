@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { logger } from "@/lib/logger";
 import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
@@ -50,7 +50,16 @@ export function useUser(): UseUserReturn {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const supabase = createClient();
+  // Memoize the client — createClient() constructs a new browser client on
+  // every call (src/lib/supabase/client.ts is not a module-level singleton),
+  // so calling it in the hook body produced a fresh reference each render.
+  // That fresh reference invalidated fetchProfile + the subscription effect
+  // below on every render, tearing down and re-creating the
+  // onAuthStateChange subscription continuously. With useMemo the client is
+  // stable for the component's lifetime, fetchProfile is stable, and the
+  // effect runs exactly once (subscription created once, unsubscribed in
+  // cleanup on unmount).
+  const supabase = useMemo(() => createClient(), []);
 
   const fetchProfile = useCallback(async (userId: string) => {
     // 2026-04-30: dropped points_balance, tier, total_jobs_won from

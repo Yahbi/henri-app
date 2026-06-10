@@ -42,26 +42,39 @@ export function useStripeTax(input: UseStripeTaxInput | null): {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Stable cache key — re-fetch only when inputs meaningfully change
+  // Stable cache key — re-fetch only when inputs meaningfully change.
+  // This is the ONLY effect dependency: the `input` object itself is a
+  // new reference on every consumer render (inline object literal in the
+  // Estimate Builder), so depending on it caused the effect to tear down
+  // and re-run every render (effect storm + per-render debounce resets).
+  // `enabled` is folded into the key so flipping it re-triggers the effect.
   const key = input
-    ? `${input.subtotal_cents}|${input.address.postal_code}|${input.address.state ?? ""}|${input.product_tax_code ?? ""}`
+    ? `${input.enabled === false ? "off" : "on"}|${input.subtotal_cents}|${input.address.postal_code}|${input.address.state ?? ""}|${input.product_tax_code ?? ""}`
     : null;
 
   useEffect(() => {
     if (!input || input.enabled === false || !key) return;
+
+    let cancelled = false;
+
     if (input.subtotal_cents <= 0) {
       // setState in an effect: strict mode flags direct calls. Defer
       // to the microtask queue so React batches outside this render
-      // frame. queueMicrotask is sync-safe under StrictMode.
+      // frame. queueMicrotask is sync-safe under StrictMode — but it can
+      // also run AFTER this effect's cleanup (unmount / key change), so
+      // it must respect the cancelled flag like every other setState here.
       queueMicrotask(() => {
+        if (cancelled) return;
         setResult(null);
         setLoading(false);
       });
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
-    let cancelled = false;
     queueMicrotask(() => {
+      if (cancelled) return;
       setLoading(true);
       setError(null);
     });
@@ -98,7 +111,14 @@ export function useStripeTax(input: UseStripeTaxInput | null): {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [key, input]);
+    // `input` is intentionally NOT a dependency — it is a fresh object
+    // reference every render. `key` serializes the fields that
+    // meaningfully change the tax result (subtotal, postal_code, state,
+    // tax code, enabled) — same semantics as the pre-existing cache key;
+    // line1/city deliberately excluded (US sales tax routes on ZIP+state,
+    // and including them would refire per keystroke in the address field).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
   return { result, loading, error };
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { requireContractor } from "@/lib/auth/requireContractor";
 import { logApiError } from "@/lib/log";
 import { logger } from "@/lib/logger";
 import { DraftReplyBodySchema, parseBody } from "@/lib/schemas/api";
@@ -43,12 +44,12 @@ export async function POST(req: NextRequest) {
     const reviewerName = sanitizeForDelimiter(reviewerIn.trim());
 
     // Scope to authenticated contractor so the business context comes from
-    // their profile (trade, company name).
+    // their profile (trade, company name). Contractor-facing reputation UI —
+    // homeowner sessions have no business drafting replies on Henri's dime.
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const { user } = gate;
     const { data: profile } = await supabase
       .from("profiles")
       .select("full_name, company_name, trade")

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import {
   checkRateLimit,
   getClientIp,
@@ -51,10 +52,33 @@ export async function GET(request: NextRequest) {
 /* ─── POST /api/referrals/validate — process signup with referral code ─── */
 /* Called during user registration when ref= query param is present */
 export async function POST(request: NextRequest) {
+  const ip = getClientIp(request);
+  const rl = checkRateLimit(`referrals.validate.post:${ip}`, {
+    maxRequests: 20,
+    windowMs: 60_000,
+  });
+  if (!rl.allowed) return rateLimitResponse(rl);
+
   const raw = await request.json().catch(() => ({}));
   const parsed = parseBody(ReferralValidateBodySchema, raw);
   if (parsed.response) return parsed.response;
   const { code, userId, email, role } = parsed.data;
+
+  /* Require an authenticated session and only allow the caller to process
+   * their OWN signup — otherwise the admin-client RPC below could be used
+   * to forge referral credit onto arbitrary user IDs. */
+  const authClient = await createClient();
+  const {
+    data: { user },
+  } = await authClient.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (userId !== user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const supabase = createAdminClient();
 

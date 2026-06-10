@@ -225,6 +225,10 @@ export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, dis
   return (
     <button
       onClick={onClick}
+      /* Selectable-card semantics: the card acts as a toggle for "this
+       * lead is the active one", so screen readers get the pressed
+       * state alongside the visual active border. */
+      aria-pressed={!!active}
       style={inlineBorderStyle}
       className={cn(
         "w-full text-left px-4 py-3 border-l-3 transition-colors",
@@ -237,7 +241,14 @@ export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, dis
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground truncate">
+          {/* `title` exposes the full address on hover — the virtualized
+           * list clamps every row to CARD_HEIGHT with overflow:hidden and
+           * this line is `truncate`d, so long addresses are otherwise
+           * unreadable. Minimal safe fix; no layout change. */}
+          <p
+            className="text-sm font-semibold text-foreground truncate"
+            title={lead.fullAddress || lead.addr}
+          >
             {/* Phase AA — saved indicator. Bookmark icon appears
                 inline ahead of the address so the contractor can
                 spot saved leads in the unfiltered list, not only

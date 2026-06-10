@@ -23,18 +23,18 @@ export function useSavedLeads() {
 
   const fetchSaved = useCallback(async () => {
     const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      if (!cancelledRef.current) {
-        setSavedIds(new Set());
-        setLoading(false);
-      }
-      return;
-    }
-
     try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      // Check the cancelled ref before EVERY setState — the auth await
+      // above can resolve after unmount.
+      if (cancelledRef.current) return;
+      if (!user) {
+        setSavedIds(new Set());
+        return;
+      }
+
       const { data, error } = await supabase
         .from("saved_leads")
         .select("lead_id")

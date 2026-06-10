@@ -22,18 +22,25 @@ export function useExclusivity(leadIds: string[] | undefined | null) {
   const [locks, setLocks] = useState<Record<string, ExclusivityLeadSummary>>({});
   const lastKey = useRef<string | null>(null);
 
+  // Stable serialization of the SORTED id list. The previous dependency
+  // array used positional values (length + first + last id), which missed
+  // membership changes in the middle of the array (e.g. a lead swapped at
+  // index 3 with length/endpoints unchanged → stale locks). Sorting first
+  // means reordering does NOT refetch, but any membership change does.
+  const idsKey = (leadIds ?? []).filter(Boolean).slice().sort().join(",");
+
   useEffect(() => {
     // Wedge-critical fetch effect — reset-on-empty + async lock fetch (Phase 0a).
     // Behavior change would affect lock-badge rendering; intentionally keeping
     // setState-in-effect pattern. See CLAUDE.md "Wedge contract".
     /* eslint-disable react-hooks/set-state-in-effect */
-    const ids = (leadIds ?? []).filter(Boolean);
+    const ids = idsKey ? idsKey.split(",") : [];
     if (ids.length === 0) {
       setLocks({});
       lastKey.current = null;
       return;
     }
-    const key = ids.slice().sort().join(",");
+    const key = idsKey;
     if (key === lastKey.current) return;
 
     let cancelled = false;
@@ -63,7 +70,7 @@ export function useExclusivity(leadIds: string[] | undefined | null) {
     })();
     return () => { cancelled = true; };
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [leadIds?.length, leadIds?.[0], leadIds?.[leadIds.length - 1]]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [idsKey]);
 
   return { locks };
 }

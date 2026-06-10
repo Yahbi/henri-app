@@ -1,8 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useRef, useState, useMemo, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { MapPin } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { MapStyleSwitcher } from "@/components/map/MapStyleSwitcher";
 import { OverlayControls } from "@/components/map/OverlayControls";
 import type { OverlayState } from "@/components/map/OverlayControls";
@@ -22,6 +25,7 @@ import type { LeadData } from "@/components/dashboard/LeadCard";
 import type { MapDashboardHandle } from "@/components/map/MapDashboard";
 import type maplibregl from "maplibre-gl";
 import { useLeads } from "@/hooks/useLeads";
+import { countHiddenByGeocodeFilter } from "@/hooks/useLeads.helpers";
 import { useGodMode } from "@/hooks/useGodMode";
 import { useLeadCount } from "@/hooks/useLeadCount";
 import { useUser } from "@/hooks/useUser";
@@ -178,14 +182,31 @@ function EmptyLeadsState() {
   return (
     <div className="flex flex-col h-full bg-card border-r border-border items-center justify-center p-8 text-center">
       <div className="w-14 h-14 rounded-full bg-primary-08 flex items-center justify-center mb-4">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-primary">
-          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
-        </svg>
+        <MapPin className="h-6 w-6 text-primary" aria-hidden="true" />
       </div>
       <p className="text-sm font-semibold text-foreground">No leads yet</p>
-      <p className="text-xs text-muted-foreground mt-1 max-w-[180px]">
-        Your territories are being monitored. Check back soon.
+      <p className="text-xs text-muted-foreground mt-1 max-w-[220px]">
+        Claim your first ZIP to start receiving leads. Henri monitors every
+        active territory and new leads land here automatically.
       </p>
+      {/* Primary CTA — the territory claim surface lives at
+       * /onboarding/territory (same target as the "Add ZIP" / "Claim your
+       * first ZIP" links on /settings/territories). Without it this empty
+       * state was a dead end for contractors with 0 territories. */}
+      <Button asChild className="mt-4">
+        <Link href="/onboarding/territory">
+          <MapPin className="h-4 w-4" aria-hidden="true" />
+          Claim your first ZIP
+        </Link>
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        className="mt-2 text-muted-foreground"
+        onClick={() => window.location.reload()}
+      >
+        Check again
+      </Button>
     </div>
   );
 }
@@ -416,6 +437,17 @@ function DashboardContent() {
     filters: { geocoded_only: !godMode },
   });
 
+  // "Never silently drop rows": the geocoded_only filter above excludes
+  // non-geocoded leads server-side, so they never reach the panel. Derive
+  // the hidden count from the total/geocoded counts (already fetched via
+  // useLeadCount) and surface it in the LeadsPanel, mirroring the capacity
+  // filter's "N filtered out" pattern.
+  const hiddenNonGeocoded = countHiddenByGeocodeFilter(
+    !godMode,
+    leadCount.total,
+    leadCount.geocoded,
+  );
+
   const leads = useMemo<LeadData[]>(
     () => (rawLeads ?? []).map(mapLead),
     [rawLeads],
@@ -453,7 +485,7 @@ function DashboardContent() {
     if (sw[0] !== ne[0] || sw[1] !== ne[1]) {
       mapInstance.fitBounds([sw, ne], { padding: 60, maxZoom: 14, duration: 1200 });
     }
-  }, [mapInstance, leads.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mapInstance, leads.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Select a lead and fly the map to its location */
   const handleSelectLead = useCallback(
@@ -546,6 +578,7 @@ function DashboardContent() {
             collapsed={leftCollapsed}
             onToggleCollapsed={() => setLeftCollapsed((c) => !c)}
             totalGeocoded={leadCount.geocoded}
+            hiddenNonGeocoded={hiddenNonGeocoded}
           />
         ) : isLoading ? (
           <LeadsPanelSkeleton />

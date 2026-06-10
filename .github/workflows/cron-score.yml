@@ -1,0 +1,41 @@
+# Score cron — every 20 minutes.
+#
+# WHY THIS EXISTS: the external scheduler (Hetzner crontab curling the Vercel
+# cron endpoints) went silent on 2026-05-14 and the lead pipeline froze:
+# 166k permits piled up unscored and zero leads were created for 3+ weeks.
+# vercel.json can only hold 2 native crons on the Hobby plan, so GitHub
+# Actions is the scheduler of record for everything else (see cron-fleet.yml).
+#
+# Score runs aggressively (every 20 min, 1,000 permits per run = up to
+# 72k/day) until the backlog drains, after which each run is a cheap no-op
+# rotator tick. The endpoint is idempotent and CRON_SECRET-gated.
+#
+# NOTE: schedule triggers only fire from the default branch. Requires the
+# repository secret CRON_SECRET (same value as the Vercel env var).
+
+name: cron-score
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: cron-score
+  cancel-in-progress: false
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger /api/cron/score
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/body.json -w "%{http_code}" \
+            --max-time 290 --retry 2 --retry-delay 5 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://meethenri.com/api/cron/score")
+          echo "HTTP $code"
+          cat /tmp/body.json
+          test "$code" = "200"

@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
+
+/* Zod schema — PATCH body. Caps ids at 500 so a single request can't
+ * carry an unbounded IN-list into the update query. */
+const NotificationsPatchSchema = z.object({
+  ids: z.array(z.string().uuid()).max(500).optional(),
+  markAllRead: z.boolean().optional(),
+});
 
 /* ─── GET /api/notifications — fetch user's notifications ─── */
 export async function GET(request: NextRequest) {
@@ -60,8 +68,15 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json();
-  const { ids, markAllRead } = body as { ids?: string[]; markAllRead?: boolean };
+  const body = await request.json().catch(() => null);
+  const parsed = NotificationsPatchSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid request", detail: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+  const { ids, markAllRead } = parsed.data;
 
   if (markAllRead) {
     const { error } = await supabase

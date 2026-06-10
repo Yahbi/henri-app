@@ -44,6 +44,19 @@ export async function POST(request: NextRequest) {
         logger.error("Twilio webhook invalid signature");
         return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
       }
+    } else {
+      logger.warn("Twilio signature not validated — TWILIO_AUTH_TOKEN unset");
+      // In production, never process unsigned webhook payloads — anyone
+      // could forge delivery-status updates against outreach_queue.
+      if (
+        process.env.NODE_ENV === "production" ||
+        process.env.VERCEL_ENV === "production"
+      ) {
+        return NextResponse.json(
+          { error: "Webhook signature validation unavailable" },
+          { status: 503 }
+        );
+      }
     }
 
     const supabase = createAdminClient();

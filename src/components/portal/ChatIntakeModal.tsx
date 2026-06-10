@@ -24,8 +24,21 @@ interface ChatIntakeModalProps {
 }
 
 interface Message {
+  /** Monotonic id assigned at creation time — used as the React key for
+   *  the chat bubble list. The log is truncated on back-nav (handleBack)
+   *  and re-seeded on open, so index-derived keys would re-bind bubble
+   *  state across unrelated messages. */
+  id: number;
   from: "henri" | "user";
   text: string;
+}
+
+/* Module-scoped counter: ids only need to be unique within a rendered
+ * list, and a module counter survives re-renders without a ref dance.
+ * Monotonic across modal opens — never reused, never reset. */
+let nextMessageId = 0;
+function makeMessage(from: Message["from"], text: string): Message {
+  return { id: nextMessageId++, from, text };
 }
 
 /* Audit-04-29 priority D step 2 — refactor map:
@@ -51,8 +64,8 @@ export function ChatIntakeModal({
 }: ChatIntakeModalProps) {
   /* ---- state ---- */
   const [step, setStep] = useState(0);
-  const [messages, setMessages] = useState<Message[]>([
-    { from: "henri", text: HENRI_MESSAGES[0] },
+  const [messages, setMessages] = useState<Message[]>(() => [
+    makeMessage("henri", HENRI_MESSAGES[0]),
   ]);
 
   // Answers
@@ -116,19 +129,19 @@ export function ChatIntakeModal({
       const hasTrade = !!initialTrade;
       let startStep = 0;
       const seedMessages: Message[] = [
-        { from: "henri", text: HENRI_MESSAGES[0] },
+        makeMessage("henri", HENRI_MESSAGES[0]),
       ];
       if (hasTrade && zipIsValid) {
         // Both pre-filled — jump to Step2.
-        seedMessages.push({ from: "user", text: initialTrade });
-        seedMessages.push({ from: "henri", text: HENRI_MESSAGES[1] });
-        seedMessages.push({ from: "user", text: initialZip.trim() });
-        seedMessages.push({ from: "henri", text: HENRI_MESSAGES[2] });
+        seedMessages.push(makeMessage("user", initialTrade));
+        seedMessages.push(makeMessage("henri", HENRI_MESSAGES[1]));
+        seedMessages.push(makeMessage("user", initialZip.trim()));
+        seedMessages.push(makeMessage("henri", HENRI_MESSAGES[2]));
         startStep = 2;
       } else if (hasTrade) {
         // Trade only — jump to Step1.
-        seedMessages.push({ from: "user", text: initialTrade });
-        seedMessages.push({ from: "henri", text: HENRI_MESSAGES[1] });
+        seedMessages.push(makeMessage("user", initialTrade));
+        seedMessages.push(makeMessage("henri", HENRI_MESSAGES[1]));
         startStep = 1;
       }
       setStep(startStep);
@@ -158,8 +171,8 @@ export function ChatIntakeModal({
   const advance = useCallback((userText: string, nextStep: number) => {
     setMessages((prev) => [
       ...prev,
-      { from: "user", text: userText },
-      { from: "henri", text: HENRI_MESSAGES[nextStep] },
+      makeMessage("user", userText),
+      makeMessage("henri", HENRI_MESSAGES[nextStep]),
     ]);
     setStep(nextStep);
   }, []);
@@ -217,10 +230,10 @@ export function ChatIntakeModal({
       if (zipIsValid) {
         setMessages((prev) => [
           ...prev,
-          { from: "user", text: trade },
-          { from: "henri", text: HENRI_MESSAGES[1] },
-          { from: "user", text: address.trim() },
-          { from: "henri", text: HENRI_MESSAGES[2] },
+          makeMessage("user", trade),
+          makeMessage("henri", HENRI_MESSAGES[1]),
+          makeMessage("user", address.trim()),
+          makeMessage("henri", HENRI_MESSAGES[2]),
         ]);
         setStep(2);
         return;
@@ -253,7 +266,7 @@ export function ChatIntakeModal({
 
   const handleDescriptionSubmit = useCallback(async () => {
     if (!description.trim()) return;
-    setMessages((prev) => [...prev, { from: "user", text: description.trim() }]);
+    setMessages((prev) => [...prev, makeMessage("user", description.trim())]);
 
     setIsRefinement(true);
     setRefinementLoading(true);
@@ -270,15 +283,15 @@ export function ChatIntakeModal({
       const data = await res.json();
       if (data.done || !data.question) {
         setIsRefinement(false);
-        setMessages((prev) => [...prev, { from: "henri", text: HENRI_MESSAGES[5] }]);
+        setMessages((prev) => [...prev, makeMessage("henri", HENRI_MESSAGES[5])]);
         setStep(5);
       } else {
         setRefinementIndex(0);
-        setMessages((prev) => [...prev, { from: "henri", text: data.question }]);
+        setMessages((prev) => [...prev, makeMessage("henri", data.question)]);
       }
     } catch {
       setIsRefinement(false);
-      setMessages((prev) => [...prev, { from: "henri", text: HENRI_MESSAGES[5] }]);
+      setMessages((prev) => [...prev, makeMessage("henri", HENRI_MESSAGES[5])]);
       setStep(5);
     } finally {
       setRefinementLoading(false);
@@ -293,7 +306,7 @@ export function ChatIntakeModal({
     const nextAnswers = [...refinementAnswers, answer];
     setRefinementAnswers(nextAnswers);
     const nextIndex = refinementIndex + 1;
-    setMessages((prev) => [...prev, { from: "user", text: answer }]);
+    setMessages((prev) => [...prev, makeMessage("user", answer)]);
     setRefinementLoading(true);
 
     try {
@@ -310,15 +323,15 @@ export function ChatIntakeModal({
       if (data.done || !data.question) {
         setIsRefinement(false);
         setRefinementIndex(0);
-        setMessages((prev) => [...prev, { from: "henri", text: HENRI_MESSAGES[5] }]);
+        setMessages((prev) => [...prev, makeMessage("henri", HENRI_MESSAGES[5])]);
         setStep(5);
       } else {
         setRefinementIndex(nextIndex);
-        setMessages((prev) => [...prev, { from: "henri", text: data.question }]);
+        setMessages((prev) => [...prev, makeMessage("henri", data.question)]);
       }
     } catch {
       setIsRefinement(false);
-      setMessages((prev) => [...prev, { from: "henri", text: HENRI_MESSAGES[5] }]);
+      setMessages((prev) => [...prev, makeMessage("henri", HENRI_MESSAGES[5])]);
       setStep(5);
     } finally {
       setRefinementLoading(false);
@@ -369,8 +382,8 @@ export function ChatIntakeModal({
     if (!validateContact()) return;
     setMessages((prev) => [
       ...prev,
-      { from: "user", text: `${contactName} | ${contactPhone} | ${contactEmail}` },
-      { from: "henri", text: HENRI_MESSAGES[7] },
+      makeMessage("user", `${contactName} | ${contactPhone} | ${contactEmail}`),
+      makeMessage("henri", HENRI_MESSAGES[7]),
     ]);
     setStep(7);
     setIsComputing(true);
@@ -419,14 +432,14 @@ export function ChatIntakeModal({
         if (primary) setMatchedContractor(primary);
         setMessages((prev) => [
           ...prev,
-          {
-            from: "henri",
-            text: computed != null
+          makeMessage(
+            "henri",
+            computed != null
               ? (result.matched
                   ? `Your project scored ${computed}/100. We found a great contractor for you.`
                   : `Your project scored ${computed}/100. We're matching the best contractor in your area — you'll hear back shortly.`)
               : "Your project is in. We're matching you with a local contractor now — you'll hear back shortly.",
-          },
+          ),
         ]);
       } catch {
         // Submission failed entirely. Don't fake a score; tell the user
@@ -435,10 +448,10 @@ export function ChatIntakeModal({
         setScore(null);
         setMessages((prev) => [
           ...prev,
-          {
-            from: "henri",
-            text: "Something went wrong submitting your project. Please check your connection and retry — we don't want to lose your details.",
-          },
+          makeMessage(
+            "henri",
+            "Something went wrong submitting your project. Please check your connection and retry — we don't want to lose your details.",
+          ),
         ]);
       } finally {
         setIsComputing(false);
@@ -530,11 +543,11 @@ export function ChatIntakeModal({
             aria-live="polite"
             aria-atomic="false"
           >
-            {messages.map((msg, i) =>
+            {messages.map((msg) =>
               msg.from === "henri" ? (
-                <HenriBubble key={i} text={msg.text} />
+                <HenriBubble key={msg.id} text={msg.text} />
               ) : (
-                <UserBubble key={i} text={msg.text} />
+                <UserBubble key={msg.id} text={msg.text} />
               ),
             )}
 

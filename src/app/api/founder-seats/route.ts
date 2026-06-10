@@ -1,5 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  checkRateLimit,
+  getClientIp,
+  rateLimitResponse,
+} from "@/lib/utils/rate-limit";
 import { logApiError } from "@/lib/log";
 
 /**
@@ -25,8 +30,20 @@ const FOUNDER_CAP = 100;
 export const revalidate = 60;
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // Public landing-page endpoint — rate-limit per IP so the admin-client
+  // count below can't be hammered anonymously.
+  const ip = getClientIp(request);
+  const rl = checkRateLimit(`founder-seats:${ip}`, {
+    maxRequests: 60,
+    windowMs: 60_000,
+  });
+  if (!rl.allowed) return rateLimitResponse(rl);
+
   try {
+    // Admin client kept deliberately: profiles is RLS-gated and an anon
+    // read isn't verified to permit aggregate counts. This query is
+    // count-only (head: true) — no profile rows or PII ever leave.
     const admin = createAdminClient();
 
     // Count any profile carrying the founder plan slug. We deliberately

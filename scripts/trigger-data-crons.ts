@@ -28,9 +28,11 @@ const ONLY = (() => {
   return new Set(v.split(",").map((s) => s.trim().toLowerCase()));
 })();
 
-const BASE_URL = IS_LOCAL
-  ? "http://localhost:3000"
-  : (process.env.NEXT_PUBLIC_APP_URL || "https://meethenri.com");
+// Footgun fix (2026-06-09): .env.local sets NEXT_PUBLIC_APP_URL to
+// localhost:3000 for dev, which silently pointed every "production"
+// trigger at a dev server that usually isn't running (18/18 instant
+// "fetch failed"). Without --local, always target production.
+const BASE_URL = IS_LOCAL ? "http://localhost:3000" : "https://meethenri.com";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 if (!CRON_SECRET) {

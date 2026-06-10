@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireContractor } from "@/lib/auth/requireContractor";
 import { logger } from "@/lib/logger";
 
 export async function GET(request: NextRequest) {
   try {
+    // Contractor-only map overlay. Gate access here, then keep the admin
+    // client for the query itself — RLS would block territory-external
+    // permit reads, and the map intentionally shows the full viewport.
+    const authClient = await createClient();
+    const gate = await requireContractor(authClient);
+    if (gate.response) return gate.response;
+
     const { searchParams } = new URL(request.url);
     const bounds = searchParams.get("bounds");
     const zoom = searchParams.get("zoom");

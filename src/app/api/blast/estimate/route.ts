@@ -10,11 +10,19 @@
  * ────────────────────────────────────────────────────────────────────────── */
 
 import { NextResponse, type NextRequest } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 const DEFAULT_DENSITY = 800; // housing units per sq mile (suburban US)
 
 export async function GET(request: NextRequest) {
+  // Contractor planning tool — gate access before the admin-client
+  // aggregate query over the leads table runs.
+  const authClient = await createClient();
+  const gate = await requireContractor(authClient);
+  if (gate.response) return gate.response;
+
   const { searchParams } = request.nextUrl;
   const lat = parseFloat(searchParams.get("lat") ?? "");
   const lng = parseFloat(searchParams.get("lng") ?? "");

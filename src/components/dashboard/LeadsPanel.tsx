@@ -49,6 +49,13 @@ interface LeadsPanelProps {
   onToggleCollapsed?: () => void;
   /** Total geocoded leads available for this contractor (cap-transparency). */
   totalGeocoded?: number;
+  /** Leads hidden by the server-side `geocoded_only` filter (no lat/lng
+   *  yet, so they can't render on the map). Computed by the parent via
+   *  `countHiddenByGeocodeFilter` in useLeads.helpers. When > 0 a muted
+   *  "N leads hidden (no map location yet)" line renders below the
+   *  filter row — same "never silently drop rows" contract as the
+   *  capacity filter bar. */
+  hiddenNonGeocoded?: number;
 }
 
 /* Filter dot colours — fed to inline `style={{ background: f.dot }}` so
@@ -96,6 +103,7 @@ export function LeadsPanel({
   collapsed,
   onToggleCollapsed,
   totalGeocoded,
+  hiddenNonGeocoded = 0,
 }: LeadsPanelProps) {
   // Hooks MUST all run on every render (rules-of-hooks). Declare them
   // before the `if (collapsed) return …` early-exit so the collapsed
@@ -105,6 +113,27 @@ export function LeadsPanel({
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [search, setSearch] = useState("");
+
+  // Close the filter/sort popovers on outside click. Same inline
+  // mousedown-listener pattern as TopBar / NotificationDropdown /
+  // MapStyleSwitcher (no shared useClickOutside hook exists yet).
+  // One listener handles both popovers; attached only while one is open.
+  const filterRef = useRef<HTMLDivElement>(null);
+  const sortRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!filterOpen && !sortOpen) return;
+    function handleOutside(e: MouseEvent) {
+      const t = e.target as Node;
+      if (filterRef.current && !filterRef.current.contains(t)) {
+        setFilterOpen(false);
+      }
+      if (sortRef.current && !sortRef.current.contains(t)) {
+        setSortOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [filterOpen, sortOpen]);
   // Module 8 — show-hidden toggle. Defaults to false so hidden leads
   // disappear from the panel; the contractor can flip it on to audit
   // what they've hidden.
@@ -339,9 +368,12 @@ export function LeadsPanel({
         {/* Filter + Sort row */}
         <div className="flex items-center gap-2 mt-2">
           {/* Filter dropdown */}
-          <div className="relative">
+          <div className="relative" ref={filterRef}>
             <button
+              type="button"
               onClick={() => setFilterOpen(!filterOpen)}
+              aria-haspopup="listbox"
+              aria-expanded={filterOpen}
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-accent transition-colors"
             >
               {activeFilter.dot && (
@@ -414,7 +446,7 @@ export function LeadsPanel({
            * the OS color scheme, which produced white-on-white text in
            * dusk/dark mode. Mirrors the Filter dropdown above so both
            * controls render identically across light / dusk / dark. */}
-          <div className="relative ml-auto">
+          <div className="relative ml-auto" ref={sortRef}>
             <button
               type="button"
               onClick={() => setSortOpen((o) => !o)}
@@ -441,6 +473,17 @@ export function LeadsPanel({
             )}
           </div>
         </div>
+
+        {/* Geocode-filter transparency — mirrors the capacity filter's
+            "N filtered out" pattern. These leads exist but have no
+            lat/lng yet, so the server-side geocoded_only filter holds
+            them back from the map-driven panel. Never silently drop. */}
+        {hiddenNonGeocoded > 0 && (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {hiddenNonGeocoded.toLocaleString()} lead
+            {hiddenNonGeocoded === 1 ? "" : "s"} hidden (no map location yet)
+          </p>
+        )}
       </div>
 
       {/* Phase 0a capacity filter bar — sits above the list. Shows
