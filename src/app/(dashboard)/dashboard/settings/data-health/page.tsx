@@ -39,9 +39,22 @@ interface HealthRow {
   recent_runs?: CronRunInfo[];
 }
 
+interface EnrichmentFill {
+  total: number | null;
+  owner_name_pct: number | null;
+  phone_pct: number | null;
+  email_pct: number | null;
+  property_value_pct: number | null;
+  year_built_pct: number | null;
+  enriched_pct: number | null;
+  score_max: number | null;
+  hot_count: number | null;
+}
+
 interface HealthResponse {
   ok: true;
   generated_at: string;
+  enrichment?: EnrichmentFill | null;
   tables: HealthRow[];
 }
 
@@ -259,6 +272,29 @@ export default function DataHealthPage() {
         </div>
       )}
 
+      {data?.enrichment && (
+        <div className="rounded-lg border border-border bg-card p-4 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-[13px] font-semibold text-foreground">
+              Lead enrichment fill rates
+            </h2>
+            <span className="text-[11px] text-fg-subtle">
+              {formatRows(data.enrichment.total)} leads ·{" "}
+              {data.enrichment.hot_count ?? 0} hot · max score{" "}
+              {data.enrichment.score_max ?? "—"}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+            <FillStat label="Owner" pct={data.enrichment.owner_name_pct} />
+            <FillStat label="Phone" pct={data.enrichment.phone_pct} />
+            <FillStat label="Email" pct={data.enrichment.email_pct} />
+            <FillStat label="Prop. value" pct={data.enrichment.property_value_pct} />
+            <FillStat label="Year built" pct={data.enrichment.year_built_pct} />
+            <FillStat label="Enriched" pct={data.enrichment.enriched_pct} />
+          </div>
+        </div>
+      )}
+
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[12px]">
@@ -411,6 +447,22 @@ function SummaryCard({
     <div className={`rounded-lg border p-3 ${cls[color]}`}>
       <div className="text-[10px] uppercase tracking-wider opacity-80">{label}</div>
       <div className="text-2xl font-semibold tabular-nums mt-0.5">{count}</div>
+    </div>
+  );
+}
+
+function FillStat({ label, pct }: { label: string; pct: number | null }) {
+  // Colour by health: green ≥40%, amber ≥10%, rose below — phone/email at
+  // ~1% read rose, which is the point (it flags the gap to the operator).
+  const v = pct ?? 0;
+  const tone =
+    v >= 40 ? "text-emerald-600" : v >= 10 ? "text-amber-600" : "text-rose-600";
+  return (
+    <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
+      <div className="text-[10px] uppercase tracking-wider text-fg-subtle">{label}</div>
+      <div className={`text-lg font-semibold tabular-nums ${tone}`}>
+        {pct == null ? "—" : `${pct}%`}
+      </div>
     </div>
   );
 }

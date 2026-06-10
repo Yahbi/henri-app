@@ -3,6 +3,7 @@ import type { MatchCandidate } from "./engine";
 import { sendLeadSMS } from "@/lib/twilio/sms";
 import { sendLeadEmail } from "@/lib/resend/email";
 import { logger } from "@/lib/logger";
+import { zipToState } from "@/lib/scrapers/normalizer";
 import type { LeadData } from "@/types/leads";
 
 interface IntakeInfo {
@@ -62,10 +63,13 @@ export async function notifyMatch(
     });
   }
 
-  /* 3. Fetch contractor contact info for external notifications */
+  /* 3. Fetch contractor contact info for external notifications.
+   * (2026-06-10: removed the non-existent `sms_notifications` column —
+   * selecting it errored the whole query, so notifications never sent.
+   * SMS is now gated on the contractor having a phone on file.) */
   const { data: profile } = await supabase
     .from("profiles")
-    .select("email, phone, sms_notifications")
+    .select("email, phone")
     .eq("id", contractorId)
     .single();
 
@@ -81,8 +85,10 @@ export async function notifyMatch(
   const leadData: LeadData = {
     permitType: trade,
     address: `ZIP ${zip}`,
-    city: "Los Angeles",
-    state: "CA",
+    city: "",
+    // Derive state from the ZIP (was hardcoded "CA" — wrong for every
+    // non-California lead in the notification body).
+    state: zipToState(zip) ?? "",
     description: description ?? null,
     estimatedValue: null,
     score: intake.henri_score ?? 70,
@@ -94,7 +100,7 @@ export async function notifyMatch(
   /* Send SMS if contractor has it enabled.
    * Module 7 — pass `homeownerIntakeId` so the hygiene gate verifies
    * intake.consent_given_at + non-withdrawn status before send. */
-  if (profile.sms_notifications && profile.phone) {
+  if (profile.phone) {
     notifications.push(sendLeadSMS(profile.phone, leadData, {
       homeownerIntakeId: intakeId,
       zip,

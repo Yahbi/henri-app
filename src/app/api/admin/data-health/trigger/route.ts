@@ -60,6 +60,11 @@ const ALLOWED: ReadonlySet<string> = new Set([
   // (post-audit 2026-05-02) and added here so the data-health Run-now
   // button can fire it manually when Vercel's auto-cron drops it.
   "score",
+  // Enrichment (2026-06-10): now logged to cron_runs + on a dedicated
+  // GH drain workflow. Manual-fire from the data-health page is the
+  // fastest way to push fill rates after provisioning API keys.
+  "enrich",
+  "re-enrich",
 ]);
 
 interface TriggerBody {

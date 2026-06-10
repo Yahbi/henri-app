@@ -220,6 +220,18 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Enrichment fill rates (2026-06-10) — the operator-facing measure of
+  // lead quality. Single-scan RPC (migration 00108), best-effort so a
+  // slow scan never breaks the whole panel.
+  let enrichment: Record<string, number | null> | null = null;
+  try {
+    const admin = createAdminClient();
+    const { data: fr } = await admin.rpc("get_lead_fill_rates");
+    if (fr) enrichment = fr as Record<string, number | null>;
+  } catch {
+    enrichment = null;
+  }
+
   const results = await Promise.all(TABLES.map(probeTable));
   // Order: errors → stale → empty → ok, then by wave.
   const statusOrder: Record<HealthRow["status"], number> = {
@@ -238,6 +250,7 @@ export async function GET() {
     {
       ok: true,
       generated_at: new Date().toISOString(),
+      enrichment,
       tables: results,
     },
     { headers: { "Cache-Control": "private, max-age=30" } },

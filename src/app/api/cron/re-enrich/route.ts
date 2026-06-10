@@ -51,6 +51,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { enrichLead } from "@/lib/enrichment/orchestrator";
 import { classifyApplicant } from "@/lib/permits/applicant-classifier";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 import { buildEnrichmentPatch } from "./helpers";
 
 export const runtime = "nodejs";
@@ -253,17 +254,25 @@ export async function GET(request: NextRequest) {
 
   await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
-  return NextResponse.json({
-    success: true,
-    summary: {
-      scanned: leads?.length ?? 0,
-      processed: Math.min(cursor, leads?.length ?? 0),
-      enriched,
-      missed,
-      apolloFires,
-      concurrency: CONCURRENCY,
-      elapsedMs: Date.now() - t0,
-      hitDeadline: Date.now() >= deadline,
-    },
+  const summary = {
+    scanned: leads?.length ?? 0,
+    processed: Math.min(cursor, leads?.length ?? 0),
+    enriched,
+    missed,
+    apolloFires,
+    concurrency: CONCURRENCY,
+    elapsedMs: Date.now() - t0,
+    hitDeadline: Date.now() >= deadline,
+  };
+
+  // Surface re-enrich in cron_runs (2026-06-10). `inserted` = real-field
+  // changes; the GH drain workflow halts when a batch returns 0 scanned.
+  await logCronRun("re-enrich", t0, {
+    pulled: summary.scanned,
+    inserted: enriched,
+    summary,
+    trigger: detectTrigger(request),
   });
+
+  return NextResponse.json({ success: true, summary });
 }

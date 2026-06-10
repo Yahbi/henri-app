@@ -118,6 +118,9 @@ export async function POST(req: NextRequest) {
 
     const topMatch = matches[0] ?? null;
     const matchedContractorId = topMatch?.contractorId ?? null;
+    // territory = someone claimed this exact ZIP; proximity = cold-start
+    // widen-to-nearest fallback; none = nobody within range.
+    const matchType = topMatch?.matchType ?? "none";
 
     /* ── 2. Save homeowner intake ── */
     const { data: intake, error: intakeError } = await supabase
@@ -136,6 +139,7 @@ export async function POST(req: NextRequest) {
         henri_score: henri_score ?? null,
         matched_contractor_id: matchedContractorId,
         status: matches.length > 0 ? "matched" : "pending",
+        match_type: matchType,
         // Module 5 — only stamp consent timestamps when the homeowner
         // affirmatively checked the box. NULL means "no consent yet"
         // (outreach hygiene gate refuses every send for this intake).
