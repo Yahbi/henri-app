@@ -27,7 +27,11 @@ export interface Candidate {
   stateGuess: string | null;
 }
 
-const UA = { "User-Agent": "Henri/1.0 permit-discovery" };
+// Browser-like UA — some catalog/feature servers WAF-block bot agents.
+const UA = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+};
 
 async function getJson(url: string, timeoutMs = 12000): Promise<unknown | null> {
   try {

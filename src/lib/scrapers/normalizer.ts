@@ -120,6 +120,13 @@ export function parseDate(raw: string | null): string | null {
   return null;
 }
 
+/** Browser-like User-Agent for all upstream requests. Many self-hosted
+ *  ArcGIS/permit servers sit behind a WAF that 403s bot-looking agents
+ *  (e.g. anything containing "scraper") — Tampa's arcgis.tampagov.net is
+ *  one. A standard Chrome UA gets through where a custom one is blocked. */
+export const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 export function extractZip(address: string): string | null {
   const match = address.match(/\b(\d{5})(?:-\d{4})?\b/);
   return match ? match[1] : null;

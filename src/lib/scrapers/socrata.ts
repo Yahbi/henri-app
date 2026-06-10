@@ -10,12 +10,16 @@ import {
   deriveState,
   parseCoord,
   parseMoney,
+  BROWSER_UA,
 } from "./normalizer";
 
-/** Build Socrata request headers — add app token when available to avoid rate limits */
+/** Build Socrata request headers — browser UA (some gov WAFs 403 bot
+ *  agents) + app token when available to avoid rate limits. */
 function socrataHeaders(): Record<string, string> {
   const token = process.env.SOCRATA_APP_TOKEN;
-  return token ? { "X-App-Token": token } : {};
+  const base: Record<string, string> = { "User-Agent": BROWSER_UA };
+  if (token) base["X-App-Token"] = token;
+  return base;
 }
 
 async function fetchWithRetry(
