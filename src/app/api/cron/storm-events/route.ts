@@ -35,6 +35,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -74,6 +75,7 @@ async function fetchLatestDetailsCsvForYear(year: number): Promise<string | null
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": "Henri-Bot/1.0 (cron@meethenri.com)" },
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
       logger.warn("NOAA listing fetch failed", { status: res.status });
@@ -171,6 +173,9 @@ async function fetchAndParse(
 ): Promise<StormEventRow[]> {
   const res = await fetch(url, {
     headers: { "User-Agent": "Henri-Bot/1.0 (cron@meethenri.com)" },
+    // 60s — this streams a multi-thousand-row gzip; the 10s listing timeout
+    // is too tight for the dataset pull itself.
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok || !res.body) {
     logger.warn("NOAA dataset fetch failed", { url, status: res.status });
@@ -259,6 +264,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const t0 = Date.now();
+
   try {
     const supabase = createAdminClient();
     const windowStart = new Date(Date.now() - 7 * 86_400_000);
@@ -275,6 +282,11 @@ export async function GET(req: NextRequest) {
     ].filter((u): u is string => u !== null);
 
     if (candidates.length === 0) {
+      await logCronRun("storm-events", t0, {
+        status: "error",
+        error: "No NOAA dataset URL resolved",
+        trigger: detectTrigger(req),
+      });
       return NextResponse.json(
         { ok: false, error: "No NOAA dataset URL resolved" },
         { status: 502 },
@@ -306,6 +318,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    await logCronRun("storm-events", t0, {
+      pulled: inserted + skipped,
+      inserted,
+      summary: { inserted, skipped, datasets: candidates.length },
+      trigger: detectTrigger(req),
+    });
+
     return NextResponse.json({
       ok: true,
       inserted,
@@ -314,6 +333,11 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     logger.error("Storm-events cron failed", { error: String(err) });
+    await logCronRun("storm-events", t0, {
+      status: "error",
+      error: String(err),
+      trigger: detectTrigger(req),
+    });
     return NextResponse.json(
       { ok: false, error: "Cron failed" },
       { status: 500 },

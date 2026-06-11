@@ -2,12 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe/client";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
 /* Shared handler — Vercel Cron sends GET; manual triggers can use POST */
 async function handler(request: NextRequest): Promise<NextResponse> {
+  const t0 = Date.now();
+  // Hard deadline per invocation. 110s leaves 10s headroom vs maxDuration=120.
+  const deadlineMs = t0 + 110_000;
+  const deadlineExceeded = () => Date.now() > deadlineMs;
+
   /* Validate CRON_SECRET bearer token */
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -42,6 +48,8 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     };
 
     for (const profile of profiles ?? []) {
+      // Deadline guard: return a clean partial instead of a hard 504.
+      if (deadlineExceeded()) break;
       try {
         const sub = await stripe.subscriptions.retrieve(
           profile.stripe_subscription_id as string
@@ -68,6 +76,13 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       }
     }
 
+    await logCronRun("billing-sync", t0, {
+      pulled: (profiles ?? []).length,
+      inserted: updated,
+      summary: { synced, updated, issues, hitDeadline: deadlineExceeded() },
+      trigger: detectTrigger(request),
+    });
+
     return NextResponse.json({
       success: true,
       synced,
@@ -81,6 +96,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     // panel with no way to debug from the UI.
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Billing sync cron error", { error: errMsg });
+    await logCronRun("billing-sync", t0, {
+      status: "error",
+      error: errMsg,
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "Cron job failed", detail: errMsg },
       { status: 500 },

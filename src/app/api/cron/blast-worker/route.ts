@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logApiError } from "@/lib/log";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 /**
  * Blast campaign worker.
@@ -64,12 +65,20 @@ export async function GET(request: NextRequest) {
       );
     }
     logApiError("cron.blast-worker.scan", scanError);
+    await logCronRun("blast-worker", t0, {
+      status: "error",
+      error: scanError.message,
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: scanError.message }, { status: 500 });
   }
 
   const results: Array<{ campaign_id: string; sent: number; failed: number }> = [];
 
   for (const { id: campaignId } of (queued ?? []) as { id: string }[]) {
+    // Deadline guard: stop before claiming a new campaign so we return
+    // a clean partial instead of a hard 504. 280s vs maxDuration=300.
+    if (Date.now() - t0 > 280_000) break;
     // Atomically claim the campaign: only succeeds if still 'queued'.
     // Two overlapping cron runs will race on this UPDATE; only one wins per row.
     const { data: claimed, error: claimError } = await supabase
@@ -130,6 +139,14 @@ export async function GET(request: NextRequest) {
     if (Date.now() - t0 > 280_000) break;
   }
 
+  const totalSent = results.reduce((s, r) => s + r.sent, 0);
+  await logCronRun("blast-worker", t0, {
+    pulled: (queued ?? []).length,
+    inserted: totalSent,
+    summary: { campaigns_processed: results.length, results, elapsedMs: Date.now() - t0 },
+    trigger: detectTrigger(request),
+  });
+
   return NextResponse.json({
     ok: true,
     elapsedMs: Date.now() - t0,
@@ -163,6 +180,7 @@ async function deliverOne(c: BlastCampaign, lead: Lead): Promise<boolean> {
             To: String(lead.phone),
             Body: personalized,
           }).toString(),
+          signal: AbortSignal.timeout(10_000),
         },
       );
       return res.ok;
@@ -194,6 +212,7 @@ async function deliverOne(c: BlastCampaign, lead: Lead): Promise<boolean> {
          * so we keep an audit trail and can suppress on opt-out. */
         reply_to: ["support@meethenri.com"],
       }),
+      signal: AbortSignal.timeout(10_000),
     });
     return res.ok;
   } catch {

@@ -2,9 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recheckLicense } from "@/lib/license/verify";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
+
+export const runtime = "nodejs";
+export const maxDuration = 300;
 
 /* Shared handler — Vercel Cron sends GET; manual triggers can use POST */
 async function handler(request: NextRequest): Promise<NextResponse> {
+  const t0 = Date.now();
+  // Hard deadline per invocation. 280s leaves 20s headroom vs maxDuration=300.
+  const deadlineMs = t0 + 280_000;
+  const deadlineExceeded = () => Date.now() > deadlineMs;
+
   /* Validate CRON_SECRET bearer token */
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -22,6 +31,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
     if (error) {
       logger.error("License fetch error", { error: String(error) });
+      await logCronRun("license-check", t0, {
+        status: "error",
+        error: String(error),
+        trigger: detectTrigger(request),
+      });
       return NextResponse.json({ error: "Failed to fetch licenses" }, { status: 500 });
     }
 
@@ -30,6 +44,8 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     const issues: string[] = [];
 
     for (const license of licenses ?? []) {
+      // Deadline guard: return a clean partial instead of a hard 504.
+      if (deadlineExceeded()) break;
       try {
         const result = await recheckLicense(license.license_number, license.license_state);
         checked++;
@@ -67,6 +83,13 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       }
     }
 
+    await logCronRun("license-check", t0, {
+      pulled: (licenses ?? []).length,
+      inserted: changed,
+      summary: { checked, changed, issues, hitDeadline: deadlineExceeded() },
+      trigger: detectTrigger(request),
+    });
+
     return NextResponse.json({
       success: true,
       checked,
@@ -76,6 +99,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     logger.error("License check cron error", { error: String(error) });
+    await logCronRun("license-check", t0, {
+      status: "error",
+      error: String(error),
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: "Cron job failed" }, { status: 500 });
   }
 }
