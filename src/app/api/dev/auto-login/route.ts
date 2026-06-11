@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
+import { isDevLoginAllowed } from "@/lib/auth/dev-login";
 
 /**
  * DEV-ONLY one-click login. Creates (or upserts) y.abismuth@gmail.com with a
@@ -24,17 +25,16 @@ import { logApiError } from "@/lib/log";
  */
 
 const DEV_EMAIL = "y.abismuth@gmail.com";
-const DEV_PASSWORD = "DevLogin!2026";
-
-function devLoginAllowed(): boolean {
-  if (process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN !== "1") return false;
-  if (process.env.NODE_ENV === "production") return false;
-  if (process.env.VERCEL_ENV) return false; // any Vercel env (incl. preview) is off-limits
-  return true;
-}
 
 export async function POST() {
-  if (!devLoginAllowed()) {
+  if (!isDevLoginAllowed()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Password comes from env — never a hardcoded default. If unset, the route
+  // refuses (same shape as when the gate is disabled).
+  const DEV_PASSWORD = process.env.DEV_LOGIN_PASSWORD;
+  if (!DEV_PASSWORD) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

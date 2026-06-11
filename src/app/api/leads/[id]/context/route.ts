@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
 import { logApiError } from "@/lib/log";
+import { haversineMi } from "@/lib/geo/haversine";
 import {
   deriveAll,
   type DerivationContext,
@@ -141,23 +142,6 @@ interface ContextResponse {
   stage_entered_at: string | null;
 }
 
-/** Approx miles between two lat/lng pairs via haversine. */
-function haversineMi(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-): number {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  // 3958.8 = mean Earth radius in miles
-  return 3958.8 * c;
-}
 
 export async function GET(
   _request: NextRequest,

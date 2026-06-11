@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { isDevLoginAllowed } from "@/lib/auth/dev-login";
 
 // Dev-only one-click login for the seeded dev contractor.
 // Refuses to run in production OR on any Vercel deploy.
@@ -9,17 +10,10 @@ import { createServerClient } from "@supabase/ssr";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Defense-in-depth (P0-2): three independent gates. All must hold for
-// the route to fire. Mirrors the pattern in /api/dev/auto-login.
-function devLoginAllowed(): boolean {
-  if (process.env.NODE_ENV === "production") return false;
-  if (process.env.VERCEL_ENV) return false; // any Vercel env is off-limits
-  if (process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN !== "1") return false;
-  return true;
-}
-
+// Defense-in-depth (P0-2): three independent gates centralized in
+// @/lib/auth/dev-login. All must hold for the route to fire.
 export async function GET(request: Request) {
-  if (!devLoginAllowed()) {
+  if (!isDevLoginAllowed()) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

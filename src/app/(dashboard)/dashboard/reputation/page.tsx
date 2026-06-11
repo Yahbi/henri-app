@@ -167,12 +167,12 @@ function ReplyModal({ review, onClose }: { review: ReviewItem; onClose: () => vo
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="reply-modal-title">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative z-10 w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-heading font-normal text-foreground">Reply to {review.reviewer}</h2>
+            <h2 id="reply-modal-title" className="text-lg font-heading font-normal text-foreground">Reply to {review.reviewer}</h2>
             <div className="flex items-center gap-2 mt-1">
               <StarRating count={review.stars} />
               <span className="text-xs text-muted-foreground">{review.platform} · {review.date}</span>
