@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Resend } from "resend";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -485,10 +486,15 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
   const supabase = createAdminClient();
   const resend = new Resend(process.env.RESEND_API_KEY);
+  const t0 = Date.now();
+  // Hard deadline per invocation. 280s leaves 20s headroom vs maxDuration=300.
+  const deadlineMs = t0 + 280_000;
+  const deadlineExceeded = () => Date.now() > deadlineMs;
 
   let sent = 0;
   let skipped = 0;
   let errors = 0;
+  let contractorCount = 0;
 
   try {
     /* Fetch all onboarded contractors with an active plan */
@@ -501,11 +507,18 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
     if (cError) {
       logger.error("Failed to fetch contractors", { error: String(cError) });
+      await logCronRun("weekly-digest", t0, {
+        status: "error",
+        error: String(cError),
+        trigger: detectTrigger(request),
+      });
       return NextResponse.json(
         { error: "Failed to fetch contractors" },
         { status: 500 }
       );
     }
+
+    contractorCount = (contractors ?? []).length;
 
     /* Date boundaries */
     const now = new Date();
@@ -515,6 +528,8 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     const prevWeekISO = prevWeekStart.toISOString();
 
     for (const contractor of contractors ?? []) {
+      // Deadline guard: return a clean partial instead of a hard 504.
+      if (deadlineExceeded()) break;
       try {
         /* ---- Check notification preferences ---- */
         const prefs = contractor.notification_prefs as Record<string, boolean> | null;
@@ -809,6 +824,13 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       }
     }
 
+    await logCronRun("weekly-digest", t0, {
+      pulled: contractorCount,
+      inserted: sent,
+      summary: { sent, skipped, errors, hitDeadline: deadlineExceeded() },
+      trigger: detectTrigger(request),
+    });
+
     return NextResponse.json({
       success: true,
       sent,
@@ -818,6 +840,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     logger.error("Weekly digest cron error", { error: String(error) });
+    await logCronRun("weekly-digest", t0, {
+      status: "error",
+      error: String(error),
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: "Cron job failed" }, { status: 500 });
   }
 }

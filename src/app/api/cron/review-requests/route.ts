@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -17,6 +18,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
   }
 
   const supabase = createAdminClient();
+  const t0 = Date.now();
 
   let sent = 0;
   let skipped = 0;
@@ -42,6 +44,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
     if (leadsErr) {
       logger.error("Failed to query won leads", { error: String(leadsErr) });
+      await logCronRun("review-requests", t0, {
+        status: "error",
+        error: String(leadsErr),
+        trigger: detectTrigger(request),
+      });
       return NextResponse.json(
         { error: "Failed to query leads" },
         { status: 500 }
@@ -49,6 +56,12 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     }
 
     if (!wonLeads || wonLeads.length === 0) {
+      await logCronRun("review-requests", t0, {
+        pulled: 0,
+        inserted: 0,
+        summary: { sent: 0, skipped: 0, errors: 0 },
+        trigger: detectTrigger(request),
+      });
       return NextResponse.json({
         success: true,
         sent: 0,
@@ -164,6 +177,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
                     reviewLink,
                   }),
                 }),
+                signal: AbortSignal.timeout(10_000),
               });
               emailSent = response.ok;
             }
@@ -199,6 +213,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
                     From: twilioFrom,
                     Body: smsBody,
                   }).toString(),
+                  signal: AbortSignal.timeout(10_000),
                 }
               );
               smsSent = response.ok;
@@ -224,6 +239,13 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       }
     }
 
+    await logCronRun("review-requests", t0, {
+      pulled: wonLeads.length,
+      inserted: sent,
+      summary: { sent, skipped, errors },
+      trigger: detectTrigger(request),
+    });
+
     return NextResponse.json({
       success: true,
       sent,
@@ -233,6 +255,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     logger.error("Review requests cron error", { error: String(error) });
+    await logCronRun("review-requests", t0, {
+      status: "error",
+      error: String(error),
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: "Cron job failed" }, { status: 500 });
   }
 }
