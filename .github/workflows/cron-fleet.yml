@@ -114,6 +114,13 @@ jobs:
             # that grows coverage toward every municipality that publishes
             # open permit data, then keeps watching for new ones.
             if [ "$MM" = "00" ]; then due+=(discover-sources); fi
+
+            # Catch-up self-heal (2026-06-10): GH throttles the fleet, so a
+            # once-daily slot can be missed for days (audit found 5 data
+            # crons frozen ~4 weeks). The catchup endpoint reads cron_runs
+            # and re-fires any tracked data cron past its cadence — runs
+            # EVERY fleet fire so starvation self-corrects within hours.
+            due+=(catchup)
           fi
 
           if [ "${#due[@]}" -eq 0 ]; then
