@@ -310,7 +310,8 @@ export default function SettingsPage() {
           </Link>
         </div>
 
-        <div className="space-y-0 border border-border rounded-lg overflow-hidden divide-y divide-border">
+        <fieldset className="space-y-0 border border-border rounded-lg overflow-hidden divide-y divide-border">
+          <legend className="sr-only">Notification preferences</legend>
           <div className="flex items-center justify-between px-4 py-3.5">
             <div className="flex items-center gap-3">
               <Bell className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -324,6 +325,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <Toggle
+              aria-label="New leads (SMS)"
               checked={notifPrefs.sms_new_leads}
               onChange={() => toggleNotif("sms_new_leads")}
             />
@@ -342,6 +344,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <Toggle
+              aria-label="New leads (Email)"
               checked={notifPrefs.email_new_leads}
               onChange={() => toggleNotif("email_new_leads")}
             />
@@ -360,6 +363,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <Toggle
+              aria-label="Weekly report"
               checked={notifPrefs.weekly_report}
               onChange={() => toggleNotif("weekly_report")}
             />
@@ -378,11 +382,12 @@ export default function SettingsPage() {
               </div>
             </div>
             <Toggle
+              aria-label="Storm alerts"
               checked={notifPrefs.storm_alerts}
               onChange={() => toggleNotif("storm_alerts")}
             />
           </div>
-        </div>
+        </fieldset>
 
         <div className="flex items-center gap-3 mt-4">
           <button

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "@/lib/logger";
+import { haversineMi } from "@/lib/geo/haversine";
 
 /* ── Types ── */
 
@@ -335,18 +336,6 @@ export async function findMatches(
 }
 
 /* ── Proximity (cold-start) fallback ── */
-
-/** Approximate miles between two lat/lng pairs (haversine). Mirrors the
- *  score cron's `haversineMi`. */
-function haversineMi(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 /** ZIP centroids derived from geocoded permits (no dedicated centroid
  *  table exists). One grouped query covers the intake ZIP + every claimed

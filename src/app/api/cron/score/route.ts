@@ -11,6 +11,7 @@ import { buildScoreSignalBreakdown } from "@/lib/scoring/signals";
 import { classify as classifyIntent } from "@/lib/intent/classify";
 import type { OpportunityStage } from "@/lib/intent/reason-codes";
 import { logger } from "@/lib/logger";
+import { haversineMi } from "@/lib/geo/haversine";
 import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 import { evaluateRules, type AddressPermitHistory } from "@/lib/predictive/rules";
 import { mineDescription, mergeSuggestions } from "@/lib/predictive/llm-mining";
@@ -621,22 +622,6 @@ export async function GET(request: NextRequest) {
       logger.warn("score.liens_load_failed", {
         error: e instanceof Error ? e.message : String(e),
       });
-    }
-
-    /** Approximate miles between two lat/lng pairs via haversine. */
-    function haversineMi(
-      lat1: number,
-      lng1: number,
-      lat2: number,
-      lng2: number,
-    ): number {
-      const toRad = (d: number) => (d * Math.PI) / 180;
-      const dLat = toRad(lat2 - lat1);
-      const dLng = toRad(lng2 - lng1);
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-      return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     /** Highest-magnitude SWDI signature within 25mi of (lat,lng), 0-100. */

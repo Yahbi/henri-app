@@ -219,7 +219,9 @@ export function deriveState(
   const fromZip = zipToState(zip);
   if (fromZip) return fromZip;
   if (fallback && fallback !== "US" && VALID_STATES.has(fallback)) return fallback;
-  return fallback ?? null;
+  // A junk 'US' sentinel (or anything that isn't a real 2-letter state) must
+  // not be stored as a state — return null so it never lands in permits.state.
+  return null;
 }
 
 export function parseCoord(val: unknown): number | null {

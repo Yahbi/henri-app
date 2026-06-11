@@ -37,7 +37,8 @@ describe("deriveState", () => {
     expect(deriveState(null, null, "TX")).toBe("TX");
   });
   it("does not trust a junk fallback when nothing else resolves", () => {
-    expect(deriveState(null, null, "US")).toBe("US"); // unchanged, nothing better
+    // 'US' is not a state — return null rather than storing the sentinel.
+    expect(deriveState(null, null, "US")).toBeNull();
   });
   it("ignores a bogus 2-letter token that is not a real state", () => {
     // 'XX' is not a state; should fall through to ZIP
