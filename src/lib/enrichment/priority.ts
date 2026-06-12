@@ -30,24 +30,36 @@ export async function getPriorityZipSets(
   const trial = new Set<string>();
   const target = new Set<string>();
 
+  // God-mode (founder/dev) emails are treated as PAID so the founder's own
+  // claimed territory gets the full enrichment stack — otherwise, with no
+  // paying customer yet, every keyed source would sit dormant and the
+  // product couldn't be exercised end-to-end. Cheap: god_mode_emails is tiny.
+  const { data: godRows } = await supabase
+    .from("god_mode_emails")
+    .select("email");
+  const godEmails = new Set(
+    ((godRows ?? []) as Array<{ email: string }>).map((g) => g.email.toLowerCase()),
+  );
+
   const { data: terrs } = await supabase
     .from("territories")
-    .select("zip, profiles!inner(stripe_subscription_id, trial_ends_at)")
+    .select("zip, profiles!inner(email, stripe_subscription_id, trial_ends_at)")
     .eq("status", "active");
 
   const nowMs = Date.now();
   for (const row of (terrs ?? []) as Array<{
     zip: string;
     profiles:
-      | { stripe_subscription_id: string | null; trial_ends_at: string | null }
-      | Array<{ stripe_subscription_id: string | null; trial_ends_at: string | null }>;
+      | { email: string | null; stripe_subscription_id: string | null; trial_ends_at: string | null }
+      | Array<{ email: string | null; stripe_subscription_id: string | null; trial_ends_at: string | null }>;
   }>) {
     const p = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
     if (!p) continue;
+    const isGod = !!p.email && godEmails.has(p.email.toLowerCase());
     const hasSub = !!p.stripe_subscription_id;
     const trialActive =
       !!p.trial_ends_at && new Date(p.trial_ends_at).getTime() > nowMs;
-    if (hasSub && !trialActive) paid.add(row.zip);
+    if (isGod || (hasSub && !trialActive)) paid.add(row.zip);
     else if (trialActive) trial.add(row.zip);
     // A claimed ZIP with neither a sub nor an active trial gets no keyed
     // spend (falls through to tier 4) — correct under the no-pay-no-quota rule.
