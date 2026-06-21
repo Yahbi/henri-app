@@ -1,14 +1,23 @@
 import Stripe from "stripe";
-import { getEnv } from "@/lib/env";
 
 /**
  * Centralized Stripe client factory — all server code that needs a Stripe
- * client should call this rather than `new Stripe(process.env.…!)`. This keeps
- * the secret-key access path in one place and gives dev-mode env validation
- * from getEnv().
+ * client should call this rather than `new Stripe(process.env.…!)`.
+ *
+ * 2026-06-17 fix: this used to read `getEnv().stripeSecretKey`, but getEnv()
+ * eagerly validates ~18 unrelated vars (Twilio, OpenAI, Mapbox) and THROWS in
+ * production if any is missing. With Twilio unprovisioned, that killed every
+ * Stripe path (checkout, billing-sync, change-plan, extra-zip, and the
+ * webhook) before they did anything — billing-sync errored on a missing
+ * TWILIO_ACCOUNT_SID every run. Read only STRIPE_SECRET_KEY here so Stripe
+ * never depends on unrelated subsystems being configured.
  */
 export function getStripe() {
-  return new Stripe(getEnv().stripeSecretKey, {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) {
+    throw new Error("[Henri] STRIPE_SECRET_KEY is not set");
+  }
+  return new Stripe(key, {
     apiVersion: "2026-03-25.dahlia",
   });
 }

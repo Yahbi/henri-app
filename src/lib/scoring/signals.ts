@@ -97,9 +97,14 @@ function detailFor(key: ScoreSignalKey, factors: string[], signals: ScoringSigna
 
   switch (key) {
     case "permit_freshness": {
-      const hit = find([/filed /i, /day[s]? ago/i, /today/i]);
+      const hit = find([/filed /i, /day[s]? ago/i, /today/i, /date unknown/i]);
       if (hit) return hit;
-      const days = Math.max(0, Math.round(Math.min(signals.permitAge, signals.daysSinceCreated)));
+      // Real permit date only (2026-06-17) — must match scoreFreshness, which
+      // no longer blends the ingest date. +Infinity = no usable permit date.
+      if (!Number.isFinite(signals.permitAge) || signals.permitAge < 0) {
+        return "Permit date unknown";
+      }
+      const days = Math.max(0, Math.round(signals.permitAge));
       return days < 1 ? "Filed today" : `Filed ~${days} days ago`;
     }
     case "permit_value": {
