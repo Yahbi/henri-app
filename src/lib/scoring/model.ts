@@ -147,12 +147,25 @@ export interface ScoreResult {
 
 /**
  * Compute freshness score (0-20).
- * Uses the minimum of permitAge and daysSinceCreated for the most
- * favorable interpretation — a permit filed 2 days ago but ingested
- * today is still "fresh."
+ * Freshness reflects the REAL permit date only (issued/applied), never the
+ * ingest date.
+ *
+ * 2026-06-17 fix: this used `Math.min(permitAge, daysSinceCreated)` for "the
+ * most favorable interpretation," which let a fresh INGEST date override an
+ * old or missing permit date — a decade-old permit (or one with no date at
+ * all, ~28% of rows where permitAge is +Infinity) scored "Filed today." That
+ * inflated freshness is the root of the dishonest urgency that the
+ * speed-to-lead wedge depends on. Now: score from `permitAge` alone; a permit
+ * with no usable date floors to 0. `daysSinceCreated` is no longer consulted.
  */
 function scoreFreshness(signals: ScoringSignals, factors: string[]): number {
-  const age = Math.min(signals.permitAge, signals.daysSinceCreated);
+  const age = signals.permitAge;
+
+  // No usable permit date (null issued AND applied → permitAge is +Infinity).
+  if (!Number.isFinite(age) || age < 0) {
+    factors.push("Permit date unknown");
+    return 0;
+  }
 
   let score: number;
   if (age < 1) {
@@ -616,16 +629,14 @@ export function buildSignals(params: {
 }): ScoringSignals {
   const now = Date.now();
 
-  /* Permit age: days since the permit was filed.
+  /* Permit age: days since the permit was filed (issued/applied — the cron
+   * passes COALESCE(issued_date, applied_date) as issue_date).
    *
-   * Bug fix (audit B2, 2026-04-27): when `issue_date` is null, the prior
-   * code left `permitAge = 0`, which then fell into the `age < 1` branch
-   * of `Math.min(permitAge, daysSinceCreated)` and gave 20/20 freshness
-   * (max signal) on EVERY permit with a missing issue_date. Live data
-   * has ~38% of permits without `issued_date`, so >1/3 of leads were
-   * receiving falsely-maxed freshness. Now: when `issue_date` is null,
-   * set `permitAge = +Infinity` so `Math.min` falls through to
-   * `daysSinceCreated` only (the genuinely-known signal). */
+   * When `issue_date` is null, `permitAge = +Infinity`; scoreFreshness floors
+   * that to 0 ("Permit date unknown"). (Was audit B2, 2026-04-27: a null date
+   * left permitAge=0 → falsely-maxed freshness. 2026-06-17: freshness now
+   * reads permitAge ALONE — the ingest-date blend that re-introduced the same
+   * optimism for stale-but-recently-ingested permits is removed.) */
   let permitAge = Number.POSITIVE_INFINITY;
   if (params.permit.issue_date) {
     const filed = new Date(params.permit.issue_date).getTime();
