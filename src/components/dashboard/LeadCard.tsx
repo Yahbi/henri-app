@@ -284,9 +284,12 @@ export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, dis
                 Pre-intent signal
               </span>
             )}
-            {lead.cascade && (
+            {(lead.cascade || (lead.cascadeCount ?? 0) > 1) && (
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary-08 px-1.5 py-0.5 rounded">
-                <span className="text-xs">&#9670;</span> Cascade
+                <span className="text-xs">&#9670;</span>{" "}
+                {(lead.cascadeCount ?? 0) > 1
+                  ? `${lead.cascadeCount} permits`
+                  : "Cascade"}
               </span>
             )}
             {/* Module 22 — stage indicator chip. Same palette as the drawer
