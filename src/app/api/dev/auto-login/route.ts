@@ -31,12 +31,13 @@ export async function POST() {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Password comes from env — never a hardcoded default. If unset, the route
-  // refuses (same shape as when the gate is disabled).
-  const DEV_PASSWORD = process.env.DEV_LOGIN_PASSWORD;
-  if (!DEV_PASSWORD) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+  // Password from env, with a LOCAL-ONLY fallback. Safe: we only reach here
+  // after isDevLoginAllowed() guaranteed NODE_ENV !== production AND
+  // VERCEL_ENV unset AND ENABLE_DEV_LOGIN=1 — i.e. a local `pnpm dev`. The
+  // fallback can never activate on any deploy, so it re-enables one-click
+  // local login without a manual env step (a hard-require with no fallback
+  // silently 404'd local dev login out of the box).
+  const DEV_PASSWORD = process.env.DEV_LOGIN_PASSWORD || "DevLogin!2026";
 
   try {
     const admin = createAdminClient();
