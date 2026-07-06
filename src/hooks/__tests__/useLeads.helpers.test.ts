@@ -46,9 +46,11 @@ import {
   applyLeadFilters,
   applyLeadSort,
   dedupRowsById,
+  dedupByAddress,
   resolveSelect,
   type LeadsQueryBuilder,
 } from "../useLeads.helpers";
+import type { Lead } from "@/types/lead";
 
 /* ── Mock query-builder factory ──
  *
@@ -259,6 +261,61 @@ describe("dedupRowsById", () => {
     const out = dedupRowsById(rows);
     expect(out).toHaveLength(1);
     expect(out[0]).toEqual({ id: "k", score: 1 });
+  });
+});
+
+describe("dedupByAddress", () => {
+  const L = (o: Partial<Lead>) => o as Lead;
+
+  it("collapses multiple permits at the same address to one card", () => {
+    // Input ordered by score DESC (as the fetch delivers it).
+    const leads = [
+      L({ id: "1", address: "80 Seymour St", zip: "06106", score: 69 }),
+      L({ id: "2", address: "80 SEYMOUR ST.", zip: "06106", score: 55 }),
+      L({ id: "3", address: "80  seymour  st", zip: "06106", score: 40 }),
+      L({ id: "4", address: "12 Oak Ave", zip: "06106", score: 60 }),
+    ];
+    const out = dedupByAddress(leads);
+    expect(out).toHaveLength(2);
+    // Keeps the top-scored lead for the collapsed address.
+    expect(out[0].id).toBe("1");
+    expect(out[1].id).toBe("4");
+  });
+
+  it("stamps cascade_count with the true permit count at the address", () => {
+    const leads = [
+      L({ id: "1", address: "80 Seymour St", zip: "06106", score: 69, cascade_count: 1 }),
+      L({ id: "2", address: "80 Seymour St", zip: "06106", score: 55, cascade_count: 1 }),
+      L({ id: "3", address: "80 Seymour St", zip: "06106", score: 40, cascade_count: 1 }),
+    ];
+    const out = dedupByAddress(leads);
+    expect(out).toHaveLength(1);
+    expect((out[0] as { cascade_count?: number }).cascade_count).toBe(3);
+  });
+
+  it("does NOT collapse different addresses in the same ZIP", () => {
+    const leads = [
+      L({ id: "1", address: "1 A St", zip: "06106", score: 50 }),
+      L({ id: "2", address: "2 B St", zip: "06106", score: 50 }),
+    ];
+    expect(dedupByAddress(leads)).toHaveLength(2);
+  });
+
+  it("does NOT collapse the same street across different ZIPs", () => {
+    const leads = [
+      L({ id: "1", address: "1 Main St", zip: "06106", score: 50 }),
+      L({ id: "2", address: "1 Main St", zip: "33602", score: 50 }),
+    ];
+    expect(dedupByAddress(leads)).toHaveLength(2);
+  });
+
+  it("never collapses leads with no usable address", () => {
+    const leads = [
+      L({ id: "1", address: "Unknown", zip: "06106", score: 50 }),
+      L({ id: "2", address: "", zip: "06106", score: 50 }),
+      L({ id: "3", address: "Unknown", zip: "06106", score: 40 }),
+    ];
+    expect(dedupByAddress(leads)).toHaveLength(3);
   });
 });
 

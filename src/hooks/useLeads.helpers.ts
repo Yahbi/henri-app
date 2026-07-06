@@ -217,7 +217,7 @@ import type { Lead } from "@/types/lead";
 
 export function mapRowsToLeads(rows: Record<string, unknown>[]): Lead[] {
   const deduped = dedupRowsById(rows);
-  return deduped.map((row: Record<string, unknown>) => {
+  const mapped = deduped.map((row: Record<string, unknown>) => {
     const permit = row.permits as Record<string, unknown> | null;
     return {
       ...row,
@@ -276,6 +276,59 @@ export function mapRowsToLeads(rows: Record<string, unknown>[]): Lead[] {
         null,
     } as Lead;
   });
+  return dedupByAddress(mapped);
+}
+
+/** Normalize a street address for grouping: lowercase, collapse whitespace,
+ *  strip separators/unit noise so "80 Seymour St", "80 SEYMOUR ST." and
+ *  "80  seymour  st" all key the same. */
+function normalizeAddressKey(address: string | null | undefined): string {
+  return (address ?? "")
+    .toLowerCase()
+    .replace(/[.,#]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Collapse leads to ONE per physical address so a property with several
+ *  permits shows a single card (2026-06 customer-readiness fix — the leads
+ *  list was cluttered with the same address repeated per permit).
+ *
+ *  Keeps the FIRST lead seen per (address, zip) — callers fetch ordered by
+ *  score DESC, so that's the highest-scored/most-actionable permit at the
+ *  address — and stamps `cascade_count` with the true number of permits at
+ *  that address so the card can surface "N permits here". Leads with no
+ *  usable address ("Unknown"/empty) are never collapsed. Order-preserving.
+ *  Exported for unit tests. O(n). */
+export function dedupByAddress(leads: Lead[]): Lead[] {
+  const firstIndexForKey = new Map<string, number>();
+  const permitCountForKey = new Map<string, number>();
+  const out: Lead[] = [];
+
+  for (const lead of leads) {
+    const norm = normalizeAddressKey(lead.address);
+    if (!norm || norm === "unknown") {
+      out.push(lead); // no reliable address — keep every one
+      continue;
+    }
+    const key = `${norm}|${(lead.zip ?? "").trim()}`;
+    permitCountForKey.set(key, (permitCountForKey.get(key) ?? 0) + 1);
+    if (firstIndexForKey.has(key)) continue; // already kept the best for this address
+    firstIndexForKey.set(key, out.length);
+    out.push(lead);
+  }
+
+  // Reflect the real permit count on each kept lead (max of any existing
+  // cascade_count and the group size).
+  for (const [key, idx] of firstIndexForKey) {
+    const n = permitCountForKey.get(key) ?? 1;
+    const existing = (out[idx] as { cascade_count?: number | null }).cascade_count ?? 1;
+    if (n > 1 || existing > 1) {
+      out[idx] = { ...out[idx], cascade_count: Math.max(existing, n) } as Lead;
+    }
+  }
+
+  return out;
 }
 
 /** Defensive dedupe — even with a stable tiebreaker, a cached + rewritten
