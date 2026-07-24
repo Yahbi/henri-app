@@ -219,7 +219,7 @@ export default function PermitsPage() {
           </Card>
           <Card className="p-4">
             <p className="text-sm text-muted-foreground">High Value</p>
-            <p className="text-2xl font-heading font-normal text-[#D4886A] mt-1">
+            <p className="text-2xl font-heading font-normal text-primary mt-1">
               {stats.highValue}
             </p>
           </Card>

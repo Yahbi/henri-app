@@ -19,6 +19,7 @@
  * itself is untouched.
  */
 import type { LeadFilters, LeadSortField, LeadSortDir } from "@/types/lead";
+import { classifyPropertyType } from "@/lib/permits/property-classifier";
 
 /* ── SELECT lists ── (moved from useLeads.ts; same strings)
  *
@@ -38,9 +39,15 @@ export const COLUMNS_NARROW = `
   owner_name, owner_first, owner_last,
   year_built, home_sqft, lot_sqft,
   assessed_value, property_value, owner_occupied, owner_since,
-  pipeline_value, permit_history,
+  pipeline_value,
   opportunity_stage, reason_codes, trade_tags,
   source, parcel_sidecar_uid`;
+/* NOTE: `permit_history` (the scorer's string[] rollup) is deliberately NOT
+ * selected on the list path — it's a heavy per-row JSON blob and no list/card
+ * consumer reads it (the drawer pulls live history via `usePermitHistory`, and
+ * the map page already hardcodes `permitHistory: []`). Downstream mappers use
+ * `?? []`, so its absence degrades cleanly. `cross_trade_suggestions` DOES stay
+ * (COLUMNS_EXTENDED) — the drawer's CrossTradeOpportunities panel reads it. */
 
 export const COLUMNS_EXTENDED = `,
   contact_source, contact_confidence,
@@ -250,6 +257,13 @@ export function mapRowsToLeads(rows: Record<string, unknown>[]): Lead[] {
       // usePermitDetail. Keep the field on the Lead shape for downstream
       // consumers but populate from the joined row when available.
       permit_description: (permit?.description as string | null) ?? null,
+      // Derived property-type axis (residential / commercial / unknown) for
+      // the "Exclude commercial" leads filter. Conservative — "unknown" unless
+      // the permit_type/description clearly says otherwise.
+      propertyType: classifyPropertyType(
+        (row.permit_type as string | null) ?? (permit?.permit_type as string | null),
+        permit?.description as string | null,
+      ),
       permit_value:
         (row.permit_value as number | null) ??
         (permit?.estimated_value as number | null) ??

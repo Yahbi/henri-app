@@ -7,6 +7,8 @@ import { usePermitHistory } from "@/hooks/usePermitHistory";
 import { usePermitDetail } from "@/hooks/usePermitDetail";
 import { useLeadContext } from "@/hooks/useLeadContext";
 import { useDrawerResize } from "@/hooks/useDrawerResize";
+import { useSavedLeads } from "@/hooks/useSavedLeads";
+import { useHiddenLeads } from "@/hooks/useHiddenLeads";
 import { FocusTrap } from "@/components/ui/focus-trap";
 import { ScoreSignalBreakdown } from "./ScoreSignalBreakdown";
 import { PermitTimeline } from "./PermitTimeline";
@@ -127,6 +129,15 @@ export function LeadDetailDrawer({
     lead?.permitUuid ?? lead?.permitNumber ?? fetchedPermit?.id ?? null,
   );
 
+  /* ── Saved / hidden state (Module 11 wiring) ──
+   * Read the contractor's saved/hidden sets so the drawer's action
+   * buttons open reflecting the TRUE state (a previously-saved lead
+   * shows "saved", not "unsaved"). The shared module store in these
+   * hooks means our optimistic add/remove also updates the LeadsPanel
+   * instance — so hiding a lead removes its row from the list at once. */
+  const { savedIds, add: addSaved, remove: removeSaved } = useSavedLeads();
+  const { hiddenIds, add: addHidden } = useHiddenLeads();
+
   /* ── WS7: contact-view analytics (invisible to the contractor) ──
    * When the drawer opens for a lead that actually carries contact info
    * (phone / email / owner present), log a single best-effort view event.
@@ -167,8 +178,21 @@ export function LeadDetailDrawer({
       aria-modal="true"
       aria-labelledby="lead-drawer-title"
     >
-      {/* Module 11 (2026-05-09) — Save / Hide actions next to close. */}
-      <LeadActionButtons leadId={lead.id} />
+      {/* Module 11 (2026-05-09) — Save / Hide actions next to close.
+          initialSaved/initialHidden open the buttons in their true state;
+          onSaved/onHidden push optimistic updates to the shared sets so
+          the LeadsPanel filter + list react immediately. The drawer is
+          keyed by lead id upstream, so these remount per lead. */}
+      <LeadActionButtons
+        leadId={lead.id}
+        initialSaved={savedIds.has(lead.id)}
+        initialHidden={hiddenIds.has(lead.id)}
+        onSaved={(saved) => (saved ? addSaved(lead.id) : removeSaved(lead.id))}
+        onHidden={() => {
+          addHidden(lead.id);
+          onClose();
+        }}
+      />
 
       {/* Close button */}
       <button

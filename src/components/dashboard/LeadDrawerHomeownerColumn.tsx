@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils/cn";
 import { ProvenanceChip } from "./LeadDetailDrawer.helpers";
 import type { LeadData } from "./LeadCard";
+import { sanitizePropertyValue } from "@/lib/permits/value-sanity";
 
 /**
  * LeadDrawerHomeownerColumn — the rightmost column of the LeadDetailDrawer:
@@ -53,6 +54,15 @@ export function LeadDrawerHomeownerColumn({
   enrichment,
   enrichLoading,
 }: LeadDrawerHomeownerColumnProps) {
+  // Sanity-clamp enrichment property values before display — a bad county-GIS
+  // join can attach an 8–9 figure "assessed value" to a home. Implausible
+  // values collapse to null so the row simply hides rather than showing $380M.
+  const assessedValueNum = sanitizePropertyValue(
+    enrichment?.assessed_value != null ? Number(enrichment.assessed_value) : null,
+  );
+  const propertyValueNum = sanitizePropertyValue(
+    enrichment?.property_value != null ? Number(enrichment.property_value) : null,
+  );
   return (
     <div className="shrink-0 w-full sm:w-[220px] flex flex-col justify-between border-t pt-3 sm:border-t-0 sm:pt-0 sm:border-l border-border sm:pl-4 overflow-y-auto scrollbar-thin">
       <div className="space-y-1.5">
@@ -178,23 +188,23 @@ export function LeadDrawerHomeownerColumn({
               Property Details
             </h3>
 
-            {(enrichment?.assessed_value ?? lead.assessedValue) && (
+            {(assessedValueNum != null || lead.assessedValue) && (
               <div className="flex justify-between text-[11px]">
                 <span className="text-muted-foreground">Assessed</span>
                 <span className="text-foreground font-medium">
-                  {enrichment?.assessed_value
-                    ? `$${Number(enrichment.assessed_value).toLocaleString()}`
+                  {assessedValueNum != null
+                    ? `$${assessedValueNum.toLocaleString()}`
                     : lead.assessedValue}
                 </span>
               </div>
             )}
 
-            {(enrichment?.property_value ?? lead.propertyValue) && (
+            {(propertyValueNum != null || lead.propertyValue) && (
               <div className="flex justify-between text-[11px]">
                 <span className="text-muted-foreground">Est. Value</span>
                 <span className="text-foreground font-medium">
-                  {enrichment?.property_value
-                    ? `$${Number(enrichment.property_value).toLocaleString()}`
+                  {propertyValueNum != null
+                    ? `$${propertyValueNum.toLocaleString()}`
                     : lead.propertyValue}
                 </span>
               </div>

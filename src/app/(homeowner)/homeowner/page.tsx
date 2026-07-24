@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { MessageSquare, Clock, CheckCircle, User, Plus, Home, Wrench, Search, DollarSign, ChevronRight } from "lucide-react";
-import { ChatIntakeModal } from "@/components/portal/ChatIntakeModal";
 import { CostEstimator } from "@/components/homeowner/CostEstimator";
 import { MaintenanceCalendar } from "@/components/homeowner/MaintenanceCalendar";
 import { PropertyTracker } from "@/components/homeowner/PropertyTracker";
@@ -11,6 +11,14 @@ import { ContractorList } from "@/components/homeowner/ContractorCard";
 import { useUser } from "@/hooks/useUser";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils/cn";
+
+// Code-split the intake modal (~1,430 LOC). Gated on `chatOpen` in the JSX
+// below so its chunk isn't fetched until the homeowner opens it.
+const ChatIntakeModal = dynamic(
+  () =>
+    import("@/components/portal/ChatIntakeModal").then((m) => m.ChatIntakeModal),
+  { ssr: false },
+);
 
 /* ─── Types ─── */
 interface Intake {
@@ -212,11 +220,13 @@ export default function HomeownerDashboard() {
       </div>
 
       {/* Chat modal */}
-      <ChatIntakeModal
-        isOpen={chatOpen}
-        onClose={() => setChatOpen(false)}
-        initialZip={userZip}
-      />
+      {chatOpen && (
+        <ChatIntakeModal
+          isOpen={chatOpen}
+          onClose={() => setChatOpen(false)}
+          initialZip={userZip}
+        />
+      )}
     </>
   );
 }

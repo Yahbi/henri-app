@@ -803,7 +803,10 @@ export async function GET(request: NextRequest) {
         permit_type: permit.permit_type,
         permit_description: permit.description,
         permit_value: permit.estimated_value,
-        permit_age_days: signals.permitAge,
+        // Unknown filing date leaves permitAge = +Infinity; pass null so the
+        // classifier's `ageDays != null` guards don't read Infinity > 90 and
+        // mislabel a submitted permit with no date as "stalled".
+        permit_age_days: Number.isFinite(signals.permitAge) ? signals.permitAge : null,
         contractor_name:
           (rawJsonForClassify.contractor_name as string | null) ?? null,
         applicant_name: permit.applicant_name,

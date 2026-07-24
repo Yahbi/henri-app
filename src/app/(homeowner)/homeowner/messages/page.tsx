@@ -291,6 +291,7 @@ function HomeownerMessagesPage() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder="Type a message..."
+                aria-label="Message"
                 className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none"
                 disabled={sending}
               />

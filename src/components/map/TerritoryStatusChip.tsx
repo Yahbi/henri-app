@@ -74,7 +74,7 @@ export function TerritoryStatusChip() {
 
   return (
     <div
-      className="flex items-center gap-2 px-3 py-1 rounded-full border border-[#D4886A]/40 bg-[#D4886A]/8 text-[11px]"
+      className="flex items-center gap-2 px-3 py-1 rounded-full border border-primary/40 bg-primary/8 text-[11px]"
       title={
         sees_all_trades
           ? `${plan_label} plan · ${zips_claimed} of ${zip_cap} ZIPs claimed · sees all trades`
@@ -108,7 +108,7 @@ export function TerritoryStatusChip() {
         <>
           <span className="text-[#7d4f39]/70 whitespace-nowrap">·</span>
           <a
-            href="/dashboard/settings/billing"
+            href="/settings/billing"
             className="text-[#7d4f39] font-medium underline-offset-2 hover:underline whitespace-nowrap inline-flex items-center gap-0.5"
           >
             Upgrade to {next_tier.label}

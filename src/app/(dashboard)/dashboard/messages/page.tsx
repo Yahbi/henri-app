@@ -40,7 +40,7 @@ function formatTime(isoStr: string) {
 
 export default function MessagesPage() {
   const { user } = useUser();
-  const { data: leads, isLoading } = useLeads();
+  const { data: leads, isLoading, isError, refetch } = useLeads();
   const addNote = useAddLeadNote();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -101,7 +101,19 @@ export default function MessagesPage() {
           <p className="text-xs text-muted-foreground mt-0.5">Lead conversations</p>
         </div>
         <div className="flex-1 overflow-y-auto divide-y divide-border">
-          {isLoading ? (
+          {isError ? (
+            <div
+              role="alert"
+              className="px-4 py-8 text-center space-y-3"
+            >
+              <p className="text-xs text-muted-foreground">
+                Couldn&apos;t load your conversations.
+              </p>
+              <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                Try again
+              </Button>
+            </div>
+          ) : isLoading ? (
             [...Array(4)].map((_, i) => (
               <div key={i} className="px-4 py-3 space-y-1.5">
                 <Skeleton className="h-4 w-32" />
@@ -214,6 +226,7 @@ export default function MessagesPage() {
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                 placeholder="Log a note about this lead..."
+                aria-label="Log a note"
                 className="flex-1 px-3 py-2 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <button

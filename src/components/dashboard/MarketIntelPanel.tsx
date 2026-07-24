@@ -59,6 +59,7 @@ export function MarketIntelPanel({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="ZIP"
+            aria-label="ZIP code"
             className="w-20 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <button

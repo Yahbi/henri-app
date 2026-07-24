@@ -265,6 +265,9 @@ export default function SettingsPage() {
       </Section>
 
       {/* ── 2. Territory Overview ── */}
+      {/* Scroll anchor for the topbar territory pill (#territories);
+          scroll-mt offsets the sticky header so the heading isn't clipped. */}
+      <div id="territories" className="scroll-mt-24" aria-hidden="true" />
       <Section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-foreground">

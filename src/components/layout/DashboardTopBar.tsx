@@ -326,7 +326,6 @@ export function DashboardTopBar() {
       <div className="relative">
       <nav
         className="flex items-center gap-0.5 px-4 overflow-x-auto scrollbar-none"
-        role="tablist"
         aria-label="Dashboard navigation"
       >
         {TABS.map((tab) => {
@@ -345,8 +344,7 @@ export function DashboardTopBar() {
               key={tab.href}
               href={tab.href}
               ref={active ? activeTabRef : undefined}
-              role="tab"
-              aria-selected={active}
+              aria-current={active ? "page" : undefined}
               data-tour={`dashboard-nav-${tourKey}`}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium whitespace-nowrap border-b-2 transition-colors shrink-0",

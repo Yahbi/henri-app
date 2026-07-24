@@ -8,6 +8,7 @@ import { Bookmark } from "lucide-react";
 // See ~/.claude/plans/whats-the-14-days-purring-papert.md.
 // The components themselves stay on disk (zero cost, easy to revive).
 import type { ExclusivityLeadSummary } from "@/lib/exclusivity/locks";
+import type { PropertyType } from "@/lib/permits/property-classifier";
 // Module 22 (2026-05-09) — single-source palette for stage tinting in
 // the LeadCard left-border + inline chip dot. Same colors used by the
 // drawer chip, the map pin paint, and the popup chip.
@@ -106,6 +107,10 @@ export interface LeadData {
   opportunityStage?: string | null;
   reasonCodes?: string[] | null;
   tradeTags?: string[] | null;
+
+  /* Derived property-type axis for the "Exclude commercial" filter.
+   * "unknown" when the permit gives no clear residential/commercial signal. */
+  propertyType?: PropertyType;
 
   /* Phase AA-3 provenance. When source = 'parcel_synthesis' the card
    * surfaces a small "Pre-intent signal" indicator so the contractor
@@ -342,7 +347,9 @@ export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, dis
               <span
                 className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
                 style={{
-                  backgroundColor: dot === "red" ? "#DC4A3D" : "#D4A24A",
+                  // Canonical urgency tokens (same --hot / --warm the score
+                  // pill uses) rather than rogue hex literals.
+                  backgroundColor: dot === "red" ? "var(--hot)" : "var(--warm)",
                 }}
               />
             )}

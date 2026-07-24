@@ -29,6 +29,10 @@ interface LeadActionButtonsProps {
    *  row immediately (it's now in the hidden_leads table and the next
    *  fetch would filter it anyway, but we want instant feedback). */
   onHidden?: () => void;
+  /** Called after a successful Save toggle (in either direction) so the
+   *  parent can sync the shared saved-leads set — keeps the "Saved"
+   *  filter accurate and makes a reopened lead show its true saved state. */
+  onSaved?: (saved: boolean) => void;
 }
 
 export function LeadActionButtons({
@@ -36,6 +40,7 @@ export function LeadActionButtons({
   initialSaved = false,
   initialHidden = false,
   onHidden,
+  onSaved,
 }: LeadActionButtonsProps) {
   const [saved, setSaved] = useState(initialSaved);
   const [hidden, setHidden] = useState(initialHidden);
@@ -52,6 +57,7 @@ export function LeadActionButtons({
           body: next ? JSON.stringify({}) : undefined,
         });
         if (!res.ok) throw new Error(`save failed: ${res.status}`);
+        if (onSaved) onSaved(next);
       } catch (e) {
         logger.warn("LeadActionButtons: save toggle failed", {
           leadId,
@@ -97,7 +103,7 @@ export function LeadActionButtons({
         {pending ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : saved ? (
-          <BookmarkCheck className="h-4 w-4 text-[#D4886A]" />
+          <BookmarkCheck className="h-4 w-4 text-primary" />
         ) : (
           <Bookmark className="h-4 w-4" />
         )}

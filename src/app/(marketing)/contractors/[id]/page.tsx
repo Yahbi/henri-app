@@ -46,7 +46,7 @@ interface Review {
 function StarIcon({ filled = true }: { filled?: boolean }) {
   return (
     <svg
-      className={`h-4 w-4 ${filled ? "text-[#D4A24A]" : "text-border"}`}
+      className={`h-4 w-4 ${filled ? "text-warm" : "text-border"}`}
       viewBox="0 0 20 20"
       fill="currentColor"
     >
@@ -534,7 +534,7 @@ export default async function ContractorProfilePage({
                     <StarIcon filled />
                     <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-border">
                       <div
-                        className="h-full rounded-full bg-[#D4A24A] transition-all"
+                        className="h-full rounded-full bg-warm transition-all"
                         style={{ width: `${pct}%` }}
                       />
                     </div>

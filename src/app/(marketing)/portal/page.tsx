@@ -2,9 +2,18 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { ChevronDown } from "lucide-react";
-import { ChatIntakeModal } from "@/components/portal/ChatIntakeModal";
 import { cn } from "@/lib/utils/cn";
+
+// Code-split the intake modal (~1,430 LOC across ChatIntakeModal + steps +
+// parts). It's closed by default on this public landing page, so it's gated
+// on `chatOpen` below — the chunk isn't fetched until the visitor opens it.
+const ChatIntakeModal = dynamic(
+  () =>
+    import("@/components/portal/ChatIntakeModal").then((m) => m.ChatIntakeModal),
+  { ssr: false },
+);
 
 /* ================================================================== */
 /*  DATA                                                               */
@@ -253,6 +262,7 @@ export default function PortalPage() {
               value={zipInput}
               onChange={(e) => setZipInput(e.target.value)}
               placeholder="Enter your ZIP code"
+              aria-label="ZIP code"
               className="flex-1 rounded-lg border border-input bg-card px-4 py-3 text-sm text-foreground shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <button
@@ -534,12 +544,14 @@ export default function PortalPage() {
       {/* ============================================================ */}
       {/*  CHAT MODAL                                                  */}
       {/* ============================================================ */}
-      <ChatIntakeModal
-        isOpen={chatOpen}
-        onClose={() => setChatOpen(false)}
-        initialZip={chatZip}
-        initialTrade={chatTrade}
-      />
+      {chatOpen && (
+        <ChatIntakeModal
+          isOpen={chatOpen}
+          onClose={() => setChatOpen(false)}
+          initialZip={chatZip}
+          initialTrade={chatTrade}
+        />
+      )}
     </>
   );
 }

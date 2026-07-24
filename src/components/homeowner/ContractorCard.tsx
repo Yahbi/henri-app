@@ -30,7 +30,7 @@ interface ContractorProfile {
 function StarDisplay({ rating }: { rating: number }) {
   return (
     <span className="inline-flex items-center gap-1">
-      <Star className="h-3.5 w-3.5 fill-[#D4A24A] text-[#D4A24A]" />
+      <Star className="h-3.5 w-3.5 fill-warm text-warm" />
       <span className="text-sm font-medium text-foreground">{rating.toFixed(1)}</span>
     </span>
   );
@@ -244,21 +244,17 @@ function mapApiContractor(c: ContractorSearchResult): ContractorProfile {
     rating: c.avg_rating ?? 0,
     reviewCount: c.total_reviews ?? 0,
     responseTime:
-      typeof (c as unknown as { response_time_h?: number }).response_time_h === "number"
-        ? `~${Math.round((c as unknown as { response_time_h: number }).response_time_h)}h`
+      typeof c.response_time_h === "number"
+        ? `~${Math.round(c.response_time_h)}h`
         : null,
     completedProjects: c.total_jobs_won ?? 0,
-    licensedState:
-      (c as unknown as { license_state?: string | null }).license_state ?? null,
+    licensedState: c.license_state ?? null,
     licenseVerified: c.verified ?? false,
     lastVerified: c.verified ? "Verified" : null,
-    insured: (c as unknown as { insured?: boolean }).insured ?? null,
-    backgroundChecked:
-      (c as unknown as { background_checked?: boolean }).background_checked ?? null,
-    yearsInBusiness:
-      (c as unknown as { years_experience?: number }).years_experience ?? null,
-    specialties:
-      (c as unknown as { specialties?: string[] }).specialties ?? [],
+    insured: c.insured ?? null,
+    backgroundChecked: c.background_checked ?? null,
+    yearsInBusiness: c.years_experience ?? null,
+    specialties: c.specialties ?? [],
   };
 }
 

@@ -108,6 +108,7 @@ function SendModal({ id, total, address, onClose }: { id: string; total: number;
             <button
               key={m}
               onClick={() => setMethod(m)}
+              aria-pressed={method === m}
               className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                 method === m ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:text-foreground"
               }`}

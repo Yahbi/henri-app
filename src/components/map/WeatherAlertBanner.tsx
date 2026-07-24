@@ -52,12 +52,14 @@ export function WeatherAlertBanner({ alerts, className }: WeatherAlertBannerProp
         </div>
         <button
           onClick={() => setExpanded((e) => !e)}
+          aria-label={expanded ? "Collapse alert details" : "Expand alert details"}
           className="h-6 w-6 flex items-center justify-center rounded hover:bg-black/5 transition-colors"
         >
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </button>
         <button
           onClick={() => setDismissed(true)}
+          aria-label="Dismiss weather alerts"
           className="h-6 w-6 flex items-center justify-center rounded hover:bg-black/5 transition-colors"
         >
           <X className="h-3.5 w-3.5" />

@@ -173,7 +173,7 @@ function scoreFreshness(signals: ScoringSignals, factors: string[]): number {
     factors.push("Filed today");
   } else if (age < 3) {
     score = 16;
-    factors.push(`Filed ${Math.ceil(age)} day${age >= 2 ? "s" : ""} ago`);
+    factors.push(`Filed ${Math.ceil(age)} day${Math.ceil(age) >= 2 ? "s" : ""} ago`);
   } else if (age < 7) {
     score = 12;
     factors.push(`Filed ${Math.ceil(age)} days ago`);
@@ -640,7 +640,14 @@ export function buildSignals(params: {
   let permitAge = Number.POSITIVE_INFINITY;
   if (params.permit.issue_date) {
     const filed = new Date(params.permit.issue_date).getTime();
-    permitAge = Math.max(0, (now - filed) / (1000 * 60 * 60 * 24));
+    const ageDays = (now - filed) / (1000 * 60 * 60 * 24);
+    // A FUTURE filing date is a placeholder / data error. Leave permitAge
+    // = +Infinity (scoreFreshness floors it to 0, "Permit date unknown")
+    // rather than clamping a negative age to 0 — the old Math.max(0, …)
+    // clamp falsely maxed freshness and mislabelled the lead "Filed today".
+    if (Number.isFinite(ageDays) && ageDays >= 0) {
+      permitAge = ageDays;
+    }
   }
 
   /* Days since lead was created in our system */

@@ -1,5 +1,7 @@
 /* ── Shared lead types used across Dashboard, Pipeline, Intel, Outreach, etc. ── */
 
+import type { PropertyType } from "@/lib/permits/property-classifier";
+
 export type LeadUrgency = "hot" | "warm" | "cool" | "cold";
 export type LeadStatus = "new" | "contacted" | "quoted" | "proposal" | "won" | "lost" | "archived";
 
@@ -56,6 +58,10 @@ export interface Lead {
   /* Permit info */
   permit_type?: string | null;
   permit_description?: string | null;
+  /* Derived at map-time from permit_type (+ description) by
+   * classifyPropertyType — powers the "Exclude commercial" leads filter.
+   * "unknown" when signals are absent/contradictory. */
+  propertyType?: PropertyType;
   permit_value?: number | null;
   permit_filed_date?: string | null;
   permit_age_days?: number | null;

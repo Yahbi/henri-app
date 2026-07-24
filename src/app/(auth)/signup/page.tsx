@@ -198,6 +198,7 @@ function SignupInner() {
                     key={r}
                     type="button"
                     onClick={() => setRole(r)}
+                    aria-pressed={role === r}
                     className={cn(
                       "rounded-lg border px-4 py-3 text-sm font-medium transition-colors",
                       role === r

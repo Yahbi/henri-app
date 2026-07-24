@@ -192,10 +192,28 @@ export async function getLandingStats(): Promise<LandingStats> {
     return buildFallback();
   }
 
-  const permitsCount = Math.max(
+  const cleanPermits = Math.max(
     0,
     (permitsResult.count ?? 0) - junkStateCount - junkNullCount,
   );
+
+  // Truthfulness + resilience guard: the count query can SUCCEED (no
+  // throw, so the catch above never fires) yet return null/0 — e.g. the
+  // DB is mid-restore, the planner estimate is unavailable, or a
+  // transient empty read. We KNOW the catalog is well over 1.5M, so we
+  // must never render a "0.0M+" understatement on the marketing pages.
+  // Treat any null/zero/implausibly-low live count as a failed read and
+  // use the hand-verified honest floor instead of the broken live value.
+  if (permitsResult.count == null || cleanPermits < FALLBACK_PERMITS / 2) {
+    console.warn(
+      "[landing-stats] live permit count missing/implausible (",
+      permitsResult.count,
+      ") — using verified fallback floor",
+    );
+    return buildFallback();
+  }
+
+  const permitsCount = cleanPermits;
   const leadsCount = leadsResult.count ?? 0;
 
   // Active states list. Two server-side aggregation paths were tried

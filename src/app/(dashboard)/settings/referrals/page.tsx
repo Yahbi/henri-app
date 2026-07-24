@@ -146,10 +146,10 @@ export default function ReferralsPage() {
         </Card>
         <Card className="p-4">
           <div className="flex items-center gap-1.5 mb-1">
-            <Gift className="h-3.5 w-3.5 text-[#D4A24A]" />
+            <Gift className="h-3.5 w-3.5 text-warm" />
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Pending</p>
           </div>
-          <p className="text-2xl font-heading font-normal text-[#D4A24A]">
+          <p className="text-2xl font-heading font-normal text-warm">
             {isLoading ? "\u2014" : stats.pendingRewards}
           </p>
         </Card>
@@ -191,6 +191,7 @@ export default function ReferralsPage() {
               onChange={(e) => setInviteEmail(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleInvite()}
               placeholder="colleague@email.com"
+              aria-label="Invite email address"
               className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               disabled={inviteSending}
             />

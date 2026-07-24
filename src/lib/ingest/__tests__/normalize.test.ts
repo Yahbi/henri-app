@@ -194,7 +194,9 @@ describe("mapPermitTypeToEnum", () => {
 
   it("maps commercial types", () => {
     expect(mapPermitTypeToEnum("Commercial Electrical Permit")).toBe("commercial");
-    expect(mapPermitTypeToEnum("Building Permit (Commercial) - Tenant Improvement/Alteration")).toBe("renovation");
+    // A commercial tenant improvement classifies as commercial, not renovation
+    // (the `commercial` check now precedes the project-type buckets).
+    expect(mapPermitTypeToEnum("Building Permit (Commercial) - Tenant Improvement/Alteration")).toBe("commercial");
   });
 
   it("maps demolition types", () => {

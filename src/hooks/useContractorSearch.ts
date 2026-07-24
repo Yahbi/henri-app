@@ -14,6 +14,15 @@ export interface ContractorSearchResult {
   total_jobs_won: number;
   zip: string;
   verified: boolean;
+  /* Optional enrichment fields — present only when the search API has
+   * them for a given contractor. Typed as optional so the card can read
+   * them directly instead of casting through `unknown`. */
+  response_time_h?: number | null;
+  license_state?: string | null;
+  insured?: boolean | null;
+  background_checked?: boolean | null;
+  years_experience?: number | null;
+  specialties?: string[] | null;
 }
 
 interface UseContractorSearchReturn {

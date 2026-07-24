@@ -316,11 +316,15 @@ export function mapPermitTypeToEnum(type: string): PermitTypeEnum {
 
   if (/demol|wreck/i.test(lower)) return "demolition";
   if (/new\s*(construction|building)|single family home/i.test(lower)) return "new_construction";
+  // `commercial` MUST be checked before the project-type buckets below:
+  // "Building Permit (Commercial) - Tenant Improvement" should classify as
+  // commercial, not renovation. (Fixed 2026-07 — the old ordering matched
+  // `renovation` first and mislabelled every commercial tenant-improvement.)
+  if (/commercial|non-residential/i.test(lower)) return "commercial";
   if (/renovation|alteration|remodel|tenant improvement|interior/i.test(lower))
     return "renovation";
   if (/addition|add[\s-]on/i.test(lower)) return "addition";
   if (/repair|foundation repair/i.test(lower)) return "repair";
-  if (/commercial|non-residential/i.test(lower)) return "commercial";
   if (/residential|1-2 family|one or two family/i.test(lower)) return "residential";
 
   return "other";

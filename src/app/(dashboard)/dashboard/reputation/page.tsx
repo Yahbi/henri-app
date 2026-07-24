@@ -263,6 +263,7 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
         <div className="flex gap-2">
           {(["sms", "email"] as const).map((m) => (
             <button key={m} onClick={() => setMethod(m)}
+              aria-pressed={method === m}
               className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                 method === m ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:text-foreground"
               }`}>
@@ -497,6 +498,7 @@ function ReputationPageInner() {
           <div className="flex gap-1.5">
             {(["all", "positive", "neutral", "negative"] as const).map((f) => (
               <button key={f} onClick={() => setFilter(f)}
+                aria-pressed={filter === f}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                   filter === f ? "bg-primary text-white" : "bg-bg-subtle text-muted-foreground hover:text-foreground"
                 }`}>

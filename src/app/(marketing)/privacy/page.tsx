@@ -277,7 +277,7 @@ export default function PrivacyPolicyPage() {
                 To exercise any of these rights, contact us at{" "}
                 <a
                   href="mailto:privacy@meethenri.com"
-                  className="text-[#D4886A] underline underline-offset-2"
+                  className="text-primary underline underline-offset-2"
                 >
                   privacy@meethenri.com
                 </a>
@@ -330,7 +330,7 @@ export default function PrivacyPolicyPage() {
                 To submit a CCPA request, email us at{" "}
                 <a
                   href="mailto:privacy@meethenri.com"
-                  className="text-[#D4886A] underline underline-offset-2"
+                  className="text-primary underline underline-offset-2"
                 >
                   privacy@meethenri.com
                 </a>{" "}
@@ -389,7 +389,7 @@ export default function PrivacyPolicyPage() {
               data practices, please contact us at{" "}
               <a
                 href="mailto:privacy@meethenri.com"
-                className="text-[#D4886A] underline underline-offset-2"
+                className="text-primary underline underline-offset-2"
               >
                 privacy@meethenri.com
               </a>

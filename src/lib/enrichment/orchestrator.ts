@@ -71,6 +71,10 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  sanitizePropertyValue,
+  PROPERTY_VALUE_FIELDS,
+} from "@/lib/permits/value-sanity";
 import { enrichFromCounty } from "./county-gis";
 import { queryRegrid } from "./regrid-parcel";
 import { lookupCompanyPrincipal } from "./opencorporates";
@@ -211,6 +215,17 @@ function applyField<K extends keyof EnrichedContact>(
 ): void {
   if (value == null) return;
   if (target[key] != null) return;
+  // Sanity-clamp monetary property fields before writing — implausible values
+  // (e.g. a $380.9M "assessed value" from a bad county-GIS join onto a
+  // residential parcel) are dropped so they never reach scoring, the drawer,
+  // or the map popup. Covers every writer (county, Regrid, sidecar) at once.
+  if (PROPERTY_VALUE_FIELDS.has(key as string) && typeof value === "number") {
+    const clean = sanitizePropertyValue(value);
+    if (clean == null) return;
+    target[key] = clean as EnrichedContact[K];
+    target.sources[key as string] = source;
+    return;
+  }
   target[key] = value;
   target.sources[key as string] = source;
 }

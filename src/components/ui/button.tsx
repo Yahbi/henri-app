@@ -11,7 +11,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
+          "bg-cta text-cta-foreground hover:bg-cta/90 shadow-sm",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80 shadow-sm",
         ghost: "hover:bg-accent hover:text-accent-foreground",
@@ -24,7 +24,7 @@ const buttonVariants = cva(
         // instead of arbitrary `shadow-[hsl(var(--primary)/X)]` values.
         // Same visual output; the arbitrary-value form trips a Tailwind
         // v4 + Turbopack 16.2.3 PostCSS parser bug.
-        glow: "bg-primary text-primary-foreground shadow-glow-button hover:shadow-glow-button-hover hover:bg-primary/90",
+        glow: "bg-cta text-cta-foreground shadow-glow-button hover:shadow-glow-button-hover hover:bg-cta/90",
       },
       size: {
         /* `sm` stays at h-8 (32px) for tight contexts — tables, filter

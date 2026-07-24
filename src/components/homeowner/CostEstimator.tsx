@@ -110,6 +110,7 @@ export function CostEstimator({ initialZip = "" }: CostEstimatorProps) {
             <button
               key={q.value}
               onClick={() => { setQuality(q.value); setShowResult(false); }}
+              aria-pressed={quality === q.value}
               className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                 quality === q.value
                   ? "border-primary bg-primary/5 text-primary"

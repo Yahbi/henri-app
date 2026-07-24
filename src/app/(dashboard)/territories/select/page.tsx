@@ -101,6 +101,7 @@ export default function TerritorySelectPage() {
                     </div>
                     <button
                       onClick={() => setSelectedZip(null)}
+                      aria-label="Close"
                       className="text-muted-foreground hover:text-foreground"
                     >
                       <X className="h-4 w-4" />
@@ -175,6 +176,7 @@ export default function TerritorySelectPage() {
                     </div>
                     <button
                       onClick={() => removeZip(z.zip)}
+                      aria-label="Remove ZIP"
                       className="text-muted-foreground hover:text-destructive transition-colors"
                     >
                       <X className="h-4 w-4" />
