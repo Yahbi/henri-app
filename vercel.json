@@ -1,21 +1,4 @@
 {
-  "$comment": [
-    "CRON SCHEDULE — restored 2026-08-04.",
-    "REASON: the pipeline had been dead since 2026-07-06 (29 days, zero permits ingested).",
-    "Only 2 crons were scheduled here because the Hobby plan capped it at 2; every other",
-    "cron depended on an external scheduler (GitHub Actions / Hetzner) that had stopped.",
-    "Vercel is now on a paid plan (40-cron allowance) and Supabase is on Pro, so the fleet",
-    "is scheduled natively and no longer depends on an external trigger.",
-    "THROUGHPUT: enrich runs HOURLY. Each run enriches ~1200 leads in ~290s; at 4 runs/day",
-    "a 274k-lead backlog needs ~57 days, at 24 runs/day it clears in ~10. re-enrich fills",
-    "owner/phone/email on leads that already have year_built (which the main enrich pass",
-    "skips by design) and runs daily for the same reason. score runs every 30 min to drain",
-    "the ~83k unscored-permit backlog (1000/run) in ~2 days, then keeps pace with ingest.",
-    "REVERT PLAN: restore the two-entry array (refresh-zip-aggregates + synthesize-pre-intent)",
-    "and the app returns to its prior behaviour; every cron is idempotent and additive, so",
-    "removing a schedule only stops new data — it never corrupts existing rows.",
-    "Times are UTC. Slots are staggered so heavy jobs never overlap."
-  ],
   "crons": [
     { "path": "/api/cron/score", "schedule": "*/30 * * * *" },
     { "path": "/api/cron/enrich", "schedule": "15 * * * *" },
