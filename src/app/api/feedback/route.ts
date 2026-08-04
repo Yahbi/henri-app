@@ -5,6 +5,7 @@ import { logApiError } from "@/lib/log";
 import { logger } from "@/lib/logger";
 import { Resend } from "resend";
 import { z } from "zod";
+import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/utils/rate-limit";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -32,8 +33,9 @@ import * as path from "path";
  *
  * Returns 200 if any path succeeded, 502 only when all three failed.
  *
- * Rate limiting: cap body size at 4KB (Zod rejects longer). Platform
- * rate-limits handle flood on the unauthenticated path in prod.
+ * Rate limiting: 4KB body cap (Zod) + an IP limiter (10/hour) applied
+ * before the DB insert and founder-inbox email, so the unauthenticated
+ * anonymous path can't be used to email-bomb the inbox or burn Resend quota.
  */
 
 const FEEDBACK_INBOX = process.env.FEEDBACK_INBOX ?? "y.abismuth@gmail.com";
@@ -148,6 +150,16 @@ const BodySchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    // IP throttle before the DB insert + founder-inbox email (the anonymous
+    // path is unauthenticated). Generous cap so legit in-app feedback isn't
+    // blocked, but a flood can't email-bomb the inbox or burn Resend quota.
+    const ip = getClientIp(request);
+    const rl = checkRateLimit(`feedback:${ip}`, {
+      maxRequests: 10,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!rl.allowed) return rateLimitResponse(rl);
+
     const raw = await request.json();
     const parsed = BodySchema.safeParse(raw);
     if (!parsed.success) {

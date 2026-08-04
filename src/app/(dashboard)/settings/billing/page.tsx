@@ -28,8 +28,9 @@ const PLANS: PlanTier[] = [
     features: [
       "3 ZIP territories",
       "AI-scored permit leads",
-      "Full owner contact data",
-      "Email & SMS outreach",
+      "Best-effort owner contact enrichment",
+      "Email & SMS outreach (compose & send)",
+      "Price locked forever",
     ],
     territories: 3,
   },
@@ -43,9 +44,9 @@ const PLANS: PlanTier[] = [
     features: [
       "5 ZIP territories",
       "AI-scored permit leads",
-      "Full contact enrichment",
-      "Email & SMS outreach",
-      "Storm Center alerts",
+      "Best-effort owner contact enrichment",
+      "Email & SMS outreach (compose & send)",
+      "Storm Center dashboard",
     ],
     territories: 5,
   },
@@ -59,9 +60,9 @@ const PLANS: PlanTier[] = [
     features: [
       "12 ZIP territories",
       "Everything in Starter",
-      "Canvass targeting",
-      "Neighborhood Blast",
-      "Reputation management",
+      "Daily license verification (compliance)",
+      "Storm Center dashboard",
+      "Priority email support",
     ],
     territories: 12,
     highlighted: true,
@@ -76,9 +77,9 @@ const PLANS: PlanTier[] = [
     features: [
       "20 ZIP territories",
       "Everything in Pro",
-      "Priority lead routing",
       "Dedicated account manager",
-      "Team seats (up to 10)",
+      "Custom onboarding",
+      "Priority email support",
     ],
     territories: 20,
   },
@@ -238,7 +239,7 @@ export default function BillingPage() {
               <span className="text-sm font-normal text-muted-foreground">{currentPlan.price}/mo</span>
             </p>
             <p className="text-sm text-muted-foreground mt-1">
-              {currentPlan.territories} ZIP territories · AI-scored leads · Full contact enrichment
+              {currentPlan.territories} ZIP territories · AI-scored leads · Best-effort owner contact enrichment
             </p>
           </div>
           <button

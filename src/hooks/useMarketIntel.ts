@@ -32,11 +32,15 @@ export function useMarketIntel(zip: string | null | undefined) {
   const [intel, setIntel] = useState<MarketIntel | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [migrationPending, setMigrationPending] = useState(false);
+  // A real fetch failure must be distinguishable from a genuinely empty ZIP —
+  // otherwise the panel mislabels an outage as "no permit activity".
+  const [error, setError] = useState<string | null>(null);
   const lastKey = useRef<string | null>(null);
 
   useEffect(() => {
     if (!zip) {
       setIntel(null);
+      setError(null);
       lastKey.current = null;
       return;
     }
@@ -47,9 +51,13 @@ export function useMarketIntel(zip: string | null | undefined) {
     let cancelled = false;
     (async () => {
       setIsLoading(true);
+      setError(null);
       try {
         const res = await fetch(`/api/market-intel/${clean}`, { credentials: "include" });
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (!cancelled) setError("Couldn't load market intelligence.");
+          return;
+        }
         const body = (await res.json()) as {
           intel: MarketIntel | null;
           migrationPending?: boolean;
@@ -60,7 +68,10 @@ export function useMarketIntel(zip: string | null | undefined) {
           setMigrationPending(!!body.migrationPending);
         }
       } catch {
-        if (!cancelled) setIntel(null);
+        if (!cancelled) {
+          setIntel(null);
+          setError("Couldn't load market intelligence.");
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -68,5 +79,5 @@ export function useMarketIntel(zip: string | null | undefined) {
     return () => { cancelled = true; };
   }, [zip]);
 
-  return { intel, isLoading, migrationPending };
+  return { intel, isLoading, migrationPending, error };
 }

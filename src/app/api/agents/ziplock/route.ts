@@ -26,10 +26,14 @@ export async function POST(request: NextRequest) {
     const parsed = parseBody(ZipLockBodySchema, raw);
     if (parsed.response) return parsed.response;
     const { action, zip } = parsed.data;
-    /* contractor_id is required by the discriminated-union schema for
-     * "claim" / "release"; for "check" it's optional and may be undefined. */
-    const contractor_id =
-      "contractor_id" in parsed.data ? parsed.data.contractor_id : undefined;
+    /* SECURITY (IDOR): the contractor identity is ALWAYS the authenticated
+     * session — never the request body. A body-supplied contractor_id would
+     * let a signed-in contractor claim or RELEASE territory on another
+     * contractor's behalf (e.g. evicting a rival from their paid ZIP). Any
+     * contractor_id in the body is ignored; the discriminated-union schema
+     * still accepts the field for backward compatibility but it is not
+     * trusted for any authoritative operation. */
+    const contractor_id = auth.user.id;
 
     // Check current claim status
     if (action === "check") {
@@ -92,8 +96,11 @@ export async function POST(request: NextRequest) {
         .eq("id", contractor_id)
         .maybeSingle();
 
-      const plan = profile?.plan ?? "starter";
-      const maxZips = PLAN_ZIP_LIMITS[plan] ?? 5;
+      /* A missing/unknown plan must not silently grant Starter's larger
+       * allotment — fall back to the smallest paid tier so a contractor whose
+       * plan row is absent can't over-claim territory. */
+      const plan = profile?.plan ?? "founder";
+      const maxZips = PLAN_ZIP_LIMITS[plan] ?? PLAN_ZIP_LIMITS.founder;
 
       const { count } = await supabase
         .from("territories")

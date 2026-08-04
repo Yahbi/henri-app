@@ -154,6 +154,16 @@ export function CommandPalette() {
     }
   }, [open]);
 
+  // Keep the active option within the scroll container as the user arrows
+  // through the list. aria-activedescendant tracks the active row but does
+  // NOT auto-scroll it — without this, arrowing past the visible rows moves
+  // the highlighted option below the fold (WCAG 2.4.7).
+  useEffect(() => {
+    if (!open) return;
+    const id = flat[activeIndex]?.id;
+    if (id) document.getElementById(`cmd-${id}`)?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, flat, open]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();

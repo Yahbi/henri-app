@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
@@ -31,6 +31,16 @@ export function AddLeadDialog({ open, onClose }: AddLeadDialogProps) {
     status: "new" as const,
     estimated_value: "",
   });
+
+  // Close on Escape — the modal otherwise had no keyboard dismiss.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -77,11 +87,20 @@ export function AddLeadDialog({ open, onClose }: AddLeadDialogProps) {
 
   return (
     <FocusTrap active={open}>
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-lead-title"
+        className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 className="text-base font-semibold text-foreground">Add lead to pipeline</h2>
+          <h2 id="add-lead-title" className="text-base font-semibold text-foreground">Add lead to pipeline</h2>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"

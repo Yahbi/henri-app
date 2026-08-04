@@ -44,6 +44,7 @@ export default function MessagesPage() {
   const addNote = useAddLeadNote();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [sendError, setSendError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const contactedLeads = useMemo<Lead[]>(
@@ -77,8 +78,15 @@ export default function MessagesPage() {
     const timestamp = new Date().toISOString();
     const newLine = `${timestamp} [out]: ${draft.trim()}`;
     const existing = selected.notes ? `${selected.notes}\n${newLine}` : newLine;
-    await addNote.mutateAsync({ leadId: selected.id, note: existing });
-    setDraft("");
+    setSendError(null);
+    try {
+      await addNote.mutateAsync({ leadId: selected.id, note: existing });
+      setDraft("");
+    } catch {
+      // mutateAsync re-throws — without this the rejection is unhandled and the
+      // user gets no feedback (the note silently fails to save).
+      setSendError("Couldn't save that note — check your connection and try again.");
+    }
   }
 
   return (
@@ -218,6 +226,15 @@ export default function MessagesPage() {
               )}
               <div ref={messagesEndRef} />
             </div>
+
+            {sendError && (
+              <div
+                role="alert"
+                className="px-5 py-2 border-t border-destructive/40 bg-destructive/10 text-xs text-destructive shrink-0"
+              >
+                {sendError}
+              </div>
+            )}
 
             {/* Compose */}
             <div className="px-5 py-3 border-t border-border shrink-0 flex items-center gap-2">

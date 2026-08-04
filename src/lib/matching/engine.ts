@@ -128,9 +128,15 @@ function planCapacityScore(plan?: string): number {
   }
 }
 
-/* ── Response time label ── */
-function responseTimeLabel(hours?: number): string {
-  if (!hours || hours < 1) return "within 1 hour";
+/* ── Response time label ──
+ * `hours == null` means we have NO measured response history (the norm at
+ * launch — migration 00016 leaves response_time_h NULL until a contractor has
+ * contacted leads). That must NOT be reported as the fastest tier — surfacing
+ * "within 1 hour" for an unmeasured contractor is a fabricated metric. Only a
+ * genuine measured value < 1 earns the top label. */
+function responseTimeLabel(hours?: number | null): string {
+  if (hours == null) return "response time not yet measured";
+  if (hours < 1) return "within 1 hour";
   if (hours < 2) return "within 2 hours";
   if (hours < 4) return "within 4 hours";
   if (hours < 8) return "within 8 hours";
@@ -138,9 +144,13 @@ function responseTimeLabel(hours?: number): string {
   return "1-2 business days";
 }
 
-/* ── Response time score (out of 20) ── */
-function responseTimeScore(hours?: number): number {
-  if (!hours || hours < 1) return 20;
+/* ── Response time score (out of 20) ──
+ * Unmeasured (null) scores a neutral mid-band, not the full 20 — otherwise
+ * every contractor is cold-start-inflated to a perfect responsiveness score
+ * AND tagged "Fast response time" with no data behind it. */
+function responseTimeScore(hours?: number | null): number {
+  if (hours == null) return 10;
+  if (hours < 1) return 20;
   if (hours < 2) return 16;
   if (hours < 4) return 12;
   if (hours < 8) return 8;
@@ -159,15 +169,21 @@ function scoreContractor(
   const contractorTrade = (profile.trade ?? "").toLowerCase().trim();
   const normalizedTrade = requestedTrade.toLowerCase().trim();
 
-  /* 1. Trade match (30 points) */
+  /* 1. Trade match (30 points).
+   * Guard against empty operands: `"roofing".includes("")` is ALWAYS true in
+   * JS, so a contractor with a null/blank trade would otherwise score a false
+   * 30-point "Exact trade match" for every request. A missing trade is a
+   * no-match (0 pts), never an exact match. */
   if (
-    contractorTrade === normalizedTrade ||
-    normalizedTrade.includes(contractorTrade) ||
-    contractorTrade.includes(normalizedTrade)
+    contractorTrade &&
+    normalizedTrade &&
+    (contractorTrade === normalizedTrade ||
+      normalizedTrade.includes(contractorTrade) ||
+      contractorTrade.includes(normalizedTrade))
   ) {
     score += 30;
     factors.push("Exact trade match");
-  } else if (isRelatedTrade(normalizedTrade, contractorTrade)) {
+  } else if (contractorTrade && normalizedTrade && isRelatedTrade(normalizedTrade, contractorTrade)) {
     score += 15;
     factors.push("Related trade experience");
   }

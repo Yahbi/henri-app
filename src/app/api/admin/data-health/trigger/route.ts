@@ -65,6 +65,16 @@ const ALLOWED: ReadonlySet<string> = new Set([
   // fastest way to push fill rates after provisioning API keys.
   "enrich",
   "re-enrich",
+  // Core ingest pipeline (2026-08-04): these were missing from the
+  // allow-list, so when the scheduler stalled there was no way to restart
+  // permit ingest from the admin UI — the operator had to wait for an
+  // external trigger that never came (ingest sat dead for 29 days).
+  "permits",
+  "zip-demand",
+  "geocode-backfill",
+  // NJ statewide (2026-08-04). Backfilling 2.7M rows needs many paged runs;
+  // the admin button passes ?offset=N via `query` to walk history.
+  "nj-statewide-permits",
 ]);
 
 interface TriggerBody {

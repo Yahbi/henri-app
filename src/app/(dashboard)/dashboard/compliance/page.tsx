@@ -262,6 +262,7 @@ export default function CompliancePage() {
     complianceScore,
     warnings,
     isLoading,
+    error: complianceError,
     refresh,
   } = useCompliance();
 
@@ -383,6 +384,23 @@ export default function CompliancePage() {
             </p>
           ))}
         </div>
+      )}
+
+      {complianceError && (
+        /* A fetch failure must not read as genuine non-compliance — surface
+         * the load error + retry instead of a false 0-score / no-license. */
+        <Card role="alert" className="flex items-center justify-between gap-3 p-4 border-destructive/30">
+          <p className="text-sm text-destructive">
+            {complianceError} This isn&apos;t your real compliance status — retry.
+          </p>
+          <button
+            type="button"
+            onClick={() => refresh()}
+            className="text-sm font-medium text-destructive underline underline-offset-2 hover:opacity-80"
+          >
+            Retry
+          </button>
+        </Card>
       )}
 
       {/* Compliance Score + License Card */}

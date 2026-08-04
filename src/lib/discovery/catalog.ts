@@ -191,11 +191,21 @@ export async function fetchArcgisPage(
       domain,
       endpoint: resolved.endpoint,
       columns: resolved.columns,
-      updatedAt: p.modified ? new Date(p.modified).toISOString() : null,
+      updatedAt: safeIso(p.modified),
       stateGuess: guessState(domain + " " + (p.source ?? ""), title),
     });
   }
   return { candidates, total: json.numberMatched ?? 0 };
+}
+
+/** Coerce an external timestamp to ISO, or null if missing/invalid. Guards
+ *  against `RangeError: Invalid time value` when the upstream `modified` field
+ *  is out of Date's valid range — one malformed row must not abort the whole
+ *  discovery run. */
+function safeIso(v: unknown): string | null {
+  if (v == null) return null;
+  const d = new Date(v as number);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
 }
 
 /* ── Candidate → detection ──────────────────────────────────────────── */

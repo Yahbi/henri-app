@@ -85,7 +85,7 @@ const REQ_INTERVAL_MS = 500;
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -176,13 +176,23 @@ export async function GET(request: NextRequest) {
   let error: { message: string } | null = null;
 
   if (priorityZips.length > 0) {
+    // NOTE (2026-08-04): deliberately NO global `.order("score")` here.
+    // A global sort forces Postgres onto idx_leads_score (score DESC over the
+    // WHOLE table), discarding non-matching rows one by one — 12,603 ms for a
+    // 1200-row batch once a dense ZIP was claimed, which blew past PostgREST's
+    // 8 s statement_timeout and made the enrich cron fail outright (only ~1.1%
+    // of leads had ever been enriched).
+    // Without it the planner uses idx_leads_enrich_priority (zip, score DESC)
+    // WHERE year_built IS NULL AND address IS NOT NULL — see migration 00114 —
+    // which returns rows already score-ordered WITHIN each ZIP and lets LIMIT
+    // short-circuit: 496 ms, a 25x speedup. Per-ZIP score ordering is also
+    // fairer across claimed territories than a global sort.
     const { data: pri, error: priErr } = await supabase
       .from("leads")
       .select(SELECT_COLS)
       .in("zip", priorityZips)
       .is("year_built", null)
       .not("address", "is", null)
-      .order("score", { ascending: false })
       .limit(BATCH_SIZE);
     if (priErr) error = priErr;
     for (const l of (pri ?? []) as Array<Record<string, unknown>>) {

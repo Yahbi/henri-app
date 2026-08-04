@@ -72,12 +72,19 @@ export async function GET() {
     const openRate = totalSent > 0 ? Math.round((totalOpened / totalSent) * 100) / 100 : 0;
     const replyRate = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) / 100 : 0;
 
-    /* Fetch follow-up sequences */
+    /* Fetch follow-up sequences.
+     * Capped at 50 (matching the outreach-queue cap above). This query was
+     * previously unbounded: a contractor with 1,000 sequence rows shipped a
+     * 1.8 MB JSON payload on every Outreach-tab load — each row carries a
+     * `steps` JSONB blob — and nothing in the UI renders more than a recent
+     * slice. The oversized response was also slow enough to intermittently
+     * trip the hook's error path. */
     const { data: sequences, error: sErr } = await supabase
       .from("follow_up_sequences")
       .select("id, name, trigger_status, steps, active, created_at")
       .eq("contractor_id", user.id)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(50);
 
     if (sErr) {
       logger.error("Sequences fetch error", { error: sErr instanceof Error ? sErr.message : String(sErr) });

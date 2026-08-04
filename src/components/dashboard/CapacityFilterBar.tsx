@@ -40,7 +40,7 @@ export function CapacityFilterBar({
       <Link
         href="/settings/capacity"
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-dashed border-border text-[11px] text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-        title="Hide leads outside your working envelope (radius, project value, start window)"
+        title="Hide leads outside your project-value band"
       >
         <SlidersHorizontal className="h-3 w-3" />
         Set capacity

@@ -71,13 +71,15 @@ export function useCompliance(): UseComplianceReturn {
       const res = await fetch("/api/compliance");
 
       if (!res.ok) {
-        // Gracefully return defaults — no console errors
+        // Fetch failure — surface it so a transient error isn't shown as a
+        // real 0-score / "no license on file" (which reads as non-compliance).
         setLicense(null);
         setInsuranceExpiry(null);
         setTerritories([]);
         setPermits([]);
         setComplianceScore(0);
         setWarnings([]);
+        setError("Couldn't load compliance status.");
         setIsLoading(false);
         return;
       }
@@ -90,13 +92,14 @@ export function useCompliance(): UseComplianceReturn {
       setComplianceScore(data.compliance_score ?? 0);
       setWarnings(data.warnings ?? []);
     } catch {
-      // API not available — return clean defaults
+      // Network/parse error — surface it rather than a false non-compliant read.
       setLicense(null);
       setInsuranceExpiry(null);
       setTerritories([]);
       setPermits([]);
       setComplianceScore(0);
       setWarnings([]);
+      setError("Couldn't load compliance status.");
     } finally {
       setIsLoading(false);
     }

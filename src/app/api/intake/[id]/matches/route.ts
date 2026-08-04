@@ -154,8 +154,10 @@ export async function GET(
   }
 }
 
-function formatResponseTime(hours?: number): string {
-  if (!hours || hours < 1) return "within 1 hour";
+function formatResponseTime(hours?: number | null): string {
+  // No measured history → don't fabricate the fastest tier (see engine.ts).
+  if (hours == null) return "response time not yet measured";
+  if (hours < 1) return "within 1 hour";
   if (hours < 2) return "within 2 hours";
   if (hours < 4) return "within 4 hours";
   if (hours < 8) return "within 8 hours";

@@ -156,7 +156,7 @@ export default function CapacitySettingsPage() {
               placeholder="e.g. 6"
               value={draft.max_active_jobs}
               onChange={(v) => setDraft((d) => ({ ...d, max_active_jobs: v }))}
-              hint="Henri stops surfacing new leads once you&apos;re at this count."
+              hint="Will stop surfacing new leads once you&apos;re at this count (coming soon)."
             />
           </Section>
 

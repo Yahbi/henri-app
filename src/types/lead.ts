@@ -223,5 +223,8 @@ export function formatCurrency(cents: number | null | undefined): string {
   if (!cents) return "$0";
   if (cents >= 1_000_000) return `$${(cents / 1_000_000).toFixed(1)}M`;
   if (cents >= 1_000) return `$${Math.round(cents / 1_000)}K`;
-  return `$${cents}`;
+  // Sub-$1K values must still be rounded — returning the raw number leaked
+  // full float precision into the UI (a $149 plan / 38 leads CPL rendered as
+  // "$3.9210526315789473" on the ROI tab). Whole numbers stay clean.
+  return `$${Number.isInteger(cents) ? cents : cents.toFixed(2)}`;
 }

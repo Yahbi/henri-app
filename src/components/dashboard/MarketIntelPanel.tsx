@@ -33,7 +33,7 @@ export function MarketIntelPanel({
 }) {
   const [zip, setZip] = useState<string>(initialZip ?? "");
   const [input, setInput] = useState<string>(initialZip ?? "");
-  const { intel, isLoading, migrationPending } = useMarketIntel(zip || null);
+  const { intel, isLoading, migrationPending, error } = useMarketIntel(zip || null);
 
   return (
     <div className={cn("rounded-xl border border-border bg-card", className)}>
@@ -92,7 +92,14 @@ export function MarketIntelPanel({
         </div>
       )}
 
-      {!migrationPending && zip && !isLoading && !intel && (
+      {!migrationPending && zip && !isLoading && error && (
+        <div className="px-4 py-6 text-[12px] text-destructive" role="alert">
+          Couldn&apos;t load market intelligence for {zip}. Check your
+          connection and try again.
+        </div>
+      )}
+
+      {!migrationPending && zip && !isLoading && !error && !intel && (
         <div className="px-4 py-6 text-[12px] text-muted-foreground">
           No recent permit activity in {zip}. Either the nightly refresh
           hasn&apos;t caught up or the ZIP genuinely has &lt;1 permit in the

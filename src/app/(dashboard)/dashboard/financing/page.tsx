@@ -35,7 +35,7 @@ export default function FinancingPage() {
 }
 
 function FinancingPageInner() {
-  const { stats, deals, isLoading } = useFinancing();
+  const { stats, deals, isLoading, error: financingError, refresh: refreshFinancing } = useFinancing();
   const [amount, setAmount] = useState(18500);
   const [rate, setRate] = useState(7.99);
   const [term, setTerm] = useState(36);
@@ -59,6 +59,24 @@ function FinancingPageInner() {
           Help homeowners afford the project
         </p>
       </div>
+
+      {financingError && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2"
+        >
+          <p className="text-sm text-destructive">
+            {financingError} These figures may be incomplete — retry.
+          </p>
+          <button
+            type="button"
+            onClick={() => refreshFinancing()}
+            className="text-sm font-medium text-destructive underline underline-offset-2 hover:opacity-80"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Financing Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

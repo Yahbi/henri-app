@@ -226,7 +226,10 @@ export default function ROIPage() {
                 {!intelLoading && summary ? (
                   <>
                     <p className="text-2xl font-heading font-normal text-foreground">
-                      {summary.avgProjectValue ? `$${(summary.avgProjectValue / 1000).toFixed(0)}K` : "\u2014"}
+                      {/* formatCurrency scales into $X.XM past a million \u2014
+                          the old inline `/1000 + "K"` rendered a $10.07M
+                          commercial average as the unreadable "$10070K". */}
+                      {summary.avgProjectValue ? formatCurrency(summary.avgProjectValue) : "\u2014"}
                     </p>
                     <p className="text-xs text-muted-foreground">In your territories</p>
                   </>
