@@ -30,8 +30,29 @@ export const maxDuration = 300;
  */
 
 // cadence in hours — how stale a cron's last run may get before catch-up.
+//
+// 2026-08-05: `scrape` was NOT in this map, and a cron_runs audit found it
+// had not executed ONCE in 14 days. That is the permit ingester — the cron
+// that adds new permits to the catalog. Only `catchup` and `score` recur
+// (they are the two vercel.json slots the Hobby plan allows); every other
+// entry below existed here precisely because nothing else fires them. So the
+// single most important data cron in the product was the one cron nobody
+// caught up, and the catalog had been static for two weeks while the site
+// advertised "refreshed daily".
+//
+// The same audit found four other ingest paths absent for the same reason.
+// Anything that ADDS or REFRESHES data belongs in this map; the deliberate
+// exclusions (billing-sync, digests, follow-ups, review-requests) are
+// side-effecting and must stay on exact slots, as the docstring says.
 const CADENCE_H: Record<string, number> = {
-  // daily ingest
+  // permit ingest — the core pipeline
+  scrape: 12,
+  "nj-statewide-permits": 24,
+  "discover-sources": 168,
+  // enrichment + published stats
+  enrich: 24,
+  "refresh-landing-stats": 24,
+  // daily sidecar ingest
   "openfema-ia": 24,
   "openfema-nfip": 24,
   "openfema-declarations": 24,
@@ -48,7 +69,22 @@ const CADENCE_H: Record<string, number> = {
   "hud-reo": 168,
 };
 
-const MAX_FIRES = 6;
+/**
+ * Crons fired first when several are overdue at once.
+ *
+ * Without this, ordering is purely by how overdue a cron is, so a sidecar
+ * that has been stale for a week outranks the permit ingester that is stale
+ * by a day — and with MAX_FIRES capping each run, the pipeline that actually
+ * produces leads can be starved indefinitely by the long tail.
+ */
+const PRIORITY = new Set(["scrape", "nj-statewide-permits", "enrich"]);
+
+// Raised from 6: the map now carries 18 entries, and at 6 per run a cron at
+// the back of a fully-overdue queue would wait three days for a slot.
+// Each fire is a server-to-server call that returns quickly (the callee does
+// its own work within its own budget), so the 300s ceiling is not the
+// binding constraint here.
+const MAX_FIRES = 10;
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
@@ -84,7 +120,16 @@ export async function GET(request: NextRequest) {
       return { path: p, ageH, overdueBy: ageH - CADENCE_H[p] };
     })
     .filter((c) => c.overdueBy > 0)
-    .sort((a, b) => b.overdueBy - a.overdueBy)
+    // Priority crons first, then most-overdue. Pure overdue-ordering lets a
+    // sidecar that has been stale for a week outrank the permit ingester
+    // that is stale by a day — and with MAX_FIRES capping each run, the
+    // pipeline that actually produces leads gets starved by the long tail.
+    .sort((a, b) => {
+      const pa = PRIORITY.has(a.path) ? 1 : 0;
+      const pb = PRIORITY.has(b.path) ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      return b.overdueBy - a.overdueBy;
+    })
     .slice(0, MAX_FIRES);
 
   const fired: Array<{ path: string; code: number; ageH: number }> = [];
