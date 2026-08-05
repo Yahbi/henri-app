@@ -51,7 +51,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       } else {
         applyTheme("light");
       }
-    } catch {}
+    } catch {
+      // localStorage / matchMedia can throw (Safari private mode, sandboxed
+      // iframes). Theme is cosmetic, so we intentionally swallow and let the
+      // SSR default (light) stand rather than crash the provider.
+      applyTheme("light");
+    }
     setMounted(true);
   }, []);
 

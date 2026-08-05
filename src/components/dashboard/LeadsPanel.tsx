@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Search, EyeOff, Bookmark } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Search, EyeOff, Bookmark, Building2 } from "lucide-react";
 import { LeadCard, type LeadData } from "./LeadCard";
 import { useExclusivity } from "@/hooks/useExclusivity";
 import { useCapacityPrefs } from "@/hooks/useCapacityPrefs";
@@ -138,6 +138,11 @@ export function LeadsPanel({
   // disappear from the panel; the contractor can flip it on to audit
   // what they've hidden.
   const [showHidden, setShowHidden] = useState(false);
+  // Property-type filter — hide leads confidently classified commercial
+  // (a hospital's tenant improvement etc.). Off by default; opt-in, and the
+  // pill below shows how many are being held back (never a silent drop). Only
+  // `commercial` rows are removed — residential AND unknown always stay.
+  const [hideCommercial, setHideCommercial] = useState(false);
 
   // Phase 0a: fetch exclusivity locks for every rendered lead. Returns
   // an empty map when migration 00031 isn't applied — no visual change
@@ -168,6 +173,12 @@ export function LeadsPanel({
     let result = showHidden
       ? [...leads]
       : leads.filter((l) => !hiddenIds.has(l.id));
+
+    // Property-type exclusion — drop only rows we're CONFIDENT are commercial;
+    // residential + unknown always pass. Composes with every other filter.
+    if (hideCommercial) {
+      result = result.filter((l) => l.propertyType !== "commercial");
+    }
 
     // Text search across address, owner name, and description
     if (search.trim()) {
@@ -225,7 +236,7 @@ export function LeadsPanel({
     }
 
     return result;
-  }, [leads, filter, sort, search, hiddenIds, showHidden, savedIds]);
+  }, [leads, filter, sort, search, hiddenIds, showHidden, hideCommercial, savedIds]);
 
   // Module 8 — count of leads currently being hidden (for the toggle pill).
   const hiddenCount = useMemo(
@@ -239,6 +250,13 @@ export function LeadsPanel({
     () => leads.filter((l) => savedIds.has(l.id)).length,
     [leads, savedIds],
   );
+
+  // Count of confidently-commercial leads in the post-hidden universe — drives
+  // the "Exclude commercial" pill (only shown when there's something to hide).
+  const commercialCount = useMemo(() => {
+    const base = showHidden ? leads : leads.filter((l) => !hiddenIds.has(l.id));
+    return base.filter((l) => l.propertyType === "commercial").length;
+  }, [leads, hiddenIds, showHidden]);
 
   // Phase 0a — apply capacity filter AFTER urgency/trade/sort so the
   // "N filtered out" count is computed against what the contractor would
@@ -361,6 +379,7 @@ export function LeadsPanel({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search address, owner, description..."
+            aria-label="Search leads by address, owner, or description"
             className="w-full text-xs bg-bg-subtle border border-border rounded-lg pl-8 pr-3 py-1.5 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
@@ -438,6 +457,32 @@ export function LeadsPanel({
             >
               <Bookmark className="h-3 w-3" />
               {filter === "saved" ? `Saved only (${savedCount})` : `${savedCount} saved`}
+            </button>
+          )}
+
+          {/* Property-type filter — "Exclude commercial". Renders only when
+              ≥1 commercial lead is present. Opt-in; when active the pill
+              itself is the "N filtered out" transparency counter. */}
+          {commercialCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setHideCommercial((v) => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                hideCommercial
+                  ? "border-primary/40 bg-primary-10 text-primary"
+                  : "border-border bg-transparent text-muted-foreground hover:bg-accent"
+              }`}
+              title={
+                hideCommercial
+                  ? `Show ${commercialCount} commercial lead${commercialCount === 1 ? "" : "s"} again`
+                  : `Exclude ${commercialCount} commercial lead${commercialCount === 1 ? "" : "s"}`
+              }
+              aria-pressed={hideCommercial}
+            >
+              <Building2 className="h-3 w-3" />
+              {hideCommercial
+                ? `Commercial hidden (${commercialCount})`
+                : `${commercialCount} commercial`}
             </button>
           )}
 
@@ -578,7 +623,7 @@ function VirtualizedLeadList({ leads, activeLead, onSelectLead, emptyMessage, lo
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto">
+    <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
       {/* Spacer to establish total scroll height */}
       <div style={{ height: totalHeight, position: "relative" }}>
         {/* Only render the visible slice + overscan. Each card is absolutely

@@ -123,7 +123,7 @@ export default function InterviewsPage() {
       </div>
 
       {migrationPending && (
-        <div className="mt-4 rounded-lg border border-warm/30 bg-[rgba(212,162,74,0.08)] px-4 py-3 text-[12px] text-warm">
+        <div className="mt-4 rounded-lg border border-warm/30 bg-warm/8 px-4 py-3 text-[12px] text-warm">
           <p className="font-semibold">Feature pending</p>
           <p className="mt-0.5 text-muted-foreground">
             Apply migration{" "}

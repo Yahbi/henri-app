@@ -184,6 +184,7 @@ export default function ForeclosuresReoPage() {
             <input
               type="text"
               placeholder="ZIP"
+              aria-label="Filter by ZIP"
               value={zipFilter}
               onChange={(e) => setZipFilter(e.target.value.replace(/\D/g, "").slice(0, 5))}
               className="w-24 px-3 py-1.5 text-[12px] rounded-md border border-border bg-card"

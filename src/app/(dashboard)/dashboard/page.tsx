@@ -20,7 +20,6 @@ import { NWSAlertPolygonLayer } from "@/components/map/NWSAlertPolygonLayer";
 import { ParcelLayer } from "@/components/map/ParcelLayer";
 import { ZoningLayer } from "@/components/map/ZoningLayer";
 import { LeadsPanel } from "@/components/dashboard/LeadsPanel";
-import { LeadDetailDrawer } from "@/components/dashboard/LeadDetailDrawer";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LeadData } from "@/components/dashboard/LeadCard";
 import type { MapDashboardHandle } from "@/components/map/MapDashboard";
@@ -35,6 +34,7 @@ import { useFEMAFlood, useCensusOverlay, useWeatherAlerts } from "@/hooks/useOve
 import { useToast } from "@/components/ui/toast";
 import { formatCurrency } from "@/types/lead";
 import type { Lead } from "@/types/lead";
+import { sanitizePropertyValue } from "@/lib/permits/value-sanity";
 import {
   LEFT_PANEL_DEFAULT,
   LEFT_PANEL_MAX,
@@ -45,17 +45,41 @@ import {
 const MapDashboard = dynamic(() => import("@/components/map/MapDashboard"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full bg-muted animate-pulse flex items-center justify-center">
-      <p className="text-sm text-muted-foreground">Loading map...</p>
+    <div className="relative w-full h-full">
+      <Skeleton className="w-full h-full rounded-none" />
+      <p className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+        Loading map...
+      </p>
     </div>
   ),
 });
+
+// Code-split the lead drawer (~442 LOC + child panels: PermitTimeline,
+// CascadePrediction, StormImpact, PropertyContext…). It only renders once a
+// lead is selected, so it stays out of the initial dashboard bundle. No
+// loading fallback — the drawer is an absolutely-positioned overlay that
+// slides up, so a placeholder would only cause a flash.
+const LeadDetailDrawer = dynamic(
+  () =>
+    import("@/components/dashboard/LeadDetailDrawer").then(
+      (m) => m.LeadDetailDrawer,
+    ),
+  { ssr: false },
+);
 
 /* ── Panel size constants ──
  * Most live in `src/lib/constants/layout.ts` now; `LEFT_PANEL_MIN` stays
  * local because 240 is the practical reading-width floor for the virtual
  * list and is unlikely to be reused elsewhere. */
 const LEFT_PANEL_MIN = 240;
+
+/* Sanitize + format a property dollar value; undefined when the value is
+ * absent or implausible (e.g. a $380.9M assessed value from a bad parcel
+ * join). Keeps the drawer/card from ever rendering a nonsense figure. */
+function fmtPropertyValue(v: number | null | undefined): string | undefined {
+  const clean = sanitizePropertyValue(v);
+  return clean != null ? formatCurrency(clean) : undefined;
+}
 
 /* ── Map Lead (Supabase) → LeadData (UI card shape) ── */
 function mapLead(lead: Lead): LeadData {
@@ -92,8 +116,8 @@ function mapLead(lead: Lead): LeadData {
     issuedDate: lead.permits?.issued_date ?? undefined,
     completedDate: lead.permits?.completed_date ?? undefined,
     permitStatus: lead.permits?.status ?? undefined,
-    propertyValue: lead.property_value ? formatCurrency(lead.property_value) : undefined,
-    assessedValue: lead.assessed_value ? formatCurrency(lead.assessed_value) : undefined,
+    propertyValue: fmtPropertyValue(lead.property_value),
+    assessedValue: fmtPropertyValue(lead.assessed_value),
     yearBuilt: lead.year_built ?? undefined,
     lotSqft: lead.lot_sqft ?? undefined,
     homeSqft: lead.home_sqft ?? undefined,
@@ -147,6 +171,8 @@ function mapLead(lead: Lead): LeadData {
     opportunityStage: lead.opportunity_stage ?? null,
     reasonCodes: lead.reason_codes ?? null,
     tradeTags: lead.trade_tags ?? null,
+    // Derived property-type axis for the "Exclude commercial" filter.
+    propertyType: lead.propertyType,
     // Phase AA-3 — provenance. Drives the "Pre-intent signal" badge
     // on LeadCard for parcel_synthesis leads.
     source: lead.source ?? null,

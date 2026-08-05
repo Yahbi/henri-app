@@ -40,10 +40,11 @@ function formatTime(isoStr: string) {
 
 export default function MessagesPage() {
   const { user } = useUser();
-  const { data: leads, isLoading } = useLeads();
+  const { data: leads, isLoading, isError, refetch } = useLeads();
   const addNote = useAddLeadNote();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [sendError, setSendError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const contactedLeads = useMemo<Lead[]>(
@@ -77,8 +78,15 @@ export default function MessagesPage() {
     const timestamp = new Date().toISOString();
     const newLine = `${timestamp} [out]: ${draft.trim()}`;
     const existing = selected.notes ? `${selected.notes}\n${newLine}` : newLine;
-    await addNote.mutateAsync({ leadId: selected.id, note: existing });
-    setDraft("");
+    setSendError(null);
+    try {
+      await addNote.mutateAsync({ leadId: selected.id, note: existing });
+      setDraft("");
+    } catch {
+      // mutateAsync re-throws — without this the rejection is unhandled and the
+      // user gets no feedback (the note silently fails to save).
+      setSendError("Couldn't save that note — check your connection and try again.");
+    }
   }
 
   return (
@@ -101,7 +109,19 @@ export default function MessagesPage() {
           <p className="text-xs text-muted-foreground mt-0.5">Lead conversations</p>
         </div>
         <div className="flex-1 overflow-y-auto divide-y divide-border">
-          {isLoading ? (
+          {isError ? (
+            <div
+              role="alert"
+              className="px-4 py-8 text-center space-y-3"
+            >
+              <p className="text-xs text-muted-foreground">
+                Couldn&apos;t load your conversations.
+              </p>
+              <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                Try again
+              </Button>
+            </div>
+          ) : isLoading ? (
             [...Array(4)].map((_, i) => (
               <div key={i} className="px-4 py-3 space-y-1.5">
                 <Skeleton className="h-4 w-32" />
@@ -207,6 +227,15 @@ export default function MessagesPage() {
               <div ref={messagesEndRef} />
             </div>
 
+            {sendError && (
+              <div
+                role="alert"
+                className="px-5 py-2 border-t border-destructive/40 bg-destructive/10 text-xs text-destructive shrink-0"
+              >
+                {sendError}
+              </div>
+            )}
+
             {/* Compose */}
             <div className="px-5 py-3 border-t border-border shrink-0 flex items-center gap-2">
               <input
@@ -214,6 +243,7 @@ export default function MessagesPage() {
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                 placeholder="Log a note about this lead..."
+                aria-label="Log a note"
                 className="flex-1 px-3 py-2 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <button

@@ -413,6 +413,7 @@ export default function TerritoryPage() {
             <div className="flex gap-1 mb-3">
               <button
                 onClick={() => setSearchMode("zip")}
+                aria-pressed={searchMode === "zip"}
                 className={cn(
                   "flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors",
                   searchMode === "zip"
@@ -424,6 +425,7 @@ export default function TerritoryPage() {
               </button>
               <button
                 onClick={() => setSearchMode("city")}
+                aria-pressed={searchMode === "city"}
                 className={cn(
                   "flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors",
                   searchMode === "city"
@@ -449,6 +451,7 @@ export default function TerritoryPage() {
                     onChange={(e) => { setSearchQuery(e.target.value); setShowDropdown(true); }}
                     onFocus={() => setShowDropdown(true)}
                     placeholder="Search for a city..."
+                    aria-label="Search for a city"
                     className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
@@ -482,6 +485,7 @@ export default function TerritoryPage() {
                     onChange={(e) => { setZipInput(e.target.value.replace(/\D/g, "").slice(0, 5)); setZipCheckResult(null); }}
                     onKeyDown={(e) => e.key === "Enter" && checkZipDirect()}
                     placeholder="e.g. 80203"
+                    aria-label="ZIP code"
                     className="flex-1 px-3 py-2.5 rounded-lg border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   <button
@@ -707,7 +711,7 @@ export default function TerritoryPage() {
                   <span key={zip} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-white text-xs font-semibold">
                     <MapPin className="h-3 w-3" />
                     {zip}
-                    <button onClick={() => toggleZip(zip)} className="ml-0.5 hover:opacity-70">
+                    <button onClick={() => toggleZip(zip)} aria-label="Remove ZIP" className="ml-0.5 hover:opacity-70">
                       <X className="h-3 w-3" />
                     </button>
                   </span>

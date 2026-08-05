@@ -70,6 +70,7 @@ export function useOutreach(): UseOutreachReturn {
         setStats(defaultStats);
         setRecent([]);
         setSequences([]);
+        setError("Couldn't load outreach.");
         setIsLoading(false);
         return;
       }
@@ -79,10 +80,11 @@ export function useOutreach(): UseOutreachReturn {
       setRecent(data.recent ?? []);
       setSequences(data.sequences ?? []);
     } catch {
-      // API not available — return clean defaults
+      // Network/parse error — surface it rather than showing a zero-state.
       setStats(defaultStats);
       setRecent([]);
       setSequences([]);
+      setError("Couldn't load outreach.");
     } finally {
       setIsLoading(false);
     }

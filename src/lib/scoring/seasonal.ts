@@ -48,6 +48,10 @@ export function getSeasonalFactor(trade: string | null | undefined, month?: numb
   if (!trade) return DEFAULT_FACTORS[safeMonth];
 
   const normalized = trade.toLowerCase().trim();
+  // A whitespace-only trade passes the `!trade` guard above but trims to "".
+  // `key.includes("")` is always true, so the partial-match loop below would
+  // wrongly return the FIRST table entry (roofing). Treat empty as no trade.
+  if (!normalized) return DEFAULT_FACTORS[safeMonth];
 
   /* Try exact match first */
   if (SEASONAL_FACTORS[normalized]) {

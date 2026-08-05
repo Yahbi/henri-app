@@ -16,6 +16,11 @@
   --color-popover-foreground: hsl(var(--popover-foreground));
   --color-primary: hsl(var(--primary));
   --color-primary-foreground: hsl(var(--primary-foreground));
+  /* CTA — a deeper terracotta used ONLY as the fill behind button text so
+   * white-on-fill clears WCAG AA (4.5:1). The brand #D4886A stays for accents,
+   * links, tints, and surfaces; only the Button primary/glow fill darkens. */
+  --color-cta: hsl(var(--cta));
+  --color-cta-foreground: hsl(var(--cta-foreground));
   --color-secondary: hsl(var(--secondary));
   --color-secondary-foreground: hsl(var(--secondary-foreground));
   --color-muted: hsl(var(--muted));
@@ -192,6 +197,8 @@
   --popover-foreground: 40 10% 10%;
   --primary: 17 55% 62%;             /* #D4886A */
   --primary-foreground: 0 0% 100%;
+  --cta: 17 33% 47%;                 /* #9F6750 — AA (4.6:1 on white) deeper terracotta for button fill; same in all themes */
+  --cta-foreground: 0 0% 100%;
   --secondary: 40 20% 95%;           /* #F4F3EF */
   --secondary-foreground: 40 10% 10%;
   --muted: 40 20% 95%;
@@ -218,7 +225,10 @@
   --surface: #FFFFFF;
   --bg-subtle: #F4F3EF;
   --fg-muted: #6E6C62;
-  --fg-subtle: #9E9C92;
+  /* Darkened from #9E9C92 (2.75:1 — failed WCAG AA) to #767468 (4.70:1 on
+     white) so the small informational text this token drives — timestamps,
+     provenance, property-context labels — is legible for low-vision users. */
+  --fg-subtle: #767468;
 
   /* Primary tints */
   --primary-tint-04: rgba(212,136,106,0.04);
@@ -300,6 +310,8 @@
   --popover-foreground: 40 20% 94%;
   --primary: 17 55% 62%;             /* #D4886A — same in all themes */
   --primary-foreground: 40 5% 7%;
+  --cta: 17 33% 47%;                 /* #9F6750 — AA-safe deeper terracotta for button fill (white text) */
+  --cta-foreground: 0 0% 100%;
   --secondary: 40 6% 14%;            /* #252420 */
   --secondary-foreground: 40 20% 94%;
   --muted: 40 6% 14%;
@@ -363,6 +375,8 @@
   --popover-foreground: 30 50% 93%;
   --primary: 17 55% 62%;             /* #D4886A */
   --primary-foreground: 30 50% 7%;
+  --cta: 17 33% 47%;                 /* #9F6750 — AA-safe deeper terracotta for button fill (white text) */
+  --cta-foreground: 0 0% 100%;
   --secondary: 30 30% 12%;           /* #2D2010 */
   --secondary-foreground: 30 50% 93%;
   --muted: 30 30% 12%;

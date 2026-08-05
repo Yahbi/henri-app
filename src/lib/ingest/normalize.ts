@@ -275,9 +275,13 @@ export function parseAddress(
 ): { street: string; zip: string | null } {
   if (!raw) return { street: raw, zip: null };
 
-  // Extract 5-digit ZIP code (last occurrence)
-  const zipMatch = raw.match(/\b(\d{5})\b/g);
-  const zip = zipMatch ? zipMatch[zipMatch.length - 1] : null;
+  // Extract the 5-digit ZIP — the LAST 5-digit token, EXCEPT when that token
+  // is the leading house number. An address like "12345 Ventura Blvd" with no
+  // trailing ZIP would otherwise mis-capture the house number as the ZIP (and
+  // then strip it from the street). A real ZIP is never the first token.
+  const zipMatches = [...raw.matchAll(/\b(\d{5})\b/g)];
+  const lastZip = zipMatches.length ? zipMatches[zipMatches.length - 1] : null;
+  const zip = lastZip && (lastZip.index ?? 0) > 0 ? lastZip[1] : null;
 
   // Remove city, state, zip from the address to get just the street
   let street = raw;
@@ -287,12 +291,20 @@ export function parseAddress(
     street = street.replace(new RegExp(`\\b${zip}\\b`), "");
   }
 
-  // Remove known city name (case-insensitive)
+  // Remove the known city, but only where it is genuinely the city — a
+  // comma-delimited segment ("… , City …") or the token immediately before
+  // the known state ("… City ST"). The old code stripped the bare word
+  // globally, which also deleted the city from street names that contain it
+  // ("100 Boston Post Rd, Boston, MA" wrongly became "100 Post Rd").
   if (knownCity) {
-    street = street.replace(
-      new RegExp(`\\b${escapeRegex(knownCity)}\\b,?`, "gi"),
-      "",
-    );
+    const city = escapeRegex(knownCity);
+    street = street.replace(new RegExp(`,\\s*${city}\\b`, "gi"), "");
+    if (knownState) {
+      street = street.replace(
+        new RegExp(`\\b${city}\\b(?=[\\s,]+${escapeRegex(knownState)}\\b)`, "gi"),
+        "",
+      );
+    }
   }
 
   // Remove state abbreviation at end-ish
@@ -316,11 +328,15 @@ export function mapPermitTypeToEnum(type: string): PermitTypeEnum {
 
   if (/demol|wreck/i.test(lower)) return "demolition";
   if (/new\s*(construction|building)|single family home/i.test(lower)) return "new_construction";
+  // `commercial` MUST be checked before the project-type buckets below:
+  // "Building Permit (Commercial) - Tenant Improvement" should classify as
+  // commercial, not renovation. (Fixed 2026-07 — the old ordering matched
+  // `renovation` first and mislabelled every commercial tenant-improvement.)
+  if (/commercial|non-residential/i.test(lower)) return "commercial";
   if (/renovation|alteration|remodel|tenant improvement|interior/i.test(lower))
     return "renovation";
   if (/addition|add[\s-]on/i.test(lower)) return "addition";
   if (/repair|foundation repair/i.test(lower)) return "repair";
-  if (/commercial|non-residential/i.test(lower)) return "commercial";
   if (/residential|1-2 family|one or two family/i.test(lower)) return "residential";
 
   return "other";

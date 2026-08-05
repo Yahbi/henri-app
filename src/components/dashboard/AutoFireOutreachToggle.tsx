@@ -129,9 +129,15 @@ export function AutoFireOutreachToggle({
             )}
           </div>
           <p className="text-[12px] text-muted-foreground mt-0.5">
-            Send your chosen template automatically the instant a new scored
-            lead lands in your territory. Typical delivery: under a minute
-            from permit ingest.
+            {/* Truthfulness: no scorer or cron fires outreach on lead-create
+                today, and SMS delivery additionally depends on Twilio being
+                provisioned. The old copy promised "the instant a new lead
+                lands ... under a minute from permit ingest" — a delivery
+                guarantee the backend does not make. Describe the saved
+                preference honestly instead. */}
+            Save a default template to send first when a new scored lead lands
+            in your territory. Automatic sending turns on once SMS delivery is
+            provisioned — until then, send from the template library below.
           </p>
 
           {prefs.migrationPending && (

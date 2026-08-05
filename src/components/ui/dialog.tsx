@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils/cn";
+import { FocusTrap } from "./focus-trap";
 
 export interface DialogProps {
   open: boolean;
@@ -51,7 +52,10 @@ const Dialog: React.FC<DialogProps> = ({
         aria-hidden="true"
       />
 
-      {/* Content panel */}
+      {/* Content panel — FocusTrap contains Tab/Shift+Tab, moves focus into
+          the dialog on open, and restores focus to the trigger on close
+          (WCAG 2.4.3 / ARIA modal-dialog pattern). */}
+      <FocusTrap active={open}>
       <div
         role="dialog"
         aria-modal="true"
@@ -110,6 +114,7 @@ const Dialog: React.FC<DialogProps> = ({
         {/* Body */}
         {children}
       </div>
+      </FocusTrap>
     </div>
   );
 };

@@ -124,6 +124,7 @@ export function MaintenanceCalendar() {
           <button
             key={name}
             onClick={() => setSelectedMonth(i)}
+            aria-pressed={selectedMonth === i}
             className={`shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
               selectedMonth === i
                 ? "bg-primary text-white"

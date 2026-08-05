@@ -4,6 +4,7 @@ import { logApiError } from "@/lib/log";
 import { logger } from "@/lib/logger";
 import { Resend } from "resend";
 import { z } from "zod";
+import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/utils/rate-limit";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -25,9 +26,10 @@ import * as path from "path";
  *
  * Returns 200 if any path succeeded, 502 only when both failed.
  *
- * Anti-abuse: 4KB body cap (Zod), email format validation. Platform
- * rate-limit handles flood; we don't double-up here because the
- * footer signup is by design low-friction.
+ * Anti-abuse: 4KB body cap (Zod), email format validation, and an
+ * IP-based limiter (5/hour) applied BEFORE the DB write + Resend send —
+ * because this endpoint emails the submitted address on every call, an
+ * unthrottled public POST would be an email-bomb + quota-burn vector.
  */
 
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "henri@meethenri.com";
@@ -46,6 +48,14 @@ interface NewsletterRow {
 
 export async function POST(request: NextRequest) {
   try {
+    // Throttle BEFORE any DB upsert or Resend send (see anti-abuse note above).
+    const ip = getClientIp(request);
+    const rl = checkRateLimit(`newsletter:${ip}`, {
+      maxRequests: 5,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!rl.allowed) return rateLimitResponse(rl);
+
     const raw = await request.json().catch(() => null);
     const parsed = BodySchema.safeParse(raw);
     if (!parsed.success) {

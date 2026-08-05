@@ -11,15 +11,34 @@ import { createClient } from "@/lib/supabase/client";
  * writes the saved_leads row when a contractor clicks "Save" in the
  * drawer (LeadActionButtons). Mirrors `useHiddenLeads` line-for-line —
  * same fetch/cancellation/graceful-degrade shape, same migration-00090
- * dependency.
+ * dependency, and the same module-scope shared store + pub/sub so the
+ * drawer's Save toggle is reflected in the LeadsPanel's "Saved" filter
+ * (and stays correct when the same lead is reopened in-session).
  *
  * Returns an empty set when migration 00090 isn't applied yet or RLS
  * denies the query — never throws, never breaks the panel render.
  */
+
+let sharedSaved = new Set<string>();
+const savedListeners = new Set<(s: Set<string>) => void>();
+
+function setSharedSaved(next: Set<string>) {
+  sharedSaved = next;
+  savedListeners.forEach((l) => l(next));
+}
+
 export function useSavedLeads() {
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [savedIds, setSavedIds] = useState<Set<string>>(sharedSaved);
   const [loading, setLoading] = useState(true);
   const cancelledRef = useRef(false);
+
+  useEffect(() => {
+    const listener = (s: Set<string>) => setSavedIds(s);
+    savedListeners.add(listener);
+    return () => {
+      savedListeners.delete(listener);
+    };
+  }, []);
 
   const fetchSaved = useCallback(async () => {
     const supabase = createClient();
@@ -31,7 +50,7 @@ export function useSavedLeads() {
       // above can resolve after unmount.
       if (cancelledRef.current) return;
       if (!user) {
-        setSavedIds(new Set());
+        setSharedSaved(new Set());
         return;
       }
 
@@ -42,14 +61,14 @@ export function useSavedLeads() {
       if (cancelledRef.current) return;
       if (error) {
         // Migration 00090 missing or RLS denial — graceful-degrade.
-        setSavedIds(new Set());
+        setSharedSaved(new Set());
       } else {
-        setSavedIds(
+        setSharedSaved(
           new Set((data ?? []).map((r: { lead_id: string }) => r.lead_id)),
         );
       }
     } catch {
-      if (!cancelledRef.current) setSavedIds(new Set());
+      if (!cancelledRef.current) setSharedSaved(new Set());
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }
@@ -63,5 +82,15 @@ export function useSavedLeads() {
     };
   }, [fetchSaved]);
 
-  return { savedIds, loading, refetch: fetchSaved };
+  const add = useCallback((id: string) => {
+    setSharedSaved(new Set(sharedSaved).add(id));
+  }, []);
+
+  const remove = useCallback((id: string) => {
+    const next = new Set(sharedSaved);
+    next.delete(id);
+    setSharedSaved(next);
+  }, []);
+
+  return { savedIds, loading, refetch: fetchSaved, add, remove };
 }

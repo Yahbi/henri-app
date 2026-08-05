@@ -20,7 +20,6 @@ import { createClient } from "@/lib/supabase/client";
 import { ExpandableBanner } from "@/components/ui/expandable-banner";
 import { AlertTriangle, Lock } from "lucide-react";
 import { useLeadCount } from "@/hooks/useLeadCount";
-import { LeadDetailDrawer } from "@/components/dashboard/LeadDetailDrawer";
 import type { LeadData } from "@/components/dashboard/LeadCard";
 import { getUrgency, getUrgencyColor, getUrgencyLabel } from "@/types/lead";
 import { TerritoryStatusChip } from "@/components/map/TerritoryStatusChip";
@@ -29,6 +28,7 @@ import { TerritoryStatusChip } from "@/components/map/TerritoryStatusChip";
 // now derive them from the canonical map so a palette change in one
 // place propagates to chip + pin + card simultaneously.
 import { STAGE_COLOR_MAP, STAGE_LABEL_MAP } from "@/lib/intent/stage-colors";
+import { sanitizePropertyValue } from "@/lib/permits/value-sanity";
 
 const MapDashboard = dynamic(() => import("@/components/map/MapDashboard"), {
   ssr: false,
@@ -38,6 +38,24 @@ const MapDashboard = dynamic(() => import("@/components/map/MapDashboard"), {
     </div>
   ),
 });
+
+// Code-split the lead drawer — same rationale as /dashboard: it only mounts
+// when a lead is selected, so it stays out of the initial map-page bundle.
+const LeadDetailDrawer = dynamic(
+  () =>
+    import("@/components/dashboard/LeadDetailDrawer").then(
+      (m) => m.LeadDetailDrawer,
+    ),
+  { ssr: false },
+);
+
+/* Sanitize + format a property dollar value for display; undefined when the
+ * value is absent or implausible (e.g. a $380.9M assessed value from a bad
+ * parcel join). Matches the `$N,NNN` formatting used across the map + popup. */
+function fmtPropVal(v: unknown): string | undefined {
+  const clean = sanitizePropertyValue(v == null ? null : Number(v));
+  return clean != null ? `$${clean.toLocaleString()}` : undefined;
+}
 
 /* ── Trade colours — deterministic, accessible palette ───────────────────── */
 
@@ -122,10 +140,8 @@ function featureToLeadData(
     value: p.permit_value && Number(p.permit_value) > 0
       ? `$${Number(p.permit_value).toLocaleString()}`
       : "—",
-    propertyValue: p.property_value
-      ? `$${Number(p.property_value).toLocaleString()}` : undefined,
-    assessedValue: p.assessed_value
-      ? `$${Number(p.assessed_value).toLocaleString()}` : undefined,
+    propertyValue: fmtPropVal(p.property_value),
+    assessedValue: fmtPropVal(p.assessed_value),
     yearBuilt: (p.year_built as number) ?? undefined,
     lotSqft: (p.lot_sqft as string) ?? undefined,
     homeSqft: (p.home_sqft as string) ?? undefined,
@@ -685,7 +701,10 @@ export default function MapPage() {
                     ${p.year_built ? `<span style="opacity:0.6">Year built</span><span>${esc(p.year_built)}</span>` : ""}
                     ${p.home_sqft ? `<span style="opacity:0.6">Home sqft</span><span>${Number(p.home_sqft).toLocaleString()}</span>` : ""}
                     ${p.lot_sqft ? `<span style="opacity:0.6">Lot sqft</span><span>${Number(p.lot_sqft).toLocaleString()}</span>` : ""}
-                    ${p.assessed_value ? `<span style="opacity:0.6">Assessed</span><span>$${Number(p.assessed_value).toLocaleString()}</span>` : ""}
+                    ${(() => {
+                      const a = fmtPropVal(p.assessed_value);
+                      return a ? `<span style="opacity:0.6">Assessed</span><span>${a}</span>` : "";
+                    })()}
                     ${p.owner_since ? `<span style="opacity:0.6">Owner since</span><span>${esc(p.owner_since)}</span>` : ""}
                     ${typeof p.owner_occupied === "boolean" ? `<span style="opacity:0.6">Occupancy</span><span>${p.owner_occupied ? "Owner-occupied" : "Non-owner"}</span>` : ""}
                   </div>
@@ -1141,7 +1160,7 @@ export default function MapPage() {
                 </p>
               </div>
               <a
-                href="/dashboard/settings/billing"
+                href="/settings/billing"
                 className="text-[11px] font-medium text-[#7d4f39] hover:text-[#5a3a29] underline underline-offset-2 shrink-0"
               >
                 Upgrade

@@ -151,8 +151,13 @@ function ChevronDown({ className = "" }: { className?: string }) {
 // dependent number). Both are true; they measure different things.
 // 2026-06-10: crossed 1.5M clean permits (1,553,689 = 1,800,380 raw minus
 // 246,691 junk-state rows; live query). Bumped per the truthfulness rule.
+// 2026-08-04: live count is now 2,193,974 permits — the "1.5M+" here had gone
+// stale and UNDER-stated coverage while the auto-computed homepage label
+// (getLandingStats) already read "2.1M+". Bumped to match, still rounded DOWN.
+// This value is hand-maintained because this page is a client component and
+// cannot call the server-only getLandingStats(); re-check it on each audit.
 const STATS = [
-  { num: "1.5M+", label: "Live permits across major metro areas in 30+ US states" },
+  { num: "2.1M+", label: "Live permits across major metro areas in 30+ US states" },
   { num: "Daily", label: "Permits refreshed every day" },
   { num: "24 hrs", label: "Free trial to evaluate before any charge" },
 ];
@@ -299,7 +304,7 @@ const COMPARISON_ROWS = [
   // cohort data (n≥100 contractors, ≥90-day window) + source citations.
   {
     feature: "Automated outreach",
-    henri: { text: "Instant SMS + email", check: true },
+    henri: { text: "Compose & send templates", partial: true },
     angi: { text: "Partial", partial: true },
     thumbtack: { text: "No", cross: true },
     acculynx: { text: "Add-on cost", partial: true },

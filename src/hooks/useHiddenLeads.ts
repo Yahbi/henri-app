@@ -15,11 +15,38 @@ import { createClient } from "@/lib/supabase/client";
  * Cancellation-safe + dedupes by contractor (only fires when the
  * authed user changes). Returns an empty set when migration 00090
  * isn't applied yet — graceful-degrade, no UI breakage.
+ *
+ * SHARED STORE: the set lives at module scope with a tiny pub/sub so
+ * every `useHiddenLeads()` instance stays in sync. This matters because
+ * the LeadsPanel (which filters the list) and the LeadDetailDrawer
+ * (which hides a lead) mount SEPARATE instances — without a shared
+ * store, hiding a lead in the drawer wouldn't remove its row from the
+ * list until the next refetch. `add`/`remove` are optimistic mutators
+ * that propagate to all subscribers immediately.
  */
+
+let sharedHidden = new Set<string>();
+const hiddenListeners = new Set<(s: Set<string>) => void>();
+
+function setSharedHidden(next: Set<string>) {
+  sharedHidden = next;
+  hiddenListeners.forEach((l) => l(next));
+}
+
 export function useHiddenLeads() {
-  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(sharedHidden);
   const [loading, setLoading] = useState(true);
   const cancelledRef = useRef(false);
+
+  // Subscribe to the shared store so optimistic add/remove from any other
+  // instance (e.g. the lead drawer) re-renders this consumer.
+  useEffect(() => {
+    const listener = (s: Set<string>) => setHiddenIds(s);
+    hiddenListeners.add(listener);
+    return () => {
+      hiddenListeners.delete(listener);
+    };
+  }, []);
 
   const fetchHidden = useCallback(async () => {
     const supabase = createClient();
@@ -31,7 +58,7 @@ export function useHiddenLeads() {
       // above can resolve after unmount.
       if (cancelledRef.current) return;
       if (!user) {
-        setHiddenIds(new Set());
+        setSharedHidden(new Set());
         return;
       }
 
@@ -42,14 +69,14 @@ export function useHiddenLeads() {
       if (cancelledRef.current) return;
       if (error) {
         // Migration 00090 missing or RLS denial — graceful-degrade.
-        setHiddenIds(new Set());
+        setSharedHidden(new Set());
       } else {
-        setHiddenIds(
+        setSharedHidden(
           new Set((data ?? []).map((r: { lead_id: string }) => r.lead_id)),
         );
       }
     } catch {
-      if (!cancelledRef.current) setHiddenIds(new Set());
+      if (!cancelledRef.current) setSharedHidden(new Set());
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }
@@ -63,5 +90,15 @@ export function useHiddenLeads() {
     };
   }, [fetchHidden]);
 
-  return { hiddenIds, loading, refetch: fetchHidden };
+  const add = useCallback((id: string) => {
+    setSharedHidden(new Set(sharedHidden).add(id));
+  }, []);
+
+  const remove = useCallback((id: string) => {
+    const next = new Set(sharedHidden);
+    next.delete(id);
+    setSharedHidden(next);
+  }, []);
+
+  return { hiddenIds, loading, refetch: fetchHidden, add, remove };
 }

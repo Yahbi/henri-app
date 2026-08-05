@@ -104,6 +104,13 @@ function ReplyModal({ review, onClose }: { review: ReviewItem; onClose: () => vo
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
+  // Escape-to-close — the modal otherwise had no keyboard dismiss.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   // Fetch a Claude-drafted reply on mount. Falls back to the canonical
   // template if the endpoint is unavailable or the model errors.
   useEffect(() => {
@@ -229,6 +236,13 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
+  // Escape-to-close — the modal otherwise had no keyboard dismiss.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const template = method === "sms"
     ? `Hi! Thanks for choosing us for your recent project. If you were happy with our work, we'd really appreciate a quick review. It helps other homeowners find trusted contractors. Here's the link: [Review Link]`
     : `Hi,\n\nThank you for trusting us with your recent home project. We hope you're happy with the results!\n\nIf you have a moment, we'd appreciate a quick review. It helps homeowners in your area find reliable contractors.\n\n[Leave a Review]\n\nThank you for your support!`;
@@ -250,11 +264,11 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="review-request-title">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
         <div className="flex items-start justify-between">
-          <h2 className="text-lg font-heading font-normal text-foreground">Request a Review</h2>
+          <h2 id="review-request-title" className="text-lg font-heading font-normal text-foreground">Request a Review</h2>
           <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-bg-subtle" aria-label="Close">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 2l12 12M14 2L2 14" /></svg>
           </button>
@@ -263,6 +277,7 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
         <div className="flex gap-2">
           {(["sms", "email"] as const).map((m) => (
             <button key={m} onClick={() => setMethod(m)}
+              aria-pressed={method === m}
               className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                 method === m ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:text-foreground"
               }`}>
@@ -497,6 +512,7 @@ function ReputationPageInner() {
           <div className="flex gap-1.5">
             {(["all", "positive", "neutral", "negative"] as const).map((f) => (
               <button key={f} onClick={() => setFilter(f)}
+                aria-pressed={filter === f}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                   filter === f ? "bg-primary text-white" : "bg-bg-subtle text-muted-foreground hover:text-foreground"
                 }`}>

@@ -152,16 +152,21 @@ function detailFor(key: ScoreSignalKey, factors: string[], signals: ScoringSigna
     }
     case "recent_lien_90d": {
       const n = signals.recentLienCount ?? 0;
-      if (n <= 0) return "No payment-distress filings nearby";
-      return `${n} mechanic-lien filing${n === 1 ? "" : "s"} nearby (90 d)`;
+      if (n <= 0) return "No recent payment-distress filings in this state";
+      // The CourtListener docket count is STATE-grained (no ZIP granularity),
+      // so label it "statewide" rather than implying a per-property "nearby".
+      return `${n} mechanic-lien filing${n === 1 ? "" : "s"} statewide (90 d)`;
     }
     case "nri_risk_tier": {
       const v = signals.nriRiskScore;
       if (v == null) return "FEMA NRI not joined yet";
-      if (v >= 90) return `Very High disaster risk (NRI ${Math.round(v)}/100)`;
-      if (v >= 75) return `High disaster risk (NRI ${Math.round(v)}/100)`;
-      if (v >= 50) return `Moderate disaster risk (NRI ${Math.round(v)}/100)`;
-      return `Low disaster risk (NRI ${Math.round(v)}/100)`;
+      // FEMA NRI is a county/tract index (and falls back to the state median
+      // when the county doesn't match), so it describes AREA risk, not this
+      // exact parcel — label it "area disaster risk" to stay honest.
+      if (v >= 90) return `Very High area disaster risk (FEMA NRI ${Math.round(v)}/100)`;
+      if (v >= 75) return `High area disaster risk (FEMA NRI ${Math.round(v)}/100)`;
+      if (v >= 50) return `Moderate area disaster risk (FEMA NRI ${Math.round(v)}/100)`;
+      return `Low area disaster risk (FEMA NRI ${Math.round(v)}/100)`;
     }
     case "nfip_flood_history": {
       const n = signals.nfipClaimCount ?? 0;

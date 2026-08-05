@@ -1,5 +1,7 @@
 /* ── Shared lead types used across Dashboard, Pipeline, Intel, Outreach, etc. ── */
 
+import type { PropertyType } from "@/lib/permits/property-classifier";
+
 export type LeadUrgency = "hot" | "warm" | "cool" | "cold";
 export type LeadStatus = "new" | "contacted" | "quoted" | "proposal" | "won" | "lost" | "archived";
 
@@ -56,6 +58,10 @@ export interface Lead {
   /* Permit info */
   permit_type?: string | null;
   permit_description?: string | null;
+  /* Derived at map-time from permit_type (+ description) by
+   * classifyPropertyType — powers the "Exclude commercial" leads filter.
+   * "unknown" when signals are absent/contradictory. */
+  propertyType?: PropertyType;
   permit_value?: number | null;
   permit_filed_date?: string | null;
   permit_age_days?: number | null;
@@ -217,5 +223,8 @@ export function formatCurrency(cents: number | null | undefined): string {
   if (!cents) return "$0";
   if (cents >= 1_000_000) return `$${(cents / 1_000_000).toFixed(1)}M`;
   if (cents >= 1_000) return `$${Math.round(cents / 1_000)}K`;
-  return `$${cents}`;
+  // Sub-$1K values must still be rounded — returning the raw number leaked
+  // full float precision into the UI (a $149 plan / 38 leads CPL rendered as
+  // "$3.9210526315789473" on the ROI tab). Whole numbers stay clean.
+  return `$${Number.isInteger(cents) ? cents : cents.toFixed(2)}`;
 }

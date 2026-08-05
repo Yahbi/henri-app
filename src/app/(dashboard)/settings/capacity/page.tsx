@@ -86,7 +86,7 @@ export default function CapacitySettingsPage() {
       </p>
 
       {migrationPending && (
-        <div className="mb-6 rounded-lg border border-warm/30 bg-[rgba(212,162,74,0.08)] px-4 py-3 text-[12px] text-warm">
+        <div className="mb-6 rounded-lg border border-warm/30 bg-warm/8 px-4 py-3 text-[12px] text-warm">
           <p className="font-semibold">Feature pending</p>
           <p className="mt-0.5 text-muted-foreground">
             Capacity preferences activate once migration{" "}
@@ -156,7 +156,7 @@ export default function CapacitySettingsPage() {
               placeholder="e.g. 6"
               value={draft.max_active_jobs}
               onChange={(v) => setDraft((d) => ({ ...d, max_active_jobs: v }))}
-              hint="Henri stops surfacing new leads once you&apos;re at this count."
+              hint="Will stop surfacing new leads once you&apos;re at this count (coming soon)."
             />
           </Section>
 
@@ -169,6 +169,7 @@ export default function CapacitySettingsPage() {
                     key={day.num}
                     type="button"
                     onClick={() => toggleDay(day.num)}
+                    aria-pressed={on}
                     className={cn(
                       "px-3 py-1.5 rounded-full text-xs border transition-colors",
                       on

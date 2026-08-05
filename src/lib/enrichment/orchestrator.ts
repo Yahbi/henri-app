@@ -71,6 +71,10 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  sanitizePropertyValue,
+  PROPERTY_VALUE_FIELDS,
+} from "@/lib/permits/value-sanity";
 import { enrichFromCounty } from "./county-gis";
 import { queryRegrid } from "./regrid-parcel";
 import { lookupCompanyPrincipal } from "./opencorporates";
@@ -211,6 +215,17 @@ function applyField<K extends keyof EnrichedContact>(
 ): void {
   if (value == null) return;
   if (target[key] != null) return;
+  // Sanity-clamp monetary property fields before writing — implausible values
+  // (e.g. a $380.9M "assessed value" from a bad county-GIS join onto a
+  // residential parcel) are dropped so they never reach scoring, the drawer,
+  // or the map popup. Covers every writer (county, Regrid, sidecar) at once.
+  if (PROPERTY_VALUE_FIELDS.has(key as string) && typeof value === "number") {
+    const clean = sanitizePropertyValue(value);
+    if (clean == null) return;
+    target[key] = clean as EnrichedContact[K];
+    target.sources[key as string] = source;
+    return;
+  }
   target[key] = value;
   target.sources[key as string] = source;
 }
@@ -896,22 +911,16 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
     [result.sources.owner_name, result.sources.owner_first, result.sources.owner_last]
       .filter((s): s is string => !!s && s !== "upstream"),
   );
-  const phoneSources = new Set(
-    [result.sources.phone].filter((s): s is string => !!s && s !== "upstream"),
-  );
+  // Note: phone carries only a single source attribution (unlike owner_name,
+  // which has owner_first / owner_last sub-fields). A cross-source phone-
+  // agreement floor was therefore unreachable dead code and has been removed;
+  // reinstate it only once phone carries per-source attribution.
 
   // Floor 1: 3+ distinct sources naming the same owner → 0.95 floor.
   // This is the gold standard — when county GIS, voter file, and Apollo
   // all name "John Smith" at this address, we're confident.
   if (ownerSources.size >= 3) {
     result.confidence = Math.max(result.confidence, 0.95);
-  }
-
-  // Floor 2: 2+ distinct sources confirming a phone → 0.85 floor.
-  // Less common (most leads only get one phone hit) but powerful when it
-  // happens — e.g. Numverify + Cloudmersive both validate the same number.
-  if (phoneSources.size >= 2) {
-    result.confidence = Math.max(result.confidence, 0.85);
   }
 
   // Breadth bonus (kept from the prior implementation): 3+ distinct

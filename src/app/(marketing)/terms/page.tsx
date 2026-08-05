@@ -222,7 +222,7 @@ export default function TermsOfServicePage() {
               <p>
                 For full details on how your data is collected, used, and
                 protected, please refer to our{" "}
-                <a href="/privacy" className="text-[#D4886A] underline underline-offset-2">
+                <a href="/privacy" className="text-primary underline underline-offset-2">
                   Privacy Policy
                 </a>
                 .
@@ -381,7 +381,7 @@ export default function TermsOfServicePage() {
               If you have questions about these Terms, please contact us at{" "}
               <a
                 href="mailto:legal@meethenri.com"
-                className="text-[#D4886A] underline underline-offset-2"
+                className="text-primary underline underline-offset-2"
               >
                 legal@meethenri.com
               </a>

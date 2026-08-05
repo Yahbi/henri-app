@@ -489,7 +489,7 @@ export default function OutreachPage() {
   // everything (incl. legacy generic templates with stage=null);
   // picking a stage shows only the templates targeting that stage.
   const [stageFilter, setStageFilter] = useState<string>("all");
-  const { stats: outreachStats, recent: outreachRecent, isLoading, sendOutreach } = useOutreach();
+  const { stats: outreachStats, recent: outreachRecent, isLoading, error: outreachError, refresh: refreshOutreach, sendOutreach } = useOutreach();
 
   /* Hydrate templates from the contractor's saved rows. Previously
    * `defaultTemplates` was the only source — any TemplateModal.handleSave
@@ -599,7 +599,24 @@ export default function OutreachPage() {
           </Card>
         ))}
       </div>
-      {!isLoading && outreachStats.total_sent === 0 && (
+      {outreachError && (
+        <div
+          role="alert"
+          className="-mt-2 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2"
+        >
+          <p className="text-[12px] text-destructive">
+            {outreachError} These numbers may be incomplete — retry.
+          </p>
+          <button
+            type="button"
+            onClick={() => refreshOutreach()}
+            className="text-[12px] font-medium text-destructive underline underline-offset-2 hover:opacity-80"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {!isLoading && !outreachError && outreachStats.total_sent === 0 && (
         <p className="-mt-2 text-[11px] text-muted-foreground italic">
           Stats will populate after your first outbound message. Enable
           auto-fire above to start automatically, or use a template below

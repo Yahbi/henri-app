@@ -104,6 +104,53 @@ export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
   }));
 }
 
+/**
+ * Fetch specific sources by key, bypassing the producer/explorer rotation.
+ *
+ * Exists so a newly-registered feed can actually be TESTED. getActiveSources()
+ * splits every run 60/40 between proven producers and the ~12k never-produced
+ * explorer stubs, so a freshly-added high-value source can wait many runs for a
+ * slot — and until it gets one there is no way to tell a correct field mapping
+ * from a wrong one. Used by /api/cron/scrape?source_key=a,b,c.
+ *
+ * Still respects `enabled`, so this cannot resurrect a deliberately-disabled
+ * source.
+ */
+export async function getSourcesByKeys(keys: string[]): Promise<DBPermitSource[]> {
+  if (keys.length === 0) return [];
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("permit_sources")
+    .select(SOURCE_COLUMNS)
+    .in("source_key", keys)
+    .eq("enabled", true);
+
+  if (error) {
+    logger.error("sources-db.by-keys-failed", { error: error.message, keys });
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    source_key:   row.source_key,
+    city:         row.city ?? row.jurisdiction ?? "",
+    state:        row.state,
+    endpoint:     row.endpoint,
+    source_type:  row.source_type as "socrata" | "arcgis" | "ckan",
+    auth:         row.auth ?? "none",
+    update_freq:  row.update_freq ?? null,
+    layer_index:  row.layer_index ?? 0,
+    idField:      row.id_field ?? "id",
+    typeField:    row.type_field ?? "permit_type",
+    statusField:  row.status_field ?? "status",
+    descField:    row.desc_field ?? "description",
+    addressField: row.address_field ?? "address",
+    dateField:    row.date_field ?? "issue_date",
+    valueField:   row.value_field ?? "estimated_value",
+    latField:     row.lat_field ?? "latitude",
+    lngField:     row.lng_field ?? "longitude",
+  }));
+}
+
 /** Mark a source as successfully scraped */
 export async function markSourceScraped(
   sourceKey: string,

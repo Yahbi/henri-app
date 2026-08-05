@@ -291,6 +291,7 @@ function HomeownerMessagesPage() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder="Type a message..."
+                aria-label="Message"
                 className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none"
                 disabled={sending}
               />
@@ -305,6 +306,23 @@ function HomeownerMessagesPage() {
               </button>
             </form>
           </>
+        ) : error ? (
+          /* Load failure with no thread selected — surface the error + retry
+           * here, otherwise it stays trapped in the `selected` branch above
+           * and the inbox looks misleadingly empty. */
+          <div
+            className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
+            role="alert"
+          >
+            <p className="text-sm text-destructive">{error}</p>
+            <button
+              type="button"
+              onClick={() => refresh()}
+              className="text-sm font-medium text-primary underline underline-offset-2 hover:opacity-80"
+            >
+              Retry
+            </button>
+          </div>
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             Select a conversation

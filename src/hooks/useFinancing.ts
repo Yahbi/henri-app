@@ -62,6 +62,7 @@ export function useFinancing(): UseFinancingReturn {
       if (!res.ok) {
         setStats(defaultStats);
         setDeals([]);
+        setError("Couldn't load financing data.");
         setIsLoading(false);
         return;
       }
@@ -70,9 +71,10 @@ export function useFinancing(): UseFinancingReturn {
       setStats(data.stats ?? defaultStats);
       setDeals(data.deals ?? []);
     } catch {
-      // API not available — return clean defaults
+      // Network/parse error — surface it rather than showing zeroed stats.
       setStats(defaultStats);
       setDeals([]);
+      setError("Couldn't load financing data.");
     } finally {
       setIsLoading(false);
     }

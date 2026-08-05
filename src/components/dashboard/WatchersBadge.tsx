@@ -32,9 +32,9 @@ export function WatchersBadge({
 
   const tone =
     bucket === "5+"
-      ? "text-warm bg-[rgba(212,162,74,0.16)] border-[rgba(212,162,74,0.3)]"
+      ? "text-warm bg-warm/16 border-warm/30"
       : bucket === "3-5"
-        ? "text-warm bg-[rgba(212,162,74,0.1)] border-[rgba(212,162,74,0.22)]"
+        ? "text-warm bg-warm/10 border-warm/22"
         : "text-muted-foreground bg-bg-subtle border-border";
 
   const sizeCls =

@@ -201,13 +201,17 @@ function BillingStatePill() {
   const inTrial = trialRemainingMs > 0;
   const trialHours = Math.max(0, Math.ceil(trialRemainingMs / 3_600_000));
 
-  // License expiration.
+  // License state — three cases, not two. A NULL `licensed_until` means we
+  // have NO license on file, which previously fell through to the "Licensed"
+  // badge: the pill claimed "Licensed" while the Compliance tab correctly
+  // showed "No license on file". Never assert licensure we can't evidence.
   const licensedUntil = profile.licensed_until ? new Date(profile.licensed_until) : null;
   const licenseExpired = licensedUntil ? licensedUntil.getTime() < mountNow : false;
+  const licenseMissing = !licensedUntil;
 
   const tone = licenseExpired
     ? "bg-red-500/10 text-red-400 border-red-500/20"
-    : inTrial
+    : inTrial || licenseMissing
       ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
       : "bg-primary-04 text-primary border-primary/20";
 
@@ -215,7 +219,7 @@ function BillingStatePill() {
     <Link
       href="/dashboard/settings"
       className={`hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-colors ${tone}`}
-      aria-label={`Plan ${planLabel}, ${inTrial ? `trial ends in ${trialHours}h` : licenseExpired ? "license expired" : "licensed"}`}
+      aria-label={`Plan ${planLabel}, ${licenseExpired ? "license expired" : inTrial ? `trial ends in ${trialHours}h` : licenseMissing ? "license not on file" : "licensed"}`}
     >
       <span>{planLabel}</span>
       <span className="opacity-50">·</span>
@@ -226,6 +230,8 @@ function BillingStatePill() {
         </>
       ) : inTrial ? (
         <span>Trial ends in {trialHours}h</span>
+      ) : licenseMissing ? (
+        <span>License pending</span>
       ) : (
         <span>Licensed</span>
       )}
@@ -326,7 +332,6 @@ export function DashboardTopBar() {
       <div className="relative">
       <nav
         className="flex items-center gap-0.5 px-4 overflow-x-auto scrollbar-none"
-        role="tablist"
         aria-label="Dashboard navigation"
       >
         {TABS.map((tab) => {
@@ -345,8 +350,7 @@ export function DashboardTopBar() {
               key={tab.href}
               href={tab.href}
               ref={active ? activeTabRef : undefined}
-              role="tab"
-              aria-selected={active}
+              aria-current={active ? "page" : undefined}
               data-tour={`dashboard-nav-${tourKey}`}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium whitespace-nowrap border-b-2 transition-colors shrink-0",

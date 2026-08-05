@@ -194,6 +194,7 @@ function Step1Address({
           value={address}
           onChange={(e) => onAddressChange(e.target.value)}
           placeholder="Enter ZIP code or address..."
+          aria-label="ZIP code or address"
           className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           onKeyDown={(e) => {
             if (e.key === "Enter") onAddressSubmit();
@@ -286,6 +287,7 @@ function Step4Description({
         onChange={(e) => onDescriptionChange(e.target.value)}
         rows={4}
         placeholder="Describe your project... (e.g., need to replace a 20-year-old roof, approx 2000 sq ft)"
+        aria-label="Project description"
         className="w-full rounded-lg border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         autoFocus
       />
@@ -325,6 +327,7 @@ function RefinementInput({
               if (e.key === "Enter") onRefinementAnswer();
             }}
             placeholder="Your answer..."
+            aria-label="Your answer"
             className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             autoFocus
           />
@@ -365,6 +368,9 @@ function Step5Contact({
           value={contactName}
           onChange={(e) => onContactNameChange(e.target.value)}
           placeholder="Full name"
+          aria-label="Full name"
+          aria-invalid={!!contactErrors.name}
+          aria-describedby={contactErrors.name ? "contact-name-error" : undefined}
           className={cn(
             "w-full rounded-lg border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
             contactErrors.name
@@ -374,7 +380,7 @@ function Step5Contact({
           autoFocus
         />
         {contactErrors.name && (
-          <p className="mt-1 text-xs text-destructive">{contactErrors.name}</p>
+          <p id="contact-name-error" className="mt-1 text-xs text-destructive">{contactErrors.name}</p>
         )}
       </div>
       <div>
@@ -383,6 +389,9 @@ function Step5Contact({
           value={contactPhone}
           onChange={(e) => onContactPhoneChange(e.target.value)}
           placeholder="Phone number"
+          aria-label="Phone number"
+          aria-invalid={!!contactErrors.phone}
+          aria-describedby={contactErrors.phone ? "contact-phone-error" : undefined}
           className={cn(
             "w-full rounded-lg border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
             contactErrors.phone
@@ -391,7 +400,7 @@ function Step5Contact({
           )}
         />
         {contactErrors.phone && (
-          <p className="mt-1 text-xs text-destructive">{contactErrors.phone}</p>
+          <p id="contact-phone-error" className="mt-1 text-xs text-destructive">{contactErrors.phone}</p>
         )}
       </div>
       <div>
@@ -400,6 +409,9 @@ function Step5Contact({
           value={contactEmail}
           onChange={(e) => onContactEmailChange(e.target.value)}
           placeholder="Email address"
+          aria-label="Email address"
+          aria-invalid={!!contactErrors.email}
+          aria-describedby={contactErrors.email ? "contact-email-error" : undefined}
           className={cn(
             "w-full rounded-lg border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
             contactErrors.email
@@ -411,7 +423,7 @@ function Step5Contact({
           }}
         />
         {contactErrors.email && (
-          <p className="mt-1 text-xs text-destructive">{contactErrors.email}</p>
+          <p id="contact-email-error" className="mt-1 text-xs text-destructive">{contactErrors.email}</p>
         )}
       </div>
       {/* Module 5 (2026-05-09) — TCPA-style consent checkbox. The

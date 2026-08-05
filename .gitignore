@@ -134,3 +134,19 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Research/probe scratch artifacts (agents may download datasets while investigating)
+asrprobe/
+fccprobe/
+*.bin
+lm2/
+irs/
+lmfull/
+dg.json
+ffl.html
+*.dat
+*.zip
+co.json
+s.json
+dol/
+*.csv.gz

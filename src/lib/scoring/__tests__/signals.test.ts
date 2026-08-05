@@ -341,7 +341,7 @@ describe("buildScoreSignalBreakdown — Wave 1.5 booster path", () => {
     const breakdown = buildScoreSignalBreakdown(result, signals);
     const row = breakdown.find((r) => r.signal === "nri_risk_tier");
     expect(row?.value).toBe(3);
-    expect(row?.detail).toMatch(/very high disaster risk/i);
+    expect(row?.detail).toMatch(/very high area disaster risk/i);
   });
 
   it("renders nfip_flood_history with claim count", () => {

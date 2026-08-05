@@ -28,9 +28,10 @@ const plans: Plan[] = [
     zips: 3,
     badge: { text: "Beta \u00B7 Limited Early Access", variant: "warning" },
     features: [
-      "Priority permit alerts",
-      "AI lead scoring",
-      "Email + SMS notifications",
+      "3 ZIP territories",
+      "AI-scored permit leads",
+      "Best-effort owner contact enrichment",
+      "Email & SMS outreach (compose & send)",
     ],
   },
   {
@@ -41,9 +42,8 @@ const plans: Plan[] = [
     badge: null,
     features: [
       "Everything in Founder",
-      "Advanced lead filters",
-      "CRM integrations",
-      "Dedicated onboarding call",
+      "5 ZIP territories",
+      "Storm Center dashboard",
     ],
   },
   {
@@ -55,8 +55,8 @@ const plans: Plan[] = [
     features: [
       "Everything in Starter",
       "12 ZIP territories",
-      "Priority support",
-      "Custom analytics dashboard",
+      "Daily license verification",
+      "Priority email support",
     ],
   },
   {
@@ -69,7 +69,7 @@ const plans: Plan[] = [
       "Everything in Pro",
       "20 ZIP territories",
       "Dedicated account manager",
-      "API access",
+      "Custom onboarding",
     ],
   },
 ];

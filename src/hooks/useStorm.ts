@@ -49,10 +49,12 @@ export function useStorm(): UseStormReturn {
       const res = await fetch("/api/storm");
 
       if (!res.ok) {
-        // Gracefully return empty — no console errors
+        // Real fetch failure — surface it so the page can distinguish an
+        // outage from a genuinely quiet weather week (setError, not just empty).
         setAlerts([]);
         setTerritories([]);
         setFetchedAt(null);
+        setError("Couldn't load storm data.");
         setIsLoading(false);
         return;
       }
@@ -62,10 +64,11 @@ export function useStorm(): UseStormReturn {
       setTerritories(data.territories ?? []);
       setFetchedAt(data.fetchedAt ?? null);
     } catch {
-      // API not available — return clean defaults
+      // Network/parse error — surface it rather than showing "No alerts".
       setAlerts([]);
       setTerritories([]);
       setFetchedAt(null);
+      setError("Couldn't load storm data.");
     } finally {
       setIsLoading(false);
     }

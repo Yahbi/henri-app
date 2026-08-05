@@ -190,7 +190,7 @@ export function PricingSection() {
                 // defined as `0 0 30px hsl(var(--primary) / 0.15)`).
                 plan.popular && "ring-2 ring-primary shadow-glow-primary",
                 plan.scarcity &&
-                  "ring-1 ring-[rgba(212,162,74,0.4)]"
+                  "ring-1 ring-warm/40"
               )}
             >
               {/* Scarcity banner — warm-gold stripe with live-style count.
@@ -200,7 +200,7 @@ export function PricingSection() {
                * Popular" on Pro. Only renders for plans that actually
                * have a slot cap (Founder today). */}
               {plan.scarcity && (
-                <div className="flex items-center justify-between gap-2 bg-[rgba(212,162,74,0.12)] border-b border-[rgba(212,162,74,0.35)] px-4 py-2 text-[11px] font-semibold text-warm">
+                <div className="flex items-center justify-between gap-2 bg-warm/10 border-b border-warm/35 px-4 py-2 text-[11px] font-semibold text-warm">
                   <span className="inline-flex items-center gap-1.5">
                     <Flame className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                     Only {plan.scarcity.remaining} of {plan.scarcity.total} spots left

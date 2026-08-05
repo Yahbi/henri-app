@@ -144,7 +144,7 @@ export default function StormPage() {
     window.localStorage.setItem(STORM_KEY, stormMode ? "1" : "0");
   }, [stormMode]);
 
-  const { alerts, territories, isLoading } = useStorm();
+  const { alerts, territories, isLoading, error: stormError, refresh: refreshStorm } = useStorm();
 
   // Phase AA — pull the contractor's leads so we can break them down by
   // stage on the storm page. Restoration trades benefit from seeing
@@ -331,6 +331,17 @@ export default function StormPage() {
                   </div>
                 </Card>
               ))
+            ) : stormError ? (
+              /* Fetch failed — alert-with-retry, so an outage doesn't read
+               * as a genuinely quiet weather week. */
+              <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+                <p className="text-sm text-muted-foreground">
+                  Couldn&apos;t load storm alerts &mdash; check your connection and retry.
+                </p>
+                <Button variant="outline" size="sm" onClick={() => refreshStorm()}>
+                  Retry
+                </Button>
+              </Card>
             ) : mappedAlerts.length === 0 ? (
               <Card className="p-4">
                 <p className="text-sm text-muted-foreground">No active weather alerts for your territories.</p>

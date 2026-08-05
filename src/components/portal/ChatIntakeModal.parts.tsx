@@ -148,6 +148,7 @@ export function OptionCard({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={selected}
       className={cn(
         "rounded-xl border px-4 py-3 text-sm font-medium transition-all duration-150",
         selected
@@ -316,7 +317,7 @@ export function MatchCard({
 export function StarIcon() {
   return (
     <svg
-      className="h-4 w-4 text-[#D4A24A]"
+      className="h-4 w-4 text-warm"
       viewBox="0 0 20 20"
       fill="currentColor"
     >

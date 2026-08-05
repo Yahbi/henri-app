@@ -182,6 +182,7 @@ export default function NewsTriggersPage() {
             <input
               type="text"
               placeholder="Filter by query (broke ground, ribbon cutting, …)"
+              aria-label="Filter by query"
               value={queryFilter}
               onChange={(e) => setQueryFilter(e.target.value)}
               className="flex-1 px-3 py-1.5 text-[12px] rounded-md border border-border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
