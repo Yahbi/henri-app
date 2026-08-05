@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { QuoteButton } from "./QuoteButton";
 
 /* ================================================================== */
@@ -23,10 +24,25 @@ interface ContractorProfile {
   response_time_h: number | null;
   jobs_completed: number | null;
   profile_public: boolean | null;
-  verified_at: string | null;
-  badge_licensed: boolean | null;
-  badge_insured: boolean | null;
-  badge_background: boolean | null;
+}
+
+/* The one licensing signal Henri actually produces: a match against
+ * `state_license_rosters`, recorded by /api/onboarding/verify-license on
+ * the service-role client and locked against contractor self-writes by
+ * migration 00127.
+ *
+ * What this page used to render instead — "Licensed" / "Insured" /
+ * "Background Checked" from `profiles.badge_licensed` / `badge_insured` /
+ * `badge_background`, plus "Verified on <verified_at>" — was three claims
+ * Henri never checked. No code path in src/ writes any of those four
+ * columns (00117 hard-locks them for exactly that reason), so they were
+ * false for every contractor; the section only ever rendered if someone
+ * flipped them by hand in the SQL editor, and then it would have asserted
+ * an insurance and a background check that do not exist. Henri collects
+ * neither, so there is no honest field to replace them with. */
+interface VerifiedLicense {
+  license_state: string | null;
+  last_checked_at: string | null;
 }
 
 interface Review {
@@ -124,11 +140,7 @@ async function getContractorData(id: string) {
       review_count,
       response_time_h,
       jobs_completed,
-      profile_public,
-      verified_at,
-      badge_licensed,
-      badge_insured,
-      badge_background
+      profile_public
     `
     )
     .eq("id", id)
@@ -137,6 +149,24 @@ async function getContractorData(id: string) {
     .single();
 
   if (profileErr || !profile) return null;
+
+  /* Licence trust block. Service-role because `contractor_licenses` is
+   * row-scoped to its owner (licenses_select_own, 00010:44) — a homeowner
+   * browsing this public page would otherwise always read zero rows and
+   * see a permanently absent badge, which is its own quiet lie. Same query
+   * as /api/contractors/[id]:70-78: an expired licence is not a licence,
+   * and a NULL expiry means the roster publishes none, which is not the
+   * same as expired. Degrades to "no badge" on error. */
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: license } = await createAdminClient()
+    .from("contractor_licenses")
+    .select("license_state, last_checked_at")
+    .eq("contractor_id", id)
+    .eq("verified", true)
+    .or(`expiry_date.is.null,expiry_date.gte.${today}`)
+    .order("last_checked_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
 
   const { data: reviews } = await supabase
     .from("reviews")
@@ -164,6 +194,7 @@ async function getContractorData(id: string) {
 
   return {
     profile: profile as ContractorProfile,
+    license: (license as VerifiedLicense | null) ?? null,
     reviews: (reviews ?? []) as Review[],
     zips: (territories ?? []).map((t: { zip: string }) => t.zip),
   };
@@ -215,7 +246,7 @@ export default async function ContractorProfilePage({
 
   if (!data) notFound();
 
-  const { profile, reviews, zips } = data;
+  const { profile, license, reviews, zips } = data;
 
   const displayName = profile.company_name || profile.full_name || "Contractor";
   const avgRating = profile.avg_rating ?? 0;
@@ -364,65 +395,37 @@ export default async function ContractorProfilePage({
       )}
 
       {/* ============================================================ */}
-      {/*  VERIFICATION BADGES                                         */}
+      {/*  LICENSE VERIFICATION                                        */}
+      {/*  One badge, one source: a live match against the state       */}
+      {/*  licensing roster. No "Insured" and no "Background checked"  */}
+      {/*  — Henri collects neither, so neither can be claimed.        */}
       {/* ============================================================ */}
-      {(profile.badge_licensed ||
-        profile.badge_insured ||
-        profile.badge_background) && (
+      {license && (
         <section className="border-y border-border bg-card py-12">
           <div className="mx-auto max-w-4xl px-6">
             <h2 className="font-heading text-2xl font-normal tracking-tight text-foreground sm:text-3xl">
               Verification
             </h2>
-            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-              {profile.badge_licensed && (
-                <div className="flex items-start gap-3 rounded-xl border border-border bg-background p-5">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-10">
-                    <ShieldCheck />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      Licensed
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Active contractor license verified
-                      {profile.verified_at && (
-                        <> on {formatDate(profile.verified_at)}</>
-                      )}
-                    </p>
-                  </div>
+            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="flex items-start gap-3 rounded-xl border border-border bg-background p-5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-10">
+                  <ShieldCheck />
                 </div>
-              )}
-              {profile.badge_insured && (
-                <div className="flex items-start gap-3 rounded-xl border border-border bg-background p-5">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-10">
-                    <ShieldCheck />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      Insured
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Liability insurance on file
-                    </p>
-                  </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    Licensed
+                    {license.license_state && <> ({license.license_state})</>}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Matched against the
+                    {license.license_state ? ` ${license.license_state}` : ""}{" "}
+                    state licensing roster
+                    {license.last_checked_at && (
+                      <> on {formatDate(license.last_checked_at)}</>
+                    )}
+                  </p>
                 </div>
-              )}
-              {profile.badge_background && (
-                <div className="flex items-start gap-3 rounded-xl border border-border bg-background p-5">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-10">
-                    <ShieldCheck />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      Background Checked
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Background check passed
-                    </p>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           </div>
         </section>

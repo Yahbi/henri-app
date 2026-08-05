@@ -9,7 +9,9 @@ import { isZip5, sanitizeFilterText } from "@/lib/validation/params";
  * side (`src/hooks/useContractorSearch.ts`) imports it type-only instead of
  * re-declaring it, because the re-declared copy had silently drifted: it
  * named the fields `total_reviews` / `total_jobs_won` / `verified`, while
- * this route returns `review_count` / `jobs_completed` / `badge_licensed`.
+ * this route returns `review_count` / `jobs_completed` / `license_verified`
+ * (that last one was `badge_licensed` until the licence block below
+ * replaced it).
  * Every read on the homeowner card therefore resolved to `undefined`, so
  * every contractor rendered 0 reviews, 0 jobs and an unverified badge no
  * matter what their profile held.

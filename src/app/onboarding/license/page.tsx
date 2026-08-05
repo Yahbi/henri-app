@@ -47,6 +47,10 @@ interface VerifyResult {
   message?: string;
   match?: VerifyMatch;
   available_states?: string[];
+  /** Submit-time only — whether the server actually stored the verdict.
+   *  A probe response omits both fields. */
+  persisted?: boolean;
+  verification_status?: string | null;
 }
 
 /** Existing contractor_licenses row (onboarding-resume support). */
@@ -79,6 +83,12 @@ function LicenseVerificationContent() {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verify, setVerify] = useState<VerifyResult>({ status: "idle" });
+  /* Server-confirmed outcome of the submit-time roster check. The success
+   * screen reads THIS and not the debounced probe: the probe is advisory,
+   * only the server's persisted verdict is what a homeowner will ever
+   * see. Stays false when the roster didn't match, when the state isn't
+   * covered, or when the write didn't land. */
+  const [savedVerified, setSavedVerified] = useState(false);
   const verifyTimerRef = useRef<NodeJS.Timeout | null>(null);
   // Onboarding resume — if the contractor already submitted a license,
   // show a "License on file" card instead of the blank form.
@@ -182,36 +192,22 @@ function LicenseVerificationContent() {
         return;
       }
 
-      // Wave 2.B Phase 2 — record auto-verification status. When the
-      // cross-check found the license in our state_license_rosters,
-      // mark verified immediately. Otherwise stay pending — admin
-      // (or a future scraper) will resolve manually.
-      // Schema (migration 00010): license_state, holder_name,
-      // verified (bool), verification_status (text), last_checked_at.
-      const verifiedFlag = verify.status === "found";
-      const verificationStatus =
-        verify.status === "found"
-          ? "verified_state_roster"
-          : verify.status === "skipped"
-            ? "manual_review"
-            : verify.status === "missing"
-              ? "missing_in_roster"
-              : "pending_verification";
-
+      /* The browser writes ONLY what the contractor declared. It must not
+       * write `verified` / `verification_status` / `last_checked_at` /
+       * `expiry_date` / `raw_response`: those are the trust signals that
+       * /api/contractors/search and /api/contractors/[id] publish to
+       * homeowners, and a browser-computed value there is a badge any
+       * contractor could forge from the console. Migration 00127 now
+       * rejects such a write outright (42501); the authoritative write
+       * happens server-side below, on the service-role client.
+       *
+       * Schema (migration 00010): license_number, license_state,
+       * license_type, holder_name are all user-declared. */
       const licensePayload = {
         license_number: data.license_number,
         license_state: data.state,
-        license_type:
-          (verify.match?.license_type as string | undefined) || data.license_type || null,
-        holder_name:
-          (verify.match?.business_name as string | undefined) ||
-          data.name_on_license ||
-          null,
-        verified: verifiedFlag,
-        verification_status: verificationStatus,
-        last_checked_at: new Date().toISOString(),
-        expiry_date: (verify.match?.expire_date as string | undefined) || null,
-        raw_response: verify as unknown as Record<string, unknown>,
+        license_type: data.license_type || null,
+        holder_name: data.name_on_license || null,
       };
 
       // Onboarding resume — when a row already exists for this contractor,
@@ -219,15 +215,19 @@ function LicenseVerificationContent() {
       // row id we loaded, not every row owned by the contractor: the
       // contractor_id filter would overwrite additional licences (a
       // multi-state contractor's other rows) with this submission.
-      const { error: licenseErr } = existingLicense
+      const { data: savedRow, error: licenseErr } = existingLicense
         ? await supabase
             .from("contractor_licenses")
             .update(licensePayload)
             .eq("id", existingLicense.id)
             .eq("contractor_id", user.id)
+            .select("id")
+            .single()
         : await supabase
             .from("contractor_licenses")
-            .insert({ contractor_id: user.id, ...licensePayload });
+            .insert({ contractor_id: user.id, ...licensePayload })
+            .select("id")
+            .single();
       if (licenseErr) throw licenseErr;
 
       // Mirror the license state + number onto profiles so the middleware
@@ -241,6 +241,28 @@ function LicenseVerificationContent() {
         })
         .eq("id", user.id);
       if (profileErr) throw profileErr;
+
+      /* Hand the roster check to the server, which re-runs it and records
+       * the verdict with the service-role client. Best-effort: if it
+       * fails the licence is still on file, just unverified — the safe
+       * direction. Never fail onboarding on it. */
+      try {
+        const res = await fetch("/api/onboarding/verify-license", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            state: data.state,
+            license_number: data.license_number,
+            license_id: savedRow?.id,
+            persist: true,
+          }),
+        });
+        const outcome = (await res.json()) as VerifyResult;
+        setVerify(outcome);
+        setSavedVerified(outcome.status === "found" && outcome.persisted === true);
+      } catch {
+        setSavedVerified(false);
+      }
 
       setSubmitted(true);
     } catch (err) {
@@ -509,17 +531,19 @@ function LicenseVerificationContent() {
                 <CheckCircle2 className="h-7 w-7 text-[#3D9970]" />
               </div>
               <h3 className="font-heading font-normal text-lg text-foreground mb-1">
-                {verify.status === "found"
+                {savedVerified
                   ? "License verified"
                   : "License submitted for verification"}
               </h3>
-              {/* Two honest outcomes. When the roster cross-check matched
-               * we already stamped verified=true, so telling the user
-               * "we'll verify and notify you" was wrong. When it didn't,
-               * the review is manual and there is no automated approval
-               * notification to promise — say where to check instead. */}
+              {/* Two honest outcomes, keyed off what the SERVER actually
+               * stored (`savedVerified`) rather than the advisory probe.
+               * Claiming "verified" for a verdict that never reached the
+               * database would be the same fiction the badge rework was
+               * meant to remove. When the check didn't match, the review
+               * is manual and there is no automated approval notification
+               * to promise — say where to check instead. */}
               <p className="text-sm text-muted-foreground mb-6">
-                {verify.status === "found"
+                {savedVerified
                   ? `We matched your license against the ${state} state roster. You're all set — keep going.`
                   : "Your license is on file and pending manual review. That doesn't block you: keep setting up your account, and you can check the status any time in Settings."}
               </p>

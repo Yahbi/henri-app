@@ -243,16 +243,43 @@ export async function PATCH(request: NextRequest) {
     const { license_number, license_state, license_type, license_expiry } =
       parsed.data;
 
-    // Build update payload — only include provided fields
-    const updates: Record<string, unknown> = {
-      verified: false, // needs re-verification after any change
-      verification_status: "pending",
-    };
+    /* `expiry_date` is a TRUST column, not a self-declared one. Both
+     * homeowner-facing read paths gate the "Licensed" badge on
+     * `expiry_date.is.null,expiry_date.gte.<today>`
+     * (/api/contractors/search:104, /api/contractors/[id]:75), so a
+     * contractor who could set it would keep a dead licence's badge alive
+     * indefinitely. Migration 00127 locks it against every non-service-role
+     * session; the only writer is the roster cross-check in
+     * /api/onboarding/verify-license, which copies the state registry's
+     * own expiry. Reject loudly rather than silently dropping the field. */
+    if (license_expiry !== undefined) {
+      return NextResponse.json(
+        {
+          error:
+            "License expiry can't be set by hand — it comes from the state licensing roster when your license is checked.",
+        },
+        { status: 400 }
+      );
+    }
+
+    /* Build update payload — only the user-declared fields. `verified` and
+     * `verification_status` used to be forced to false/'pending' here to
+     * mark the licence as needing a re-check. That write is now rejected
+     * by 00127, and it is also redundant: the same migration resets the
+     * verdict automatically whenever `license_number` or `license_state`
+     * changes, which are exactly the changes that invalidate it. */
+    const updates: Record<string, unknown> = {};
 
     if (license_number !== undefined) updates.license_number = license_number;
     if (license_state !== undefined) updates.license_state = license_state;
     if (license_type !== undefined) updates.license_type = license_type;
-    if (license_expiry !== undefined) updates.expiry_date = license_expiry;
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json(
+        { error: "Provide at least one of license_number, license_state, license_type." },
+        { status: 400 }
+      );
+    }
 
     // Check if contractor already has a license row
     const { data: existing } = await supabase

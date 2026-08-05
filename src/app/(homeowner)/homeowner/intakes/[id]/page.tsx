@@ -25,7 +25,6 @@ import {
   Phone,
   Mail,
   Star,
-  Shield,
   Briefcase,
   XCircle,
 } from "lucide-react";
@@ -60,11 +59,11 @@ type Match = {
   review_count: number;
   response_time: string;
   jobs_completed: number;
-  badges: {
-    licensed: boolean;
-    insured: boolean;
-    background_checked: boolean;
-  };
+  /* `badges` (licensed / insured / background_checked) is gone from
+   * /api/intake/[id]/matches: it was read off profiles.badge_* columns
+   * that nothing writes — and one of which isn't a column at all — so it
+   * advertised three checks Henri never ran. Henri collects no insurance
+   * or background data, so nothing honest replaces it here. */
   has_portfolio: boolean;
 };
 
@@ -313,12 +312,6 @@ export default function HomeownerIntakePage() {
                   <span className="inline-flex items-center gap-1">
                     <Briefcase className="h-3.5 w-3.5" />
                     {primary.jobs_completed} jobs
-                  </span>
-                )}
-                {primary.badges.licensed && (
-                  <span className="inline-flex items-center gap-1">
-                    <Shield className="h-3.5 w-3.5 text-primary" />
-                    Licensed
                   </span>
                 )}
               </div>

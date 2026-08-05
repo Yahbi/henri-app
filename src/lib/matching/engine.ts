@@ -14,8 +14,22 @@ export interface MatchCandidate {
   reviewCount: number;
   jobsCompleted: number;
   yearsExperience: number | null;
+  /* Licence trust block — derived from `contractor_licenses`, NOT from
+   * `profiles.badge_licensed` / `badge_insured`.
+   *
+   * `verified` used to be `!!(badge_licensed && badge_insured)`. Nothing in
+   * src/ writes either column and migration 00117 hard-locks both, so that
+   * expression was false for every contractor that has ever existed — a
+   * flag the homeowner card rendered as "Licensed & Insured". The real
+   * signal is the roster cross-check recorded by
+   * /api/onboarding/verify-license, which migration 00127 makes
+   * unforgeable. There is deliberately no insured/background-checked
+   * equivalent: Henri collects neither. */
+  licenseVerified: boolean;
+  /** State of the verified licence. Null when there is no verified licence
+   *  — this is NOT the contractor's self-declared `profiles.license_state`,
+   *  which is a claim rather than a check. */
   licenseState: string | null;
-  verified: boolean;
   /** How this contractor was matched: an exact claimed-territory ZIP, or
    *  the geographic-proximity cold-start fallback (no exact match existed). */
   matchType: "territory" | "proximity";
@@ -55,16 +69,65 @@ interface ContractorProfile {
   review_count?: number;
   response_time_h?: number;
   jobs_completed?: number;
-  badge_licensed?: boolean;
-  badge_insured?: boolean;
-  // Real column is profiles.badge_background (aliased in the select).
-  badge_background_checked?: boolean;
   // Real column is profiles.portfolio_photos (text[]); has_portfolio derived.
   portfolio_photos?: string[] | null;
   // Aliased from profiles.updated_at (no last_active_at column exists).
   last_active_at?: string;
   years_experience?: number;
-  license_state?: string;
+}
+
+/** Newest verified, unexpired licence per contractor. */
+interface VerifiedLicense {
+  state: string | null;
+}
+
+/**
+ * Licence lookup for a set of contractors, mirroring
+ * /api/contractors/search:87-126.
+ *
+ * Degrades to an empty map on error: an unbadged match is honest, a failed
+ * homeowner intake is not. Note that `contractor_licenses` is row-scoped by
+ * RLS (licenses_select_own, 00010:44) — callers passing a user-session
+ * client will read nothing and every match will come back unverified,
+ * which is the safe direction. /api/intake calls this with the service-role
+ * client (see the note at src/app/api/intake/route.ts:119-128).
+ */
+async function fetchVerifiedLicenses(
+  supabase: SupabaseClient,
+  contractorIds: string[]
+): Promise<Map<string, VerifiedLicense>> {
+  const byContractor = new Map<string, VerifiedLicense>();
+  if (contractorIds.length === 0) return byContractor;
+
+  /* Date-only compare: `expiry_date` is a DATE column. An expired licence
+   * is not a licence; a NULL expiry means the roster publishes none, which
+   * is not the same as expired. */
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data, error } = await supabase
+    .from("contractor_licenses")
+    .select("contractor_id, license_state, last_checked_at")
+    .in("contractor_id", contractorIds)
+    .eq("verified", true)
+    .or(`expiry_date.is.null,expiry_date.gte.${today}`)
+    .order("last_checked_at", { ascending: false, nullsFirst: false });
+
+  if (error) {
+    logger.warn("Match licence lookup failed; licence flags suppressed", {
+      error: error.message,
+    });
+    return byContractor;
+  }
+
+  /* Ordered newest-first, so the first row per contractor is the freshest
+   * check (a multi-state contractor holds several). */
+  for (const row of data ?? []) {
+    const id = row.contractor_id as string;
+    if (byContractor.has(id)) continue;
+    byContractor.set(id, { state: (row.license_state as string | null) ?? null });
+  }
+
+  return byContractor;
 }
 
 /* ── In-memory assignment counter for round-robin tiebreaker ── */
@@ -209,21 +272,18 @@ function scoreContractor(
     factors.push("Fast response time");
   }
 
-  /* 4. Verification badges (15 points) */
-  let verificationScore = 0;
-  if (profile.badge_licensed) {
-    verificationScore += 5;
-    factors.push("Licensed");
-  }
-  if (profile.badge_insured) {
-    verificationScore += 5;
-    factors.push("Insured");
-  }
-  if (profile.badge_background_checked) {
-    verificationScore += 5;
-    factors.push("Background checked");
-  }
-  score += verificationScore;
+  /* 4. Verification badges — REMOVED.
+   * This block awarded 5 points each for `badge_licensed`, `badge_insured`
+   * and `badge_background_checked`, and pushed "Licensed" / "Insured" /
+   * "Background checked" onto the factor list shown to the homeowner.
+   * Nothing in src/ has ever written those three columns and migration
+   * 00117 hard-locks them, so every term was 0 for every contractor: dead
+   * weight in the score and three unearned claims in the factors. Henri
+   * collects no insurance or background data at all, so there is nothing
+   * honest to re-source them from. The one real licensing signal — the
+   * state-roster cross-check — is surfaced as `licenseVerified` on the
+   * candidate rather than folded into the score, so it can be shown to the
+   * homeowner without silently reordering matches. */
 
   /* 5. Capacity based on plan tier (10 points) */
   const capScore = planCapacityScore(profile.plan);
@@ -268,9 +328,8 @@ export async function findMatches(
       `contractor_id, profiles!inner(
         id, email, phone, full_name, company_name, trade, plan,
         avg_rating, review_count, response_time_h, jobs_completed,
-        badge_licensed, badge_insured, badge_background_checked:badge_background,
         portfolio_photos, last_active_at:updated_at,
-        years_experience, license_state
+        years_experience
       )`
     )
     .eq("zip", zip)
@@ -327,28 +386,34 @@ export async function findMatches(
     return scoreDiff;
   });
 
-  /* Step 4: Return top 3 */
+  /* Step 4: Return top 3 (licence lookup only for the rows we return) */
   const topCandidates = scored.slice(0, 3);
+  const licenses = await fetchVerifiedLicenses(
+    supabase,
+    topCandidates.map((c) => c.contractorId)
+  );
 
-  return topCandidates.map((c) => ({
-    contractorId: c.contractorId,
-    companyName:
-      c.profile.company_name ?? c.profile.full_name ?? "Contractor",
-    score: c.score,
-    factors: c.factors,
-    estimatedResponseTime: responseTimeLabel(c.profile.response_time_h),
-    rating: c.profile.avg_rating ?? 0,
-    reviewCount: c.profile.review_count ?? 0,
-    jobsCompleted: c.profile.jobs_completed ?? 0,
-    yearsExperience:
-      typeof c.profile.years_experience === "number" && c.profile.years_experience > 0
-        ? c.profile.years_experience
-        : null,
-    licenseState: c.profile.license_state ?? null,
-    verified:
-      !!(c.profile.badge_licensed && c.profile.badge_insured),
-    matchType: "territory" as const,
-  }));
+  return topCandidates.map((c) => {
+    const license = licenses.get(c.contractorId);
+    return {
+      contractorId: c.contractorId,
+      companyName:
+        c.profile.company_name ?? c.profile.full_name ?? "Contractor",
+      score: c.score,
+      factors: c.factors,
+      estimatedResponseTime: responseTimeLabel(c.profile.response_time_h),
+      rating: c.profile.avg_rating ?? 0,
+      reviewCount: c.profile.review_count ?? 0,
+      jobsCompleted: c.profile.jobs_completed ?? 0,
+      yearsExperience:
+        typeof c.profile.years_experience === "number" && c.profile.years_experience > 0
+          ? c.profile.years_experience
+          : null,
+      licenseVerified: license !== undefined,
+      licenseState: license?.state ?? null,
+      matchType: "territory" as const,
+    };
+  });
 }
 
 /* ── Proximity (cold-start) fallback ── */
@@ -398,9 +463,8 @@ export async function findProximityMatches(
       `zip, contractor_id, profiles!inner(
         id, email, phone, full_name, company_name, trade, plan,
         avg_rating, review_count, response_time_h, jobs_completed,
-        badge_licensed, badge_insured, badge_background_checked:badge_background,
         portfolio_photos, last_active_at:updated_at,
-        years_experience, license_state
+        years_experience
       )`,
     )
     .eq("status", "active");
@@ -438,24 +502,33 @@ export async function findProximityMatches(
   // Nearest first; score as a tiebreaker.
   scored.sort((a, b) => a.mi - b.mi || b.score - a.score);
 
-  return scored.slice(0, 3).map((c) => ({
-    contractorId: c.contractorId,
-    companyName: c.profile.company_name ?? c.profile.full_name ?? "Contractor",
-    score: c.score,
-    factors: [`Nearby (~${Math.round(c.mi)} mi)`, ...c.factors],
-    estimatedResponseTime: responseTimeLabel(c.profile.response_time_h),
-    rating: c.profile.avg_rating ?? 0,
-    reviewCount: c.profile.review_count ?? 0,
-    jobsCompleted: c.profile.jobs_completed ?? 0,
-    yearsExperience:
-      typeof c.profile.years_experience === "number" && c.profile.years_experience > 0
-        ? c.profile.years_experience
-        : null,
-    licenseState: c.profile.license_state ?? null,
-    verified: !!(c.profile.badge_licensed && c.profile.badge_insured),
-    matchType: "proximity" as const,
-    distanceMi: Math.round(c.mi),
-  }));
+  const top = scored.slice(0, 3);
+  const licenses = await fetchVerifiedLicenses(
+    supabase,
+    top.map((c) => c.contractorId)
+  );
+
+  return top.map((c) => {
+    const license = licenses.get(c.contractorId);
+    return {
+      contractorId: c.contractorId,
+      companyName: c.profile.company_name ?? c.profile.full_name ?? "Contractor",
+      score: c.score,
+      factors: [`Nearby (~${Math.round(c.mi)} mi)`, ...c.factors],
+      estimatedResponseTime: responseTimeLabel(c.profile.response_time_h),
+      rating: c.profile.avg_rating ?? 0,
+      reviewCount: c.profile.review_count ?? 0,
+      jobsCompleted: c.profile.jobs_completed ?? 0,
+      yearsExperience:
+        typeof c.profile.years_experience === "number" && c.profile.years_experience > 0
+          ? c.profile.years_experience
+          : null,
+      licenseVerified: license !== undefined,
+      licenseState: license?.state ?? null,
+      matchType: "proximity" as const,
+      distanceMi: Math.round(c.mi),
+    };
+  });
 }
 
 /* ── Convenience: get the full profile for a matched contractor (used by intake API for notifications) ── */

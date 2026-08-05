@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyLicense } from "@/lib/license/verify";
 import { LicenseVerifyBodySchema, parseBody } from "@/lib/schemas/api";
 import { logger } from "@/lib/logger";
@@ -44,15 +45,35 @@ export async function POST(req: NextRequest) {
       raw_response: result.raw_response ?? null,
     };
 
-    if (existing) {
-      await supabase
-        .from("contractor_licenses")
-        .update(licenseData)
-        .eq("id", existing.id);
-    } else {
-      await supabase
-        .from("contractor_licenses")
-        .insert(licenseData);
+    /* The trust columns (verified / verification_status / last_checked_at
+     * / expiry_date / raw_response) are server-computed by verifyLicense
+     * above and are locked against every non-service-role session by
+     * migration 00127 — RLS gates rows, not columns, so leaving this write
+     * on the caller's own session is what let a contractor self-award the
+     * homeowner-facing "Licensed" badge. The admin client is the only role
+     * allowed through; `contractor_id` still comes from the session and
+     * both statements stay scoped to the caller's own row, so bypassing
+     * RLS here grants no cross-tenant reach.
+     *
+     * The write error is surfaced now rather than swallowed: it used to be
+     * discarded, so a rejected write returned "License verified
+     * successfully" over a row that never changed. */
+    const admin = createAdminClient();
+
+    const { error: writeError } = existing
+      ? await admin
+          .from("contractor_licenses")
+          .update(licenseData)
+          .eq("id", existing.id)
+          .eq("contractor_id", user.id)
+      : await admin.from("contractor_licenses").insert(licenseData);
+
+    if (writeError) {
+      logger.error("License record write error", { error: writeError.message });
+      return NextResponse.json(
+        { error: "Could not save the license record" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({

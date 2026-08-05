@@ -225,7 +225,13 @@ export interface MatchContractor {
   rating?: number | null;
   review_count?: number | null;
   response_time?: string | null;
-  verified?: boolean | null;
+  /** Roster cross-check result from /api/intake. Was `verified`, which the
+   *  matching engine computed from `badge_licensed && badge_insured` —
+   *  columns nothing writes, so it was always false and the "Licensed &
+   *  Insured" line it drove was a claim Henri never checked. There is no
+   *  insured flag because Henri collects no insurance data. */
+  license_verified?: boolean | null;
+  license_state?: string | null;
   jobs_completed?: number | null;
   years_experience?: number | null;
 }
@@ -257,7 +263,13 @@ export function MatchCard({
   ) {
     badges.push(`${contractor.years_experience} yrs experience`);
   }
-  if (contractor?.verified) badges.push("Licensed & Insured");
+  if (contractor?.license_verified) {
+    badges.push(
+      contractor.license_state
+        ? `License verified (${contractor.license_state})`
+        : "License verified",
+    );
+  }
   if (
     typeof contractor?.jobs_completed === "number" &&
     contractor.jobs_completed > 0
@@ -273,9 +285,9 @@ export function MatchCard({
         </div>
         <div className="flex-1">
           <p className="font-semibold text-foreground">{name}</p>
-          {contractor?.verified && (
+          {contractor?.license_verified && (
             <p className="text-xs text-muted-foreground">
-              Verified &middot; Licensed &amp; Insured
+              Matched against the state licensing roster
             </p>
           )}
         </div>

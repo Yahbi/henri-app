@@ -66,16 +66,33 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    /* Fetch match results with contractor public profiles */
+    /* Fetch match results with contractor public profiles.
+     *
+     * Two things are deliberately gone from this SELECT:
+     *
+     *   badge_licensed / badge_insured / badge_background_checked — the
+     *     first two exist but nothing in src/ writes them (00117 hard-locks
+     *     them for exactly that reason) and the third is not a column at
+     *     all (the real one is `badge_background`). They were shipped to
+     *     the homeowner as `badges.licensed/insured/background_checked`,
+     *     i.e. three checks Henri never ran. Henri holds no insurance or
+     *     background data, so there is nothing honest to put in their
+     *     place. Licence status is available from /api/contractors/[id],
+     *     which reads the roster cross-check.
+     *
+     *   has_portfolio — also not a column. The real one is
+     *     `portfolio_photos` (text[]), derived below the same way
+     *     src/lib/matching/engine.ts does it.
+     *
+     * Both non-existent names made PostgREST reject this query outright,
+     * so this endpoint returned 500 rather than any badge at all. */
     const { data: matches, error: matchError } = await supabase
       .from("intake_matches")
       .select(
         `rank, is_primary, contractor_id,
          profiles!inner(
            company_name, full_name, avg_rating, review_count,
-           response_time_h, jobs_completed,
-           badge_licensed, badge_insured, badge_background_checked,
-           has_portfolio
+           response_time_h, jobs_completed, portfolio_photos
          )`
       )
       .eq("intake_id", intakeId)
@@ -87,33 +104,21 @@ export async function GET(
     }
 
     /* Shape the response -- expose public info only, no internal scores or factors */
+    type MatchProfile = {
+      company_name?: string;
+      full_name?: string;
+      avg_rating?: number;
+      review_count?: number;
+      response_time_h?: number;
+      jobs_completed?: number;
+      portfolio_photos?: string[] | null;
+    };
+
     type MatchRow = {
       rank: number;
       is_primary: boolean;
       contractor_id: string;
-      profiles: {
-        company_name?: string;
-        full_name?: string;
-        avg_rating?: number;
-        review_count?: number;
-        response_time_h?: number;
-        jobs_completed?: number;
-        badge_licensed?: boolean;
-        badge_insured?: boolean;
-        badge_background_checked?: boolean;
-        has_portfolio?: boolean;
-      } | Array<{
-        company_name?: string;
-        full_name?: string;
-        avg_rating?: number;
-        review_count?: number;
-        response_time_h?: number;
-        jobs_completed?: number;
-        badge_licensed?: boolean;
-        badge_insured?: boolean;
-        badge_background_checked?: boolean;
-        has_portfolio?: boolean;
-      }>;
+      profiles: MatchProfile | MatchProfile[];
     };
 
     // Cast is necessary because Supabase's generated types for nested
@@ -135,12 +140,7 @@ export async function GET(
         review_count: p?.review_count ?? 0,
         response_time: formatResponseTime(responseHours),
         jobs_completed: p?.jobs_completed ?? 0,
-        badges: {
-          licensed: p?.badge_licensed ?? false,
-          insured: p?.badge_insured ?? false,
-          background_checked: p?.badge_background_checked ?? false,
-        },
-        has_portfolio: p?.has_portfolio ?? false,
+        has_portfolio: (p?.portfolio_photos?.length ?? 0) > 0,
       };
     });
 

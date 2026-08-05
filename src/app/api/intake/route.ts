@@ -450,7 +450,12 @@ export async function POST(req: NextRequest) {
         rating: m.rating > 0 ? m.rating : null,
         review_count: m.reviewCount > 0 ? m.reviewCount : null,
         response_time: m.estimatedResponseTime,
-        verified: m.verified,
+        /* Was `verified: !!(badge_licensed && badge_insured)` — two columns
+         * nothing writes, rendered to the homeowner as "Licensed &
+         * Insured". Now the state-roster cross-check, the only licensing
+         * check Henri performs. Henri holds no insurance data, so no
+         * insured flag is shipped. */
+        license_verified: m.licenseVerified,
         jobs_completed: m.jobsCompleted > 0 ? m.jobsCompleted : null,
         years_experience: m.yearsExperience,
         license_state: m.licenseState,
