@@ -165,17 +165,37 @@ export default function TermsOfServicePage() {
             <h2 className="font-heading font-normal text-2xl text-foreground">
               8. Contractor Licensing Requirements
             </h2>
+            {/* 2026-08-04 truthfulness pass. This section previously read
+              * "License status is verified daily by Henri. If your license is
+              * found to be expired, revoked, or otherwise invalid, lead
+              * delivery to your account will be paused immediately..." — a
+              * contractual representation of two behaviours that do not
+              * exist in the codebase: no licensing board is contacted for any
+              * state, and no lead-delivery path gates on license status.
+              * Rewritten to describe the roster check that does run at signup
+              * and to place the maintenance obligation on the contractor,
+              * while preserving Henri's right to suspend. */}
             <div className="mt-3 space-y-3">
               <p>
                 All contractor accounts must maintain a valid, active contractor
-                license. License status is verified daily by Henri. If your
-                license is found to be expired, revoked, or otherwise invalid,
-                lead delivery to your account will be paused immediately until a
-                valid license is restored.
+                license for every jurisdiction in which they operate. At signup,
+                Henri checks the license number you provide against the public
+                license roster it holds for that state where one is available;
+                where no roster is available, the license is recorded for manual
+                review. This check is a convenience, not a guarantee, and Henri
+                does not represent that it continuously monitors the status of
+                your license.
+              </p>
+              <p>
+                Keeping your license valid and current is your responsibility.
+                You must notify Henri promptly if your license lapses, is
+                suspended, or is revoked. Henri may suspend lead delivery or
+                terminate your account if it becomes aware that your license is
+                no longer valid.
               </p>
               <p>
                 Henri is not responsible for any business losses resulting from
-                paused leads due to invalid licensing.
+                suspended leads due to invalid licensing.
               </p>
             </div>
           </section>

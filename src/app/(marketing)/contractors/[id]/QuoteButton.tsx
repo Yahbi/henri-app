@@ -14,7 +14,7 @@ export function QuoteButton({
   return (
     <Link
       href={href}
-      className="inline-flex items-center justify-center rounded-lg bg-primary px-8 py-3.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90"
+      className="inline-flex items-center justify-center rounded-lg bg-cta px-8 py-3.5 text-sm font-semibold text-cta-foreground shadow-sm transition-colors hover:bg-primary/90"
     >
       Request a Quote
     </Link>

@@ -73,6 +73,19 @@ export function LeadDetailDrawer({
     maxHeightRatio: MAX_HEIGHT_RATIO,
   });
 
+  /* ── Escape closes the drawer ──
+   * The drawer is `role="dialog" aria-modal="true"` and wrapped in a
+   * FocusTrap that only cycles Tab, so before this a keyboard user who
+   * entered the drawer had no way out except finding the X button. */
+  useEffect(() => {
+    if (!lead) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [lead, onClose]);
+
   /* ── Property enrichment ── */
   const { data: enrichment, isLoading: enrichLoading } = useEnrichment(
     lead
@@ -96,7 +109,7 @@ export function LeadDetailDrawer({
    * This is independent of the scorer's `permit_history` JSON, which
    * can lag behind fresh ingests — the drawer always shows the latest
    * DB state, not a pre-computed rollup. */
-  const { permits: permitHistory, isLoading: historyLoading } = usePermitHistory(
+  const { permits: permitHistory, isLoading: historyLoading, error: historyError } = usePermitHistory(
     lead
       ? {
           address: lead.addr,
@@ -191,6 +204,15 @@ export function LeadDetailDrawer({
         onHidden={() => {
           addHidden(lead.id);
           onClose();
+          // Hiding removes the originating LeadCard from the virtual list,
+          // so FocusTrap's restore target is already detached and focus
+          // would land on <body>. Park it on the leads list container
+          // instead (tabIndex={-1} in LeadsPanel's VirtualizedLeadList).
+          requestAnimationFrame(() => {
+            document
+              .querySelector<HTMLElement>("[data-leads-scroll]")
+              ?.focus();
+          });
         }}
       />
 
@@ -443,7 +465,13 @@ export function LeadDetailDrawer({
           <PropertyContextSection data={contextData} isLoading={contextLoading} />
 
           {/* ── Permit History at this Property ── */}
-          {(historyLoading || permitHistory.length > 0) && (
+          {historyError ? (
+            /* A fetch failure used to make the whole section vanish, which
+             * is indistinguishable from "this property has no prior work". */
+            <p role="alert" className="text-[11px] text-destructive">
+              Couldn&apos;t load this property&apos;s permit history.
+            </p>
+          ) : (historyLoading || permitHistory.length > 0) && (
             <PermitHistorySection
               history={permitHistory}
               currentPermitNumber={lead.permitNumber}
@@ -458,6 +486,9 @@ export function LeadDetailDrawer({
           lead={lead}
           enrichment={enrichment}
           enrichLoading={enrichLoading}
+          /* Same resolution order the PermitTimeline panel above uses, so
+           * the two can't disagree about the same permit. */
+          permitStatus={lead.permitStatus ?? fetchedPermit?.status ?? null}
         />
       </div>
     </div>

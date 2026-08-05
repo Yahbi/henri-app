@@ -95,14 +95,16 @@ function StatCardSkeleton() {
 }
 
 function TableRowSkeleton() {
-  // 11 cells to match the enriched table (address, owner, trade, permit#,
-  // permit value, year built, home sqft, assessed, score, status, date).
+  // 10 cells to match the enriched table (address, owner, trade, permit
+  // value, year built, home sqft, assessed, score, status, date). The
+  // "Permit #" column was dropped 2026-08-04: leads.permit_id is a uuid FK
+  // to permits(id), so the column rendered a raw UUID under a human-facing
+  // header — the Jobs board removed the same display on 2026-06-10.
   return (
     <tr className="border-b border-border last:border-b-0">
       <td className="px-4 py-3"><Skeleton className="h-4 w-40" /></td>
       <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
       <td className="px-4 py-3"><Skeleton className="h-4 w-16" /></td>
-      <td className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
       <td className="px-4 py-3"><Skeleton className="h-4 w-16" /></td>
       <td className="px-4 py-3"><Skeleton className="h-4 w-12" /></td>
       <td className="px-4 py-3"><Skeleton className="h-4 w-14" /></td>
@@ -158,6 +160,10 @@ export default function PermitsPage() {
 
     return result;
   }, [permits, tradeFilter, statusFilter, sortBy]);
+
+  // "Never silently drop rows" — how many permits the trade/status filters
+  // are currently holding back. Surfaced next to the Clear-filters button.
+  const hiddenByFilters = permits.length - filtered.length;
 
   // Mount-time reference so the 7-day window is stable across renders
   const [mountNow] = useState(() => Date.now());
@@ -274,15 +280,25 @@ export default function PermitsPage() {
         </select>
 
         {(tradeFilter !== "All" || statusFilter !== "all") && (
-          <button
-            onClick={() => {
-              setTradeFilter("All");
-              setStatusFilter("all");
-            }}
-            className="text-xs text-primary hover:underline"
-          >
-            Clear filters
-          </button>
+          <>
+            {/* Wedge rule: a filter that hides rows must always say how many
+             * it is holding back — never silently drop rows. */}
+            {hiddenByFilters > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {hiddenByFilters.toLocaleString()} permit
+                {hiddenByFilters === 1 ? "" : "s"} filtered out
+              </span>
+            )}
+            <button
+              onClick={() => {
+                setTradeFilter("All");
+                setStatusFilter("all");
+              }}
+              className="text-xs text-primary hover:underline"
+            >
+              Clear filters
+            </button>
+          </>
         )}
       </div>
 
@@ -295,7 +311,6 @@ export default function PermitsPage() {
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Address</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Owner</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Trade</th>
-                <th className="text-left px-4 py-2 text-muted-foreground font-medium">Permit #</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Permit value</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Year built</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Home sqft</th>
@@ -340,7 +355,6 @@ export default function PermitsPage() {
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Address</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Owner</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Trade</th>
-                <th className="text-left px-4 py-2 text-muted-foreground font-medium">Permit #</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Permit value</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Year built</th>
                 <th className="text-left px-4 py-2 text-muted-foreground font-medium">Home sqft</th>
@@ -356,14 +370,24 @@ export default function PermitsPage() {
                   permit.owner_first || permit.owner_last
                     ? [permit.owner_first, permit.owner_last].filter(Boolean).join(" ")
                     : permit.owner_name ?? "Unknown";
-                const permitNumber = permit.permit_id || "--";
                 const dateStr = permit.permit_filed_date ?? permit.created_at;
 
                 return (
                   <tr
                     key={permit.id}
                     onClick={() => router.push(`/dashboard/leads/${permit.id}`)}
-                    className="border-b border-border last:border-b-0 hover:bg-bg-subtle transition-colors cursor-pointer"
+                    /* The row is the only way into the lead drawer from this
+                     * table, so it has to be reachable without a mouse. */
+                    role="link"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        router.push(`/dashboard/leads/${permit.id}`);
+                      }
+                    }}
+                    aria-label={`Open lead for ${permit.address}`}
+                    className="border-b border-border last:border-b-0 hover:bg-bg-subtle transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                   >
                     <td className="px-4 py-3">
                       <div>
@@ -377,9 +401,6 @@ export default function PermitsPage() {
                     </td>
                     <td className="px-4 py-3 text-foreground">{ownerName}</td>
                     <td className="px-4 py-3 text-muted-foreground">{permit.trade ?? "--"}</td>
-                    <td className="px-4 py-3 text-muted-foreground font-mono text-xs">
-                      {permitNumber}
-                    </td>
                     <td className="px-4 py-3 text-foreground">
                       {formatPermitValue(permit.permit_value)}
                     </td>

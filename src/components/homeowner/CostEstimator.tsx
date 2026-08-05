@@ -27,9 +27,13 @@ const qualityTiers = [
 
 interface CostEstimatorProps {
   initialZip?: string;
+  /** Opens the intake chat with this project's trade prefilled. The
+   *  "Get Quotes" CTA had no handler at all before 2026-08-04 — it was a
+   *  styled div that did nothing when clicked. */
+  onRequestQuotes?: (trade: string) => void;
 }
 
-export function CostEstimator({ initialZip = "" }: CostEstimatorProps) {
+export function CostEstimator({ initialZip = "", onRequestQuotes }: CostEstimatorProps) {
   const [projectType, setProjectType] = useState("kitchen");
   const [quality, setQuality] = useState("mid");
   const [zip, setZip] = useState(initialZip);
@@ -90,8 +94,9 @@ export function CostEstimator({ initialZip = "" }: CostEstimatorProps) {
 
       {/* Project Type */}
       <div>
-        <label className="text-sm font-medium text-foreground block mb-1.5">Project Type</label>
+        <label htmlFor="ce-project-type" className="text-sm font-medium text-foreground block mb-1.5">Project Type</label>
         <select
+          id="ce-project-type"
           value={projectType}
           onChange={(e) => { setProjectType(e.target.value); setShowResult(false); }}
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -104,8 +109,8 @@ export function CostEstimator({ initialZip = "" }: CostEstimatorProps) {
 
       {/* Quality Tier */}
       <div>
-        <label className="text-sm font-medium text-foreground block mb-1.5">Quality Level</label>
-        <div className="grid grid-cols-3 gap-2">
+        <p className="text-sm font-medium text-foreground block mb-1.5" id="ce-quality-label">Quality Level</p>
+        <div className="grid grid-cols-3 gap-2" role="group" aria-labelledby="ce-quality-label">
           {qualityTiers.map((q) => (
             <button
               key={q.value}
@@ -125,9 +130,11 @@ export function CostEstimator({ initialZip = "" }: CostEstimatorProps) {
 
       {/* ZIP Code */}
       <div>
-        <label className="text-sm font-medium text-foreground block mb-1.5">Your ZIP Code</label>
+        <label htmlFor="ce-zip" className="text-sm font-medium text-foreground block mb-1.5">Your ZIP Code</label>
         <input
+          id="ce-zip"
           type="text"
+          inputMode="numeric"
           value={zip}
           onChange={(e) => { setZip(e.target.value.replace(/\D/g, "").slice(0, 5)); setShowResult(false); }}
           placeholder="90278"
@@ -139,7 +146,7 @@ export function CostEstimator({ initialZip = "" }: CostEstimatorProps) {
       {/* Estimate Button */}
       <button
         onClick={() => setShowResult(true)}
-        className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:opacity-90 transition-opacity"
+        className="w-full rounded-lg bg-cta px-4 py-2.5 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity"
       >
         Get Estimate
       </button>
@@ -165,15 +172,23 @@ export function CostEstimator({ initialZip = "" }: CostEstimatorProps) {
               <p className="text-xl font-heading font-normal text-foreground">${estimate.high.toLocaleString()}</p>
             </div>
           </div>
+          {/* Truthfulness: with no local benchmark rows this is a static
+              national range times a coarse ZIP-prefix multiplier, not a
+              local figure. The old copy said "in your area" either way. */}
           <p className="text-[10px] text-muted-foreground text-center">
             {estimate.sampleSize > 0
-              ? `Based on ${estimate.sampleSize} projects in your area. ${tier.label} quality materials.`
-              : `Estimates based on ${tier.label.toLowerCase()} quality materials in your area. Actual costs may vary.`
+              ? `Based on ${estimate.sampleSize} local projects, ${tier.label.toLowerCase()} quality materials. Actual costs vary.`
+              : `Ballpark national range for ${tier.label.toLowerCase()} quality materials — we don't have local project data for this ZIP yet. Actual costs vary a lot by site.`
             }
           </p>
-          <button className="w-full rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary/5 transition-colors">
-            Get Quotes from Verified Contractors
-          </button>
+          {onRequestQuotes && (
+            <button
+              onClick={() => onRequestQuotes(project.trade)}
+              className="w-full rounded-lg border border-primary text-primary px-4 py-2 text-sm font-medium hover:bg-primary/5 transition-colors"
+            >
+              Get quotes from local contractors
+            </button>
+          )}
         </div>
       )}
     </div>

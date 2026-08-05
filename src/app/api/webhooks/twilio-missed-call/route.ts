@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
 import { wasProcessed, markProcessed } from "@/lib/webhooks/idempotency";
-import { createHmac } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 
 /**
  * /api/webhooks/twilio-missed-call — Phase 0a wedge #5 (speed-to-lead).
@@ -34,7 +34,12 @@ function validateTwilioSignature(
   const expected = createHmac("sha1", authToken)
     .update(url + paramStr)
     .digest("base64");
-  return expected === signature;
+  /* Constant-time compare — `===` short-circuits on the first differing
+   * byte and leaks the matching prefix through response timing. Matches
+   * the pattern already used in /api/webhooks/resend. */
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 interface TwilioWebhookBody {

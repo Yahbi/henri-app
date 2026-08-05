@@ -92,7 +92,23 @@ export default function NotificationsPage() {
     void refresh();
   }, [refresh]);
 
+  /** Shared non-2xx handler so no mutation can fail silently. */
+  async function reportFailure(res: Response, fallback: string) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    setError(body?.error ?? `${fallback} (HTTP ${res.status})`);
+  }
+
+  // A stage_change rule with no target stage matches nothing useful —
+  // the form labelled "To stage (required)" but never enforced it, so
+  // "Create rule" happily produced a dead `any → any` rule.
+  const createDisabled =
+    creatingBusy || (creatingKind === "stage_change" && !draftCriteria.to);
+
   async function createRule() {
+    if (creatingKind === "stage_change" && !draftCriteria.to) {
+      setError("Pick a target stage before creating a stage-transition rule.");
+      return;
+    }
     setCreatingBusy(true);
     setError(null);
     try {
@@ -103,46 +119,68 @@ export default function NotificationsPage() {
         body: JSON.stringify({ kind: creatingKind, criteria, enabled: true, channel: "email" }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? `HTTP ${res.status}`);
+        await reportFailure(res, "Couldn't create the rule");
         return;
       }
       setDraftCriteria({});
       await refresh();
+    } catch (err) {
+      // The try had no catch — a network throw here escaped as an
+      // unhandled rejection and the UI showed nothing at all.
+      setError(err instanceof Error ? err.message : "Couldn't create the rule.");
     } finally {
       setCreatingBusy(false);
     }
   }
 
   async function toggleEnabled(rule: AlertRule, next: boolean) {
-    const res = await fetch(`/api/alerts/rules?id=${rule.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { error?: string } | null;
-      setError(body?.error ?? `HTTP ${res.status}`);
-      return;
+    try {
+      const res = await fetch(`/api/alerts/rules?id=${rule.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) {
+        await reportFailure(res, "Couldn't update the rule");
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't update the rule.");
     }
-    await refresh();
   }
 
   async function changeChannel(rule: AlertRule, channel: AlertRule["channel"]) {
-    const res = await fetch(`/api/alerts/rules?id=${rule.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel }),
-    });
-    if (!res.ok) return;
-    await refresh();
+    try {
+      const res = await fetch(`/api/alerts/rules?id=${rule.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel }),
+      });
+      // Previously `if (!res.ok) return;` — the select snapped back to
+      // its old value on the next refresh with no explanation.
+      if (!res.ok) {
+        await reportFailure(res, "Couldn't change the channel");
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't change the channel.");
+    }
   }
 
   async function deleteRule(rule: AlertRule) {
     if (!window.confirm("Delete this alert rule? This can't be undone.")) return;
-    const res = await fetch(`/api/alerts/rules?id=${rule.id}`, { method: "DELETE" });
-    if (!res.ok) return;
-    await refresh();
+    try {
+      const res = await fetch(`/api/alerts/rules?id=${rule.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        await reportFailure(res, "Couldn't delete the rule");
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't delete the rule.");
+    }
   }
 
   return (
@@ -160,9 +198,17 @@ export default function NotificationsPage() {
             <Bell className="inline-block h-5 w-5 mr-2 -mt-1 text-primary" />
             Alerts
           </h1>
+          {/* Honest timing. Homeowner-match rules genuinely fire on
+           * submit (the /api/intake handler evaluates inline). The
+           * permit-derived kinds are evaluated by the scoring run, and
+           * `dispatchAlertHits` suppresses a repeat fire of the same
+           * rule within 24h. The previous copy ("the moment", "real
+           * time") promised neither of those constraints. */}
           <p className="mt-1 text-sm text-muted-foreground">
-            Get an email or SMS the moment a new lead matches your criteria.
-            Fires in real time when leads are created or scored.
+            Email or SMS when a lead matches your criteria. Homeowner-match
+            rules fire as soon as the homeowner submits; permit-based rules
+            fire when the daily scoring run picks up new permits. Each rule
+            sends at most once every 24 hours.
           </p>
         </div>
         <button
@@ -175,7 +221,10 @@ export default function NotificationsPage() {
       </header>
 
       {error && (
-        <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <div
+          role="alert"
+          className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+        >
           {error}
         </div>
       )}
@@ -217,12 +266,16 @@ export default function NotificationsPage() {
           <button
             type="button"
             onClick={createRule}
-            disabled={creatingBusy}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+            disabled={createDisabled}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             <Plus className="h-3.5 w-3.5" />
             {creatingBusy ? "Creating…" : "Create rule"}
           </button>
+          <p className="text-xs text-muted-foreground">
+            New rules start on the Email channel. Switch a rule to SMS below —
+            SMS needs a mobile number on your profile.
+          </p>
         </div>
       </section>
 
@@ -309,19 +362,23 @@ function CriteriaEditor({
   if (kind === "high_score") {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Minimum score (0-100)" placeholder="75">
+        <Field htmlFor="alert-min-score" label="Minimum score (0-100)">
           <input
+            id="alert-min-score"
             type="number"
             min={0}
             max={100}
+            placeholder="75"
             value={draft.min_score ?? ""}
             onChange={(e) => set("min_score", e.target.value)}
             className="w-full text-sm rounded-lg border border-border bg-card px-3 py-2"
           />
         </Field>
-        <Field label="Trades (comma-separated; blank = any)" placeholder="roofing, hvac">
+        <Field htmlFor="alert-trades" label="Trades (comma-separated; blank = any)">
           <input
+            id="alert-trades"
             type="text"
+            placeholder="roofing, hvac"
             value={draft.trades ?? ""}
             onChange={(e) => set("trades", e.target.value)}
             className="w-full text-sm rounded-lg border border-border bg-card px-3 py-2"
@@ -332,9 +389,11 @@ function CriteriaEditor({
   }
   if (kind === "permit_no_contractor") {
     return (
-      <Field label="ZIP (blank = any in your territory)" placeholder="06106">
+      <Field htmlFor="alert-zip" label="ZIP (blank = any in your territory)">
         <input
+          id="alert-zip"
           type="text"
+          placeholder="06106"
           value={draft.zip ?? ""}
           onChange={(e) => set("zip", e.target.value)}
           className="w-full text-sm rounded-lg border border-border bg-card px-3 py-2"
@@ -344,9 +403,11 @@ function CriteriaEditor({
   }
   if (kind === "homeowner_match") {
     return (
-      <Field label="Trades (comma-separated; blank = any)" placeholder="adu, roofing">
+      <Field htmlFor="alert-ho-trades" label="Trades (comma-separated; blank = any)">
         <input
+          id="alert-ho-trades"
           type="text"
+          placeholder="adu, roofing"
           value={draft.trades ?? ""}
           onChange={(e) => set("trades", e.target.value)}
           className="w-full text-sm rounded-lg border border-border bg-card px-3 py-2"
@@ -357,8 +418,9 @@ function CriteriaEditor({
   // stage_change
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <Field label="From stage (optional)" placeholder="any">
+      <Field htmlFor="alert-stage-from" label="From stage (optional)">
         <select
+          id="alert-stage-from"
           value={draft.from ?? ""}
           onChange={(e) => set("from", e.target.value)}
           className="w-full text-sm rounded-lg border border-border bg-card px-3 py-2"
@@ -369,8 +431,11 @@ function CriteriaEditor({
           ))}
         </select>
       </Field>
-      <Field label="To stage (required)" placeholder="permit_filed_no_contractor">
+      <Field htmlFor="alert-stage-to" label="To stage (required)">
         <select
+          id="alert-stage-to"
+          required
+          aria-required="true"
           value={draft.to ?? ""}
           onChange={(e) => set("to", e.target.value)}
           className="w-full text-sm rounded-lg border border-border bg-card px-3 py-2"
@@ -387,16 +452,18 @@ function CriteriaEditor({
 
 function Field({
   label,
+  htmlFor,
   children,
-  placeholder: _placeholder,
 }: {
   label: string;
+  htmlFor: string;
   children: React.ReactNode;
-  placeholder?: string;
 }) {
   return (
     <div>
-      <label className="block text-xs text-muted-foreground mb-1">{label}</label>
+      <label htmlFor={htmlFor} className="block text-xs text-muted-foreground mb-1">
+        {label}
+      </label>
       {children}
     </div>
   );

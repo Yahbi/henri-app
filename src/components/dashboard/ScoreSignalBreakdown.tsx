@@ -60,7 +60,14 @@ function SignalRow({ row }: { row: ScoreSignalContribution }) {
       <div className="w-[110px] shrink-0 text-muted-foreground truncate" title={row.label}>
         {row.label}
       </div>
-      <div className="flex-1 h-1.5 rounded-full bg-bg-subtle overflow-hidden">
+      <div
+        className="flex-1 h-1.5 rounded-full bg-bg-subtle overflow-hidden"
+        role="progressbar"
+        aria-label={`${row.label} contribution`}
+        aria-valuenow={row.value}
+        aria-valuemin={0}
+        aria-valuemax={row.weight}
+      >
         <div
           className={cn("h-full rounded-full transition-all", barTone)}
           style={{ width: `${pct}%` }}
@@ -70,7 +77,10 @@ function SignalRow({ row }: { row: ScoreSignalContribution }) {
         {row.value}
         <span className="text-muted-foreground font-normal">/{row.weight}</span>
       </div>
-      <div className="flex-1 min-w-0 text-[10.5px] text-muted-foreground truncate" title={row.detail}>
+      {/* The "why this score" copy is the transparency promise (wedge #2),
+          so it wraps instead of truncating — the full text used to be
+          reachable only via a hover `title`. */}
+      <div className="flex-1 min-w-0 text-[10.5px] text-muted-foreground">
         {row.detail}
       </div>
     </div>

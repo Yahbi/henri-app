@@ -60,6 +60,14 @@ export function CascadePredictionPanel({
           </div>
         ))}
       </div>
+      {/* Never silently drop rows — the probability floor + top-N cap
+          together can hide most of the prediction set. */}
+      {predictions.length > visible.length && (
+        <p className="mt-2 text-[10px] text-muted-foreground">
+          {predictions.length - visible.length} lower-probability prediction
+          {predictions.length - visible.length === 1 ? "" : "s"} hidden
+        </p>
+      )}
     </div>
   );
 }

@@ -59,7 +59,7 @@ function SourceBar({ data, planPrice }: { data: { source: string; count: number 
 export default function ROIPage() {
   const { profile } = useUser();
   const { data: leadsRaw, isLoading: leadsLoading, error: leadsError, refetch: refetchLeads } = useLeads();
-  const { data: intel, isLoading: intelLoading } = useIntelligence();
+  const { data: intel, isLoading: intelLoading, error: intelError } = useIntelligence();
   const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
 
   const planPrice = profile?.plan ? (PLAN_PRICES[profile.plan] ?? 749) : 749;
@@ -179,7 +179,9 @@ export default function ROIPage() {
         ] as const).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
+            type="button"
             onClick={() => setTab(key)}
+            aria-pressed={tab === key}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
               tab === key
                 ? "bg-card text-foreground shadow-sm"
@@ -195,6 +197,20 @@ export default function ROIPage() {
       {/* ─── Henri Intelligence Tab ─── */}
       {tab === "intelligence" && (
         <>
+          {/* A failed intelligence fetch renders as "—" everywhere, which
+              is indistinguishable from a quiet month — say so instead. */}
+          {intelError && (
+            <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+              <p className="text-sm text-muted-foreground">
+                Couldn&apos;t load market intelligence &mdash; the figures below
+                may be incomplete.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => refetchLeads()}>
+                Retry
+              </Button>
+            </Card>
+          )}
+
           {/* Monthly Intel Report Card */}
           <Card className="border-primary/20 p-6 space-y-4">
             <div className="flex items-center gap-2">
@@ -463,8 +479,9 @@ export default function ROIPage() {
             <h2 className="text-lg font-heading font-normal text-foreground">Your Business Numbers</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground">Monthly Subscription</label>
+                <label htmlFor="roi-plan" className="text-sm font-medium text-foreground">Monthly Subscription</label>
                 <select
+                  id="roi-plan"
                   value={plan}
                   onChange={(e) => setPlan(Number(e.target.value))}
                   className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -476,18 +493,18 @@ export default function ROIPage() {
                 </select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground">Average Job Value ($)</label>
-                <input type="number" value={jobValue} onChange={(e) => setJobValue(Number(e.target.value))}
+                <label htmlFor="roi-job-value" className="text-sm font-medium text-foreground">Average Job Value ($)</label>
+                <input id="roi-job-value" type="number" value={jobValue} onChange={(e) => setJobValue(Number(e.target.value))}
                   className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground">Close Rate (%)</label>
-                <input type="number" value={closeRate} onChange={(e) => setCloseRate(Number(e.target.value))} min={0} max={100}
+                <label htmlFor="roi-close-rate" className="text-sm font-medium text-foreground">Close Rate (%)</label>
+                <input id="roi-close-rate" type="number" value={closeRate} onChange={(e) => setCloseRate(Number(e.target.value))} min={0} max={100}
                   className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground">Leads Per Month</label>
-                <input type="number" value={leadsPerMonth} onChange={(e) => setLeadsPerMonth(Number(e.target.value))} min={0}
+                <label htmlFor="roi-leads-per-month" className="text-sm font-medium text-foreground">Leads Per Month</label>
+                <input id="roi-leads-per-month" type="number" value={leadsPerMonth} onChange={(e) => setLeadsPerMonth(Number(e.target.value))} min={0}
                   className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
               </div>
             </div>

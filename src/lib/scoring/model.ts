@@ -459,6 +459,63 @@ function scoreQuakeBooster(signals: ScoringSignals, factors: string[]): number {
 }
 
 /**
+ * Re-apportion the component scores so they add up EXACTLY to the stored
+ * total after the stage modifier and the 100-point cap have been applied.
+ *
+ * Why this exists (audit 2026-08-04, wedge bullet #2 "Confidence is
+ * transparent"): the stage modifier and the cap are applied to the SUM,
+ * but the components were returned unscaled. `buildScoreSignalBreakdown`
+ * persists those unscaled components into `leads.score_signals`, and
+ * `ScoreSignalBreakdown.tsx` renders their sum next to the score circle —
+ * so the drawer showed a circle reading 44 beside rows adding to 46, and
+ * the 100-cap case diverged the same way whenever the boosters pushed the
+ * raw sum past 100. A contractor cannot verify a score whose own evidence
+ * doesn't add up.
+ *
+ * The stage modifier is a whole-lead confidence discount, so discounting
+ * every contribution proportionally is what it actually means. Largest-
+ * remainder apportionment guarantees the integers sum to `target` exactly
+ * (naive per-component rounding does not), and each part stays inside its
+ * design ceiling so `buildScoreSignalBreakdown`'s `Math.min(weight, raw)`
+ * clamp can never silently drop a point back out of the sum.
+ */
+function reconcileComponents(
+  parts: number[],
+  caps: number[],
+  target: number,
+  sum: number,
+): number[] {
+  if (sum === target) return parts;          // common case — nothing to do
+  if (sum <= 0 || target <= 0) return parts.map(() => 0);
+
+  const ratio = target / sum;
+  const scaled = parts.map((p, i) => Math.min(caps[i], p * ratio));
+  const out = scaled.map((s) => Math.floor(s));
+
+  // Hand the leftover whole points to the components with the biggest
+  // fractional part that still have headroom under their ceiling.
+  const byRemainder = scaled
+    .map((s, i) => ({ i, frac: s - Math.floor(s) }))
+    .sort((a, b) => b.frac - a.frac);
+
+  let remainder = target - out.reduce((n, v) => n + v, 0);
+  let progressed = true;
+  while (remainder > 0 && progressed) {
+    progressed = false;
+    for (const { i } of byRemainder) {
+      if (remainder <= 0) break;
+      if (out[i] < caps[i]) {
+        out[i] += 1;
+        remainder -= 1;
+        progressed = true;
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
  * Derive urgency tier from total score.
  */
 function deriveUrgency(total: number): Urgency {
@@ -550,21 +607,44 @@ export function calculateScore(
     factors.push(`Stage modifier applied (${sm.stage}, cap ${sm.cap})`);
   }
 
+  // Wedge bullet #2 — the "Why this score" rows in the drawer MUST add up
+  // to the number on the score circle. `total` above is authoritative;
+  // the components below are re-apportioned to match it exactly whenever
+  // the stage modifier or the 100-point cap moved the sum.
+  const [
+    freshnessOut,
+    valueOut,
+    contactOut,
+    demandOut,
+    engagementOut,
+    conversionOut,
+    stormOut,
+    lienOut,
+    nriOut,
+    nfipOut,
+    quakeOut,
+  ] = reconcileComponents(
+    [freshness, value, contact, demand, engagement, conversion, storm, lien, nri, nfip, quake],
+    [20, 20, 15, 15, 15, 15, 5, 3, 3, 2, 2],
+    total,
+    componentSum,
+  );
+
   const urgency = deriveUrgency(total);
 
   return {
     total,
-    freshness,
-    value,
-    contact,
-    demand,
-    engagement,
-    conversion,
-    storm,
-    lien,
-    nri,
-    nfip,
-    quake,
+    freshness: freshnessOut,
+    value: valueOut,
+    contact: contactOut,
+    demand: demandOut,
+    engagement: engagementOut,
+    conversion: conversionOut,
+    storm: stormOut,
+    lien: lienOut,
+    nri: nriOut,
+    nfip: nfipOut,
+    quake: quakeOut,
     urgency,
     factors,
   };

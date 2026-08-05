@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { MessageSquare, Clock, CheckCircle, User, Plus, Home, Wrench, Search, DollarSign, ChevronRight } from "lucide-react";
@@ -48,26 +48,65 @@ const tabs: { key: Tab; label: string; icon: typeof Home }[] = [
 
 /* ─── Page ─── */
 export default function HomeownerDashboard() {
-  const { user, profile } = useUser();
+  // The hook's own `loading` was previously discarded, and the effect
+  // below bailed on `!user` without ever clearing the local flag — so a
+  // client-side getUser() failure pinned the page on a skeleton forever
+  // with no message and no retry. useUser.ts:107 documents this exact
+  // footgun; the consumer reintroduced it with a second unguarded flag.
+  const { user, profile, loading: userLoading } = useUser();
   const [chatOpen, setChatOpen] = useState(false);
   const [intakes, setIntakes] = useState<Intake[]>([]);
   const [loading, setLoading] = useState(true);
+  // A dropped query error rendered "No projects yet — start your first
+  // project" to a homeowner who has active projects. A load failure must
+  // never be pixel-identical to genuine emptiness.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("projects");
+  // Prefills the intake chat when it's opened from a CTA that already
+  // knows the trade (Cost Estimator / maintenance task).
+  const [chatTrade, setChatTrade] = useState("");
+
+  const fetchIntakes = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setLoadError(null);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("homeowner_intakes")
+      .select("id, trade, status, henri_score, created_at, matched_contractor_id")
+      .eq("contact_email", user.email)
+      .order("created_at", { ascending: false });
+    if (error) {
+      setLoadError(error.message || "Couldn't load your projects.");
+      setLoading(false);
+      return;
+    }
+    setIntakes(data ?? []);
+    setLoading(false);
+  }, [user]);
 
   useEffect(() => {
-    if (!user) return;
-    const fetchIntakes = async () => {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("homeowner_intakes")
-        .select("id, trade, status, henri_score, created_at, matched_contractor_id")
-        .eq("contact_email", user.email)
-        .order("created_at", { ascending: false });
-      setIntakes(data ?? []);
+    let cancelled = false;
+    if (userLoading) return;
+    if (!user) {
+      // Auth resolved with no user — stop the skeleton instead of
+      // spinning forever.
       setLoading(false);
+      return;
+    }
+    void (async () => {
+      await fetchIntakes();
+      if (cancelled) return;
+    })();
+    return () => {
+      cancelled = true;
     };
-    fetchIntakes();
-  }, [user]);
+  }, [user, userLoading, fetchIntakes]);
+
+  const openChatFor = (trade: string) => {
+    setChatTrade(trade);
+    setChatOpen(true);
+  };
 
   const firstName = profile?.full_name?.split(" ")[0] ?? null;
   const greeting = firstName ? `Welcome, ${firstName}` : "Welcome back";
@@ -88,7 +127,7 @@ export default function HomeownerDashboard() {
           </div>
           <button
             onClick={() => setChatOpen(true)}
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
+            className="flex items-center gap-2 rounded-lg bg-cta px-4 py-2.5 text-sm font-medium text-cta-foreground shadow-sm transition-opacity hover:opacity-90"
           >
             <Plus className="h-4 w-4" />
             New Project
@@ -96,10 +135,18 @@ export default function HomeownerDashboard() {
         </div>
 
         {/* Tab navigation */}
-        <div className="flex gap-1 p-1 rounded-lg bg-bg-subtle mb-6 overflow-x-auto">
+        <div
+          role="tablist"
+          aria-label="Homeowner sections"
+          className="flex gap-1 p-1 rounded-lg bg-bg-subtle mb-6 overflow-x-auto"
+        >
           {tabs.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
+              role="tab"
+              id={`ho-tab-${key}`}
+              aria-selected={activeTab === key}
+              aria-controls={`ho-panel-${key}`}
               onClick={() => setActiveTab(key)}
               className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors shrink-0 ${
                 activeTab === key
@@ -107,7 +154,7 @@ export default function HomeownerDashboard() {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Icon className="h-3.5 w-3.5" />
+              <Icon className="h-3.5 w-3.5" aria-hidden="true" />
               {label}
             </button>
           ))}
@@ -115,7 +162,7 @@ export default function HomeownerDashboard() {
 
         {/* ─── My Projects Tab ─── */}
         {activeTab === "projects" && (
-          <div>
+          <div role="tabpanel" id="ho-panel-projects" aria-labelledby="ho-tab-projects">
             <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               My Projects
             </h2>
@@ -125,6 +172,45 @@ export default function HomeownerDashboard() {
                 {[1, 2].map((i) => (
                   <div key={i} className="h-20 animate-pulse rounded-xl border border-border bg-card" />
                 ))}
+              </div>
+            ) : loadError ? (
+              <div
+                role="alert"
+                className="rounded-xl border border-destructive/40 bg-destructive/5 p-5 text-sm"
+              >
+                <p className="font-semibold text-destructive">
+                  Couldn&apos;t load your projects
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  This is <strong className="text-foreground">not</strong> an
+                  empty account — any projects you submitted are still saved.{" "}
+                  {loadError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void fetchIntakes()}
+                  className="mt-3 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground transition-opacity hover:opacity-90"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : !user ? (
+              <div
+                role="status"
+                className="rounded-xl border border-dashed border-border bg-card px-6 py-10 text-center"
+              >
+                <p className="text-sm font-medium text-foreground">
+                  We couldn&apos;t confirm your session
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Sign in again to see your projects.
+                </p>
+                <Link
+                  href="/login?redirect=/homeowner"
+                  className="mt-4 inline-block rounded-lg bg-cta px-4 py-2 text-xs font-semibold text-cta-foreground transition-opacity hover:opacity-90"
+                >
+                  Sign in
+                </Link>
               </div>
             ) : intakes.length > 0 ? (
               <div className="space-y-3">
@@ -180,7 +266,7 @@ export default function HomeownerDashboard() {
                       key={s.n}
                       className="flex items-start gap-2 rounded-lg bg-bg-subtle p-3 text-xs"
                     >
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cta text-[10px] font-bold text-cta-foreground">
                         {s.n}
                       </span>
                       <span className="text-muted-foreground">{s.t}</span>
@@ -189,7 +275,7 @@ export default function HomeownerDashboard() {
                 </ol>
                 <button
                   onClick={() => setChatOpen(true)}
-                  className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                  className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-xs font-semibold text-cta-foreground transition-opacity hover:opacity-90"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Start your first project
@@ -200,18 +286,36 @@ export default function HomeownerDashboard() {
         )}
 
         {/* ─── Find Contractors Tab ─── */}
-        {activeTab === "contractors" && <ContractorList zip={userZip} />}
+        {activeTab === "contractors" && (
+          <div role="tabpanel" id="ho-panel-contractors" aria-labelledby="ho-tab-contractors">
+            <ContractorList zip={userZip} />
+          </div>
+        )}
 
         {/* ─── My Home Tab ─── */}
         {activeTab === "home" && (
-          <div className="space-y-6">
+          <div
+            role="tabpanel"
+            id="ho-panel-home"
+            aria-labelledby="ho-tab-home"
+            className="space-y-6"
+          >
             <PropertyTracker zip={userZip} />
-            <MaintenanceCalendar />
+            {/* "Book a Pro" on each maintenance task was a button with no
+                onClick — dead since it shipped. Route it into the intake
+                chat with the task's trade prefilled. */}
+            <MaintenanceCalendar onBookPro={openChatFor} />
           </div>
         )}
 
         {/* ─── Cost Estimator Tab ─── */}
-        {activeTab === "estimate" && <CostEstimator initialZip={userZip} />}
+        {activeTab === "estimate" && (
+          <div role="tabpanel" id="ho-panel-estimate" aria-labelledby="ho-tab-estimate">
+            {/* "Get Quotes from Verified Contractors" was also a dead
+                button with no handler. */}
+            <CostEstimator initialZip={userZip} onRequestQuotes={openChatFor} />
+          </div>
+        )}
 
         {/* Role-switch "I'm also a contractor" CTA moved to the top nav
             (src/app/(homeowner)/layout.tsx) as part of Phase 1.4 — it was
@@ -223,8 +327,15 @@ export default function HomeownerDashboard() {
       {chatOpen && (
         <ChatIntakeModal
           isOpen={chatOpen}
-          onClose={() => setChatOpen(false)}
+          onClose={() => {
+            setChatOpen(false);
+            setChatTrade("");
+            // A new intake may have just been created — refresh so the
+            // projects list reflects it without a manual reload.
+            void fetchIntakes();
+          }}
           initialZip={userZip}
+          initialTrade={chatTrade}
         />
       )}
     </>

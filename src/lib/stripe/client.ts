@@ -22,12 +22,19 @@ export function getStripe() {
   });
 }
 
+export interface CheckoutSessionOptions {
+  /** Omit the 24-hour trial — set when this customer already consumed one.
+   *  Without it every repeat checkout mints another free day. */
+  skipTrial?: boolean;
+}
+
 export async function createCheckoutSession(
   priceId: string,
   customerId: string,
   successUrl: string,
   cancelUrl: string,
-  metadata?: Record<string, string>
+  metadata?: Record<string, string>,
+  options?: CheckoutSessionOptions
 ): Promise<Stripe.Checkout.Session> {
   const stripe = getStripe();
   const session = await stripe.checkout.sessions.create({
@@ -46,9 +53,10 @@ export async function createCheckoutSession(
     metadata: metadata ?? {},
     // 24-hour free trial per the pricing page ("24-hour free trial, credit
     // card required"). Stripe enforces the card on file at checkout and
-    // only charges after the trial elapses.
+    // only charges after the trial elapses. The trial is per-account, not
+    // per-checkout: callers pass `skipTrial` once the customer has had one.
     subscription_data: {
-      trial_period_days: 1,
+      ...(options?.skipTrial ? {} : { trial_period_days: 1 }),
       metadata: metadata ?? {},
     },
   });

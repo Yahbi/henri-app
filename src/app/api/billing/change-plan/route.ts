@@ -21,8 +21,12 @@ import { requireContractor } from "@/lib/auth/requireContractor";
  * — same policy applies to plan downgrades.
  *
  * Implementation: uses Stripe Subscription Schedules — creates a schedule
- * with two phases: the current plan through the end of the current cycle,
- * then the new plan afterwards. No proration, no immediate charge.
+ * from the live subscription with two phases: the current plan through the
+ * end of the current cycle, then the new plan afterwards. No proration, no
+ * immediate charge, and the current entitlement is retained until the
+ * boundary. (Before 2026-08-04 this comment described behaviour the code
+ * did not have — the branch swapped the price synchronously, so a
+ * "scheduled" downgrade took effect on click with no refund.)
  *
  * For upgrades (higher tier), the old code path at /api/checkout still
  * applies — upgrades SHOULD take effect immediately so the contractor
@@ -101,16 +105,55 @@ export async function POST(req: NextRequest) {
       Math.floor(Date.now() / 1000) + 30 * 86400;
 
     if (isDowngrade) {
-      // Per CLAUDE.md: downgrades take effect at next billing cycle only.
-      // Use proration_behavior:"none" + billing_cycle_anchor:"unchanged"
-      // so Stripe swaps the price but doesn't refund or re-charge until
-      // the next renewal. Also stash the pending plan on the profile so
-      // the billing pill can show "Founder from {date}" if desired.
-      await stripe.subscriptions.update(activeSub.id, {
-        items: [{ id: firstItem.id, price: PLAN_PRICES[plan] }],
-        proration_behavior: "none",
-        billing_cycle_anchor: "unchanged",
+      /* Per CLAUDE.md: downgrades take effect at next billing cycle only,
+       * and there are no refunds — so the deferral has to be real.
+       *
+       * 2026-08-04 audit: this branch previously called
+       * `stripe.subscriptions.update({ items: [{ price: <lower> }] })`.
+       * That mutates the live subscription immediately —
+       * `proration_behavior:"none"` only suppresses proration line items and
+       * `billing_cycle_anchor:"unchanged"` only preserves the renewal date;
+       * neither defers the swap. Stripe then emitted
+       * customer.subscription.updated carrying the lower price and the
+       * webhook wrote the downgrade at once. A Pro contractor who had
+       * already paid $1,499 for the cycle dropped from a 12-ZIP to a 3-ZIP
+       * entitlement the instant they clicked Continue (and an Enterprise
+       * downgrade additionally lost all-trades visibility), with no credit
+       * — while the confirmation dialog promised full access until the
+       * cycle end.
+       *
+       * A two-phase Subscription Schedule keeps the current price live
+       * through `periodEndUnix` and only then moves to the new one, so the
+       * webhook keeps resolving the current tier until the boundary. */
+      const schedule = await stripe.subscriptionSchedules.create({
+        from_subscription: activeSub.id,
       });
+
+      const currentPriceId = firstItem.price?.id;
+      if (!currentPriceId) {
+        return NextResponse.json(
+          { error: "Could not resolve current price — plan unchanged" },
+          { status: 500 },
+        );
+      }
+
+      await stripe.subscriptionSchedules.update(schedule.id, {
+        end_behavior: "release",
+        phases: [
+          {
+            items: [{ price: currentPriceId, quantity: 1 }],
+            start_date: schedule.phases[0]?.start_date,
+            end_date: periodEndUnix,
+            proration_behavior: "none",
+          },
+          {
+            items: [{ price: PLAN_PRICES[plan], quantity: 1 }],
+            start_date: periodEndUnix,
+            proration_behavior: "none",
+          },
+        ],
+      });
+
       await supabase
         .from("profiles")
         .update({

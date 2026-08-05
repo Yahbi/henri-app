@@ -11,9 +11,25 @@ export interface VerificationResult {
 }
 
 /**
- * Verify a contractor license against the appropriate state licensing board.
- * Currently supports automated verification for California (CSLB).
- * All other states are marked as "pending" for manual review.
+ * Format-check a contractor license number and record it for review.
+ *
+ * IMPORTANT — this module does NOT contact any state licensing board.
+ * Despite the name, no code path here makes an HTTP request: every
+ * branch returns `pending` (or `failed` on a malformed number). The
+ * only real cross-check Henri performs is the roster match at signup
+ * (`/api/onboarding/verify-license` against `state_license_rosters`),
+ * which covers the states we hold rosters for.
+ *
+ * This docstring is deliberately blunt because the previous version
+ * ("Verify a contractor license against the appropriate state licensing
+ * board... automated verification for California") read as if a live
+ * board check existed, and that belief propagated into user-facing copy
+ * across the marketing site, onboarding, compliance and the homeowner
+ * contractor card — all of which promised homeowners that contractors
+ * were "verified daily against the state board." None of it was true.
+ *
+ * If a real board integration is added later, update this docstring and
+ * the copy that depends on it in the same commit.
  */
 export async function verifyLicense(
   licenseNumber: string,
@@ -48,9 +64,8 @@ export async function verifyLicense(
 }
 
 /**
- * California CSLB verification.
- * In production, this would scrape or call the CSLB API.
- * For now, it validates the format and marks as pending.
+ * California CSLB — FORMAT CHECK ONLY. Makes no request to CSLB.
+ * Returns `pending` so the record is queued for review.
  */
 async function verifyCalifornia(licenseNumber: string): Promise<VerificationResult> {
   // CSLB license numbers are typically 6-7 digits
@@ -63,9 +78,11 @@ async function verifyCalifornia(licenseNumber: string): Promise<VerificationResu
     };
   }
 
-  // In production: call CSLB API or scrape their lookup page
-  // For now: accept the format and mark as pending verification
-  // The daily cron job will attempt real verification
+  // `raw_response` is surfaced to the contractor in the onboarding and
+  // compliance UIs, so its `note` must not promise work that no code
+  // performs. The previous value — "Full CSLB verification will complete
+  // within 24 hours." — described a board integration that does not
+  // exist and a cron that only calls back into this same function.
   return {
     verified: false,
     status: "pending",
@@ -73,20 +90,25 @@ async function verifyCalifornia(licenseNumber: string): Promise<VerificationResu
       state: "CA",
       board: "CSLB",
       license_number: cleaned,
-      note: "Format validated. Full CSLB verification will complete within 24 hours.",
+      note: "License number format accepted. Not yet checked against CSLB records.",
     },
   };
 }
 
 /**
- * Re-verify an existing license (used by daily cron).
- * Checks if the license is still active, not expired or revoked.
+ * Re-check an existing license (called by /api/cron/license-check).
+ *
+ * Delegates to `verifyLicense`, which contacts no board — so this
+ * CANNOT detect a license that was revoked or suspended after signup.
+ * The only status change it can surface today is expiry, and that comes
+ * from the `expiry_date` already stored on the row, not from upstream.
+ *
+ * Kept as a distinct export so the cron has a seam to swap in a real
+ * board client without touching its call site.
  */
 export async function recheckLicense(
   licenseNumber: string,
   state: string
 ): Promise<VerificationResult> {
-  // Same logic as initial verify — in production, this would
-  // call the real state API to check current status
   return verifyLicense(licenseNumber, state);
 }

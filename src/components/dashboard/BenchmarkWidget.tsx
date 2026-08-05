@@ -70,7 +70,7 @@ function MetricRow({ label, yours, peer, unit, lowerIsBetter = false }: {
 
 /* ─── Component ─── */
 export function BenchmarkWidget() {
-  const { data: leadsRaw, isLoading } = useLeads();
+  const { data: leadsRaw, isLoading, isError, refetch } = useLeads();
   const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
 
   // Mount-time reference so the 30-day window is stable across renders
@@ -110,10 +110,15 @@ export function BenchmarkWidget() {
     <div className="rounded-xl border border-border bg-card p-5 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">How You Compare</h3>
-        <div className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${currentTier.bgColor} ${currentTier.color}`}>
-          <Award className="h-3 w-3" />
-          {currentTier.name}
-        </div>
+        {/* Only claim a tier once it's computed from real leads — the
+            `?? 0` fallback otherwise asserted Bronze on an empty or
+            failed fetch. */}
+        {myStats && (
+          <div className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${currentTier.bgColor} ${currentTier.color}`}>
+            <Award className="h-3 w-3" aria-hidden="true" />
+            {currentTier.name}
+          </div>
+        )}
       </div>
 
       {isLoading ? (
@@ -179,9 +184,26 @@ export function BenchmarkWidget() {
             </div>
           )}
         </>
+      ) : isError ? (
+        /* A failed fetch used to render the same "Processing..." copy as
+         * an empty account — indistinguishable, and it never resolved. */
+        <div role="alert" className="py-4 text-center space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Couldn&apos;t load your performance data.
+          </p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="text-xs font-medium text-primary underline underline-offset-2 hover:opacity-80"
+          >
+            Retry
+          </button>
+        </div>
       ) : (
         <div className="py-4 text-center">
-          <p className="text-xs text-muted-foreground">Processing your performance data...</p>
+          <p className="text-xs text-muted-foreground">
+            No leads in the last 30 days yet — this fills in as leads land.
+          </p>
         </div>
       )}
     </div>

@@ -120,6 +120,10 @@ export function LeadsPanel({
   // One listener handles both popovers; attached only while one is open.
   const filterRef = useRef<HTMLDivElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
+  // Trigger refs so selecting an option (which unmounts the button that was
+  // just clicked) can hand focus back instead of dropping it to <body>.
+  const filterTriggerRef = useRef<HTMLButtonElement>(null);
+  const sortTriggerRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!filterOpen && !sortOpen) return;
     function handleOutside(e: MouseEvent) {
@@ -131,8 +135,25 @@ export function LeadsPanel({
         setSortOpen(false);
       }
     }
+    // Escape dismisses without committing a change — previously the only
+    // non-mouse way out of an open popover was to pick an option.
+    function handleKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (filterOpen) {
+        setFilterOpen(false);
+        filterTriggerRef.current?.focus();
+      }
+      if (sortOpen) {
+        setSortOpen(false);
+        sortTriggerRef.current?.focus();
+      }
+    }
     document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [filterOpen, sortOpen]);
   // Module 8 — show-hidden toggle. Defaults to false so hidden leads
   // disappear from the panel; the contractor can flip it on to audit
@@ -228,11 +249,13 @@ export function LeadsPanel({
     switch (sort) {
       case "score": result.sort((a, b) => b.score - a.score); break;
       case "newest": result.sort((a, b) => (a.permitAge ?? 0) - (b.permitAge ?? 0)); break;
-      case "value": {
-        const parseVal = (v: string) => parseFloat(v.replace(/[^0-9.]/g, "")) || 0;
-        result.sort((a, b) => parseVal(b.value) - parseVal(a.value));
+      // Sort on the numeric field, not the abbreviated display string.
+      // `value` is formatted by formatCurrency, which puts the magnitude in
+      // the SUFFIX ("$2.5M", "$450K"); stripping non-digits turned those
+      // into 2.5 and 450, so million-dollar permits sorted below $1k ones.
+      case "value":
+        result.sort((a, b) => (b.rawValue ?? 0) - (a.rawValue ?? 0));
         break;
-      }
     }
 
     return result;
@@ -345,7 +368,10 @@ export function LeadsPanel({
       <div className="px-4 py-3 border-b border-border shrink-0">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-semibold text-foreground">
-            Leads <span className="text-xs font-normal text-primary bg-primary-10 px-1.5 py-0.5 rounded-full ml-1">{capacityFiltered.length.toLocaleString()}</span>
+            {/* aria-live so filter / search changes announce the new count —
+             * the virtualized list only ever has ~26 rows in the DOM, so this
+             * badge is the only place the true total is conveyed. */}
+            Leads <span aria-live="polite" className="text-xs font-normal text-primary bg-primary-10 px-1.5 py-0.5 rounded-full ml-1">{capacityFiltered.length.toLocaleString()}</span>
             {totalGeocoded && totalGeocoded > leads.length && (
               <span className="ml-2 text-[11px] font-normal text-muted-foreground">
                 of {totalGeocoded.toLocaleString()}
@@ -390,8 +416,9 @@ export function LeadsPanel({
           <div className="relative" ref={filterRef}>
             <button
               type="button"
+              ref={filterTriggerRef}
               onClick={() => setFilterOpen(!filterOpen)}
-              aria-haspopup="listbox"
+              aria-haspopup="menu"
               aria-expanded={filterOpen}
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-accent transition-colors"
             >
@@ -403,11 +430,27 @@ export function LeadsPanel({
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </button>
             {filterOpen && (
-              <div className="absolute top-full left-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-lg z-30 py-1">
+              /* role="menu" + menuitemradio matches what's actually rendered
+               * (plain buttons). The trigger previously advertised a listbox
+               * that never existed, and no option carried a selected state. */
+              <div
+                role="menu"
+                aria-label="Filter leads"
+                className="absolute top-full left-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-lg z-30 py-1"
+              >
                 {FILTERS.map((f) => (
                   <button
                     key={f.value}
-                    onClick={() => { setFilter(f.value); setFilterOpen(false); }}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={f.value === filter}
+                    onClick={() => {
+                      setFilter(f.value);
+                      setFilterOpen(false);
+                      // The clicked button unmounts with the popover — hand
+                      // focus back to the trigger instead of losing it.
+                      filterTriggerRef.current?.focus();
+                    }}
                     className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors flex items-center gap-2"
                   >
                     {f.dot && <span className="w-2 h-2 rounded-full" style={{ background: f.dot }} />}
@@ -494,8 +537,9 @@ export function LeadsPanel({
           <div className="relative ml-auto" ref={sortRef}>
             <button
               type="button"
+              ref={sortTriggerRef}
               onClick={() => setSortOpen((o) => !o)}
-              aria-haspopup="listbox"
+              aria-haspopup="menu"
               aria-expanded={sortOpen}
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-accent transition-colors"
             >
@@ -503,12 +547,22 @@ export function LeadsPanel({
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </button>
             {sortOpen && (
-              <div className="absolute top-full right-0 mt-1 w-32 bg-card border border-border rounded-lg shadow-lg z-30 py-1">
+              <div
+                role="menu"
+                aria-label="Sort leads"
+                className="absolute top-full right-0 mt-1 w-32 bg-card border border-border rounded-lg shadow-lg z-30 py-1"
+              >
                 {SORT_OPTIONS.map((o) => (
                   <button
                     key={o.value}
                     type="button"
-                    onClick={() => { setSort(o.value); setSortOpen(false); }}
+                    role="menuitemradio"
+                    aria-checked={o.value === sort}
+                    onClick={() => {
+                      setSort(o.value);
+                      setSortOpen(false);
+                      sortTriggerRef.current?.focus();
+                    }}
                     className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors text-foreground"
                   >
                     {o.label}
@@ -616,22 +670,43 @@ function VirtualizedLeadList({ leads, activeLead, onSelectLead, emptyMessage, lo
 
   if (total === 0) {
     return (
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
+      <div
+      ref={scrollRef}
+      /* tabIndex + a stable hook so the drawer can hand focus back here
+       * after an action removes the originating card from the list
+       * (see LeadDetailDrawer's onHidden). */
+      tabIndex={-1}
+      data-leads-scroll
+      className="flex-1 overflow-y-auto scrollbar-thin"
+    >
         <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>
       </div>
     );
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
-      {/* Spacer to establish total scroll height */}
-      <div style={{ height: totalHeight, position: "relative" }}>
+    <div
+      ref={scrollRef}
+      /* tabIndex + a stable hook so the drawer can hand focus back here
+       * after an action removes the originating card from the list
+       * (see LeadDetailDrawer's onHidden). */
+      tabIndex={-1}
+      data-leads-scroll
+      className="flex-1 overflow-y-auto scrollbar-thin"
+    >
+      {/* Spacer to establish total scroll height. role="list" + per-row
+       * aria-setsize/aria-posinset so assistive tech can tell "item 14 of
+       * 2,000" even though only ~26 rows exist in the DOM at a time. */}
+      <div role="list" style={{ height: totalHeight, position: "relative" }}>
         {/* Only render the visible slice + overscan. Each card is absolutely
          * positioned by its row index × card height. */}
         {leads.slice(first, last).map((lead, i) => (
           <div
             key={lead.id}
             data-virtual-row
+            role="listitem"
+            aria-setsize={total}
+            aria-posinset={first + i + 1}
             style={{
               position: "absolute",
               top: (first + i) * CARD_HEIGHT,

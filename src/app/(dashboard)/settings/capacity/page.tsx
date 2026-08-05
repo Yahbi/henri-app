@@ -54,6 +54,18 @@ export default function CapacitySettingsPage() {
   }
 
   async function handleClear() {
+    // Destructive + server-side + no undo: `clear()` PUTs
+    // EMPTY_CAPACITY_PREFS to /api/capacity, overwriting all seven saved
+    // fields with nulls. Every other destructive action in the app
+    // confirms first (alert-rule delete, interview delete, intake
+    // withdraw); this one sat unguarded next to Save.
+    if (
+      !window.confirm(
+        "Clear all capacity preferences? Leads you'd normally filter out will start showing again. This can't be undone.",
+      )
+    ) {
+      return;
+    }
     setSaving(true);
     setError(null);
     setDraft(EMPTY_CAPACITY_PREFS);
@@ -173,7 +185,7 @@ export default function CapacitySettingsPage() {
                     className={cn(
                       "px-3 py-1.5 rounded-full text-xs border transition-colors",
                       on
-                        ? "bg-primary text-white border-primary"
+                        ? "bg-cta text-cta-foreground border-cta"
                         : "bg-background text-foreground border-border hover:bg-accent",
                     )}
                   >
@@ -198,7 +210,7 @@ export default function CapacitySettingsPage() {
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-cta text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               {justSaved && <Check className="h-3.5 w-3.5" />}
@@ -208,7 +220,7 @@ export default function CapacitySettingsPage() {
               type="button"
               onClick={handleClear}
               disabled={saving}
-              className="px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              className="px-3 py-2 rounded-lg text-sm text-destructive hover:bg-destructive/5 transition-colors disabled:opacity-50"
             >
               Clear all
             </button>

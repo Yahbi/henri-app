@@ -18,7 +18,9 @@ export function StormImpactPanel({
 }: {
   storm: StormPrediction | null;
 }) {
-  if (!storm || storm.storm_event_count_60d === 0) return null;
+  // `=== 0` missed null, which rendered "<strong>{null}</strong> storm
+  // events" — a blank number. Falsy-check covers both.
+  if (!storm || !storm.storm_event_count_60d) return null;
 
   return (
     <div className="rounded-xl border border-warm/30 bg-warm/5 p-4">

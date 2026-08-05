@@ -51,6 +51,18 @@ export function MarketingNav() {
     }
   }, [open]);
 
+  // Escape closes the drawer. It renders with role="dialog" and locks body
+  // scroll, so a keyboard user previously had no way out except tabbing to
+  // the hamburger — Escape is the expected exit for anything dialog-shaped.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   const isHomeownerSurface =
     pathname?.startsWith("/portal") || pathname?.startsWith("/homeowner");
 
@@ -101,7 +113,7 @@ export function MarketingNav() {
              * (56px) so there's still 6px of clearance top + bottom. */}
             <Link
               href={primaryCta.href}
-              className="hidden h-11 items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-white transition-opacity hover:opacity-90 md:inline-flex"
+              className="hidden h-11 items-center justify-center rounded-lg bg-cta px-5 text-sm font-semibold text-cta-foreground transition-opacity hover:opacity-90 md:inline-flex"
             >
               {primaryCta.label}
             </Link>
@@ -147,7 +159,7 @@ export function MarketingNav() {
           </Link>
           <Link
             href={primaryCta.href}
-            className="flex h-11 items-center justify-center rounded-lg bg-primary px-4 text-center text-base font-semibold text-white transition-opacity hover:opacity-90"
+            className="flex h-11 items-center justify-center rounded-lg bg-cta px-4 text-center text-base font-semibold text-cta-foreground transition-opacity hover:opacity-90"
           >
             {primaryCta.label}
           </Link>

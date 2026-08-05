@@ -13,8 +13,9 @@ import { logger } from "@/lib/logger";
  * Module 11 of the 18-module enhancement plan (2026-05-09 plan §9.13.D).
  *
  * Both actions optimistically toggle local state, then call the API
- * routes. On error the toggle reverts and a logger.warn fires (no
- * user-facing toast since these are tertiary actions).
+ * routes. On error the toggle reverts, a logger.warn fires, AND a short
+ * inline message renders under the buttons — a state that silently snaps
+ * back reads as a bug rather than a failure the contractor can retry.
  */
 
 interface LeadActionButtonsProps {
@@ -45,10 +46,17 @@ export function LeadActionButtons({
   const [saved, setSaved] = useState(initialSaved);
   const [hidden, setHidden] = useState(initialHidden);
   const [pending, startTransition] = useTransition();
+  /** Which action is in flight. A single shared `pending` flag used to grey
+   *  out BOTH buttons while only one had a spinner, so the other looked
+   *  dead for no visible reason. */
+  const [busy, setBusy] = useState<"save" | "hide" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const toggleSave = () => {
     const next = !saved;
     setSaved(next);
+    setBusy("save");
+    setActionError(null);
     startTransition(async () => {
       try {
         const res = await fetch(`/api/leads/${leadId}/save`, {
@@ -64,6 +72,11 @@ export function LeadActionButtons({
           error: e instanceof Error ? e.message : String(e),
         });
         setSaved(!next);  // revert
+        setActionError(
+          next ? "Couldn't save that lead — try again." : "Couldn't unsave — try again.",
+        );
+      } finally {
+        setBusy(null);
       }
     });
   };
@@ -71,6 +84,8 @@ export function LeadActionButtons({
   const toggleHide = () => {
     const next = !hidden;
     setHidden(next);
+    setBusy("hide");
+    setActionError(null);
     startTransition(async () => {
       try {
         const res = await fetch(`/api/leads/${leadId}/hide`, {
@@ -86,21 +101,34 @@ export function LeadActionButtons({
           error: e instanceof Error ? e.message : String(e),
         });
         setHidden(!next);
+        setActionError(
+          next ? "Couldn't hide that lead — try again." : "Couldn't unhide — try again.",
+        );
+      } finally {
+        setBusy(null);
       }
     });
   };
 
   return (
     <div className="absolute top-3 right-12 flex items-center gap-1 z-10">
+      {actionError && (
+        <span
+          role="alert"
+          className="mr-1 rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive"
+        >
+          {actionError}
+        </span>
+      )}
       <button
         onClick={toggleSave}
-        disabled={pending}
+        disabled={pending && busy === "save"}
         className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
         aria-label={saved ? "Unsave lead" : "Save lead"}
         aria-pressed={saved}
         title={saved ? "Saved · click to unsave" : "Save this lead"}
       >
-        {pending ? (
+        {pending && busy === "save" ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : saved ? (
           <BookmarkCheck className="h-4 w-4 text-primary" />
@@ -110,13 +138,17 @@ export function LeadActionButtons({
       </button>
       <button
         onClick={toggleHide}
-        disabled={pending}
+        disabled={pending && busy === "hide"}
         className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
         aria-label={hidden ? "Unhide lead" : "Hide lead"}
         aria-pressed={hidden}
         title={hidden ? "Hidden · click to unhide" : "Hide this lead"}
       >
-        <EyeOff className={`h-4 w-4 ${hidden ? "text-rose-600" : ""}`} />
+        {pending && busy === "hide" ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <EyeOff className={`h-4 w-4 ${hidden ? "text-rose-600" : ""}`} />
+        )}
       </button>
     </div>
   );

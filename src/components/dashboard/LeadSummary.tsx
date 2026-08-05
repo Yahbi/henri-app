@@ -52,8 +52,14 @@ export function LeadSummaryPanel({ leadId }: { leadId: string | null }) {
   const isLoading = generate.isPending && !result?.output;
   const hasOutput = !!result?.output;
 
-  // Hide entirely when we have nothing useful to show AND we're not loading
-  if (!isLoading && !hasOutput) return null;
+  // A generate that failed (mutation rejected, or the agent replied
+  // ok:false) used to unmount the panel silently — the skeleton simply
+  // vanished and the contractor was never told anything went wrong.
+  const failed =
+    !isLoading && !hasOutput && (generate.isError || result?.ok === false);
+
+  // Hide entirely only when there is genuinely nothing to report.
+  if (!isLoading && !hasOutput && !failed) return null;
 
   const onRegenerate = () => {
     if (!leadId) return;
@@ -74,7 +80,10 @@ export function LeadSummaryPanel({ leadId }: { leadId: string | null }) {
           <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary">
             AI draft
           </span>
-          {hasOutput && !generate.isPending && (
+          {/* Regenerate must be available on the FAILURE path too — it was
+              gated on hasOutput, i.e. hidden in exactly the case where it
+              is needed. */}
+          {!generate.isPending && (
             <button
               type="button"
               onClick={onRegenerate}
@@ -92,6 +101,20 @@ export function LeadSummaryPanel({ leadId }: { leadId: string | null }) {
           <div className="h-3 rounded bg-muted/40 animate-pulse" />
           <div className="h-3 rounded bg-muted/40 animate-pulse w-11/12" />
           <div className="h-3 rounded bg-muted/40 animate-pulse w-9/12" />
+        </div>
+      ) : failed ? (
+        <div role="alert" className="space-y-1.5">
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Couldn&apos;t generate a summary for this lead
+            {result?.errorCode ? ` (${result.errorCode})` : ""}.
+          </p>
+          <button
+            type="button"
+            onClick={onRegenerate}
+            className="text-xs font-medium text-primary underline underline-offset-2 hover:opacity-80"
+          >
+            Try again
+          </button>
         </div>
       ) : (
         <p className="text-sm leading-relaxed text-foreground">{result?.output}</p>

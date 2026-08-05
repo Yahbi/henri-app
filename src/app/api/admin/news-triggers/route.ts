@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isGodModeEmail } from "@/lib/auth/god-mode";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,10 +65,8 @@ export async function GET(request: NextRequest) {
   }
   const { data, count, error } = await q;
   if (error) {
-    return NextResponse.json(
-      { error: "query failed", detail: error.message },
-      { status: 500 },
-    );
+    logger.error("admin.news_triggers query failed", { message: error.message });
+    return NextResponse.json({ error: "Query failed" }, { status: 500 });
   }
 
   // Aggregate by domain + query_match for the histograms.

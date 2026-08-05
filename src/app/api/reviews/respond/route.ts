@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
 import { ReviewRespondBodySchema, parseBody } from "@/lib/schemas/api";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /**
  * POST /api/reviews/respond
@@ -19,16 +20,15 @@ import { ReviewRespondBodySchema, parseBody } from "@/lib/schemas/api";
  */
 export async function POST(req: NextRequest) {
   try {
-    const raw = await req.json();
+    const supabase = await createClient();
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const { user } = gate;
+
+    const raw = await req.json().catch(() => null);
     const parsed = parseBody(ReviewRespondBodySchema, raw);
     if (parsed.response) return parsed.response;
     const { review_id: reviewId, reply } = parsed.data;
-
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
 
     // Write the draft. We use upsert so re-submitting replaces the
     // previous draft rather than creating duplicates.

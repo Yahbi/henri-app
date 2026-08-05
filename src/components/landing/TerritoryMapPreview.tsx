@@ -1,119 +1,91 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { MapPin, ShieldCheck, Clock } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MapPin, ShieldCheck, Hash, Clock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import type { UsState } from "@/lib/stats/us-states";
 
 /*
- * Landing-page territory visualization.
+ * Landing-page coverage section.
  *
- * Previous version dropped the full contractor MapDashboard onto the
- * marketing page, which made the section look like an unfinished admin
- * tool (weather banner, overlay controls, style switcher). Founder
- * feedback: "doesn't look pro."
+ * HISTORY
+ * v1 dropped the full contractor MapDashboard onto the marketing page,
+ * which read as an unfinished admin tool. v2 replaced it with a
+ * hand-arranged grid of 20 Los Angeles ZIP tiles labelled "Active" and
+ * "Coming" — fast and pretty, but the ZIPs were invented and the
+ * Active/Coming split was decorative, so the section carried a caveat
+ * admitting the tiles were illustrative. A visitor asking "do you cover
+ * my area?" got a decoration.
  *
- * This replacement is a hand-crafted SVG grid of ZIP tiles showing
- * availability states (Open / 1 slot left / Claimed). No live map
- * library, no overlay controls, no tile requests — renders instantly,
- * reads honestly, and conveys "one contractor per trade per ZIP" at a
- * glance without needing the contractor workspace.
+ * v3 (2026-08-04) shows the real distribution: the top states by permit
+ * volume with their exact counts, sourced from the `landing_stats`
+ * cache (migration 00115). The bars are proportional to real numbers
+ * and every figure is a stored count, so the caveat is gone because the
+ * thing it was apologising for is gone.
  *
- * Truthfulness: stats below reflect live Supabase counts (audit
- * 2026-05-03):
- *   permits.total           = 1,416,065  (rounded down to "1.4M+")
- *   permit_sources.states   = 38         (kept at "30+" — under-promise)
- *   leads.total             = 231,110
- * Always rounded DOWN. Never invent metrics.
+ * Why a cache: the underlying `GROUP BY state` is a 37s parallel
+ * sequential scan against PostgREST's 8s statement_timeout — measured,
+ * not estimated. It cannot be served from a request path, which is why
+ * this section shipped with invented tiles for three months.
+ *
+ * Graceful degrade: with no histogram (cache row missing, or a build
+ * without Supabase secrets) the ranked list is omitted entirely and the
+ * section falls back to the stat cards. It never renders zeros or
+ * placeholder rows.
+ *
+ * Truthfulness: no number here is authored. Counts come from the
+ * database; labels are rounded DOWN per CLAUDE.md.
  */
-
-type TileStatus = "active" | "coming";
-
-interface Tile {
-  zip: string;
-  status: TileStatus;
-  /* Grid position for visual variety. */
-  col: number;
-  row: number;
-}
-
-/* Hand-arranged grid that evokes a city gridmap without pretending to
-   be a real one. ZIPs are purely illustrative — not tied to live DB
-   state.
-   2026-04-30 truthfulness pass: switched the "claimed / 1 slot left /
-   open" availability framing to "active / coming" coverage framing.
-   The earlier framing implied a real per-ZIP exclusivity scoreboard
-   (which doesn't exist — there's no UI lock acquisition). The new
-   framing matches what's actually true: Henri's permit catalog covers
-   some ZIPs today and is rolling out to more. */
-const TILES: Tile[] = [
-  { zip: "90028", status: "active",   col: 0, row: 0 },
-  { zip: "90038", status: "active",   col: 1, row: 0 },
-  { zip: "90046", status: "coming",   col: 2, row: 0 },
-  { zip: "90069", status: "active",   col: 3, row: 0 },
-  { zip: "90077", status: "coming",   col: 4, row: 0 },
-  { zip: "90024", status: "active",   col: 0, row: 1 },
-  { zip: "90025", status: "coming",   col: 1, row: 1 },
-  { zip: "90034", status: "active",   col: 2, row: 1 },
-  { zip: "90035", status: "coming",   col: 3, row: 1 },
-  { zip: "90064", status: "active",   col: 4, row: 1 },
-  { zip: "90403", status: "coming",   col: 0, row: 2 },
-  { zip: "90404", status: "active",   col: 1, row: 2 },
-  { zip: "90405", status: "active",   col: 2, row: 2 },
-  { zip: "90272", status: "coming",   col: 3, row: 2 },
-  { zip: "90291", status: "coming",   col: 4, row: 2 },
-  { zip: "90066", status: "active",   col: 0, row: 3 },
-  { zip: "90230", status: "coming",   col: 1, row: 3 },
-  { zip: "90232", status: "active",   col: 2, row: 3 },
-  { zip: "90094", status: "coming",   col: 3, row: 3 },
-  { zip: "90292", status: "active",   col: 4, row: 3 },
-];
-
-const STATUS_STYLES: Record<TileStatus, {
-  fill: string;
-  border: string;
-  label: string;
-  dot: string;
-}> = {
-  active: {
-    fill: "bg-primary/10",
-    border: "border-primary/30",
-    label: "Active",
-    dot: "bg-primary",
-  },
-  coming: {
-    fill: "bg-success/10",
-    border: "border-success/30",
-    label: "Coming",
-    dot: "bg-success",
-  },
-};
-
-/* Stats match the Hero's conservative framing so numbers never
-   disagree across the landing page. "30+" reflects the live DB count
-   (audit 2026-04-30: 35 distinct US states with at least one ingested
-   permit); kept conservative to stay defensible.
-
-   2026-04-30: dropped the "14-day · Exclusive window" stat. The lock
-   infrastructure exists in DB but no UI path acquires a lock, so the
-   claim was overclaiming. See plan file
-   ~/.claude/plans/whats-the-14-days-purring-papert.md.
-
-   2026-05-07: stat numbers come in as props from `getLandingStats()`
-   so they auto-adjust as the database grows. The earlier hardcoded
-   "1.4M+" / "30+" went stale within a week of writing. */
 
 interface TerritoryMapPreviewProps {
   permitsLabel: string;
   activeStatesLabel: string;
+  /** Live per-state permit counts, keyed by 2-letter code. */
+  statePermits?: Readonly<Partial<Record<UsState, number>>>;
+  /** "18,000+" — empty/absent when the coverage cache is unavailable. */
+  zipsCoveredLabel?: string;
 }
 
-export function TerritoryMapPreview({ permitsLabel, activeStatesLabel }: TerritoryMapPreviewProps) {
+/** How many states to rank. Enough to show real breadth, few enough to scan. */
+const TOP_N = 12;
+
+const nf = new Intl.NumberFormat("en-US");
+
+export function TerritoryMapPreview({
+  permitsLabel,
+  activeStatesLabel,
+  statePermits,
+  zipsCoveredLabel,
+}: TerritoryMapPreviewProps) {
+  const ranked = useMemo(() => {
+    const entries = Object.entries(statePermits ?? {}) as [UsState, number][];
+    const sorted = entries
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, TOP_N);
+    // Bars are scaled against the leader, not against the total, so the
+    // long tail stays visible instead of collapsing to a hairline.
+    const max = sorted[0]?.[1] ?? 0;
+    return sorted.map(([state, count]) => ({
+      state,
+      count,
+      pct: max > 0 ? Math.max(2, Math.round((count / max) * 100)) : 0,
+    }));
+  }, [statePermits]);
+
+  const totalStates = Object.keys(statePermits ?? {}).length;
+  const remaining = Math.max(0, totalStates - ranked.length);
+
   const STATS = [
-    { icon: MapPin,      value: permitsLabel,       label: "Permits tracked" },
-    { icon: ShieldCheck, value: activeStatesLabel,  label: "States covered" },
-    { icon: Clock,       value: "Daily",            label: "Catalog refresh" },
-  ] as const;
-  /* Progressive reveal — tiles fade in sequentially on scroll into view.
+    { icon: MapPin, value: permitsLabel, label: "Permits tracked" },
+    { icon: ShieldCheck, value: activeStatesLabel, label: "States covered" },
+    ...(zipsCoveredLabel
+      ? [{ icon: Hash, value: zipsCoveredLabel, label: "ZIP codes with permits" }]
+      : []),
+    { icon: Clock, value: "Daily", label: "Catalog refresh" },
+  ];
+
+  /* Progressive reveal — rows fade in sequentially on scroll into view.
      Cheap effect, big visual payoff, no JS dep. */
   const sectionRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -145,68 +117,62 @@ export function TerritoryMapPreview({ permitsLabel, activeStatesLabel }: Territo
             Coverage that grows where you need it
           </h2>
           <p className="mt-4 text-lg text-muted-foreground">
-            Henri&apos;s permit catalog is live in major US metro areas
-            today and onboarding new jurisdictions weekly. ZIP codes
-            shown below are illustrative.
+            {ranked.length > 0
+              ? "Every number below is a live count from Henri's permit catalog, updated daily as new jurisdictions come online."
+              : "Henri's permit catalog is live in major US metro areas today and onboarding new jurisdictions weekly."}
           </p>
         </div>
 
-        {/* Territory grid — card-framed SVG-ish tile visualization */}
-        <Card variant="elevated" className="mt-12 overflow-hidden bg-gradient-to-br from-background to-bg-subtle border-border">
-          <CardContent className="p-8 sm:p-12">
-            <div className="flex flex-col items-center">
-              {/* Tile grid */}
-              <div
-                className="grid gap-3"
-                style={{
-                  gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-                  gridTemplateRows: "repeat(4, auto)",
-                }}
-                role="img"
-                aria-label="Illustrative grid of ZIP codes showing coverage states: Active and Coming. Real coverage varies by jurisdiction."
-              >
-                {TILES.map((tile, idx) => {
-                  const style = STATUS_STYLES[tile.status];
-                  /* Stagger the reveal by grid index so the whole thing
-                     washes in from top-left to bottom-right. */
-                  const delay = visible ? `${idx * 30}ms` : "0ms";
-                  return (
-                    <div
-                      key={tile.zip}
-                      className={`${style.fill} ${style.border} rounded-xl border px-4 py-5 text-left transition-all duration-500 ${
-                        visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
-                      }`}
-                      style={{ transitionDelay: delay }}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                          {style.label}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 font-mono text-lg font-medium tracking-tight text-foreground">
-                        {tile.zip}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+        {ranked.length > 0 && (
+          <Card
+            variant="elevated"
+            className="mt-12 overflow-hidden border-border bg-gradient-to-br from-background to-bg-subtle"
+          >
+            <CardContent className="p-8 sm:p-12">
+              <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Permits by state — top {ranked.length}
+              </h3>
 
-              {/* Legend */}
-              <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
-                {(Object.keys(STATUS_STYLES) as TileStatus[]).map((k) => (
-                  <div key={k} className="flex items-center gap-1.5">
-                    <span className={`h-2 w-2 rounded-full ${STATUS_STYLES[k].dot}`} />
-                    <span>{STATUS_STYLES[k].label}</span>
-                  </div>
+              <ol className="mt-6 space-y-3">
+                {ranked.map((row, idx) => (
+                  <li
+                    key={row.state}
+                    className={`flex items-center gap-4 transition-all duration-500 ${
+                      visible ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
+                    }`}
+                    style={{ transitionDelay: visible ? `${idx * 40}ms` : "0ms" }}
+                  >
+                    <span className="w-8 shrink-0 font-mono text-sm font-medium text-foreground">
+                      {row.state}
+                    </span>
+                    <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-foreground/5">
+                      <span
+                        className="block h-full rounded-full bg-primary transition-[width] duration-700 ease-out"
+                        style={{ width: visible ? `${row.pct}%` : "0%" }}
+                      />
+                    </span>
+                    <span className="w-24 shrink-0 text-right font-mono text-sm tabular-nums text-muted-foreground">
+                      {nf.format(row.count)}
+                    </span>
+                  </li>
                 ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+              </ol>
+
+              {remaining > 0 && (
+                <p className="mt-6 text-sm text-muted-foreground">
+                  Plus {remaining} more states with permits in the catalog.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stat cards — honest numbers only, per CLAUDE.md. */}
-        <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
+        <div
+          className={`mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 ${
+            STATS.length === 4 ? "lg:grid-cols-4" : "lg:grid-cols-3"
+          }`}
+        >
           {STATS.map((stat) => {
             const Icon = stat.icon;
             return (

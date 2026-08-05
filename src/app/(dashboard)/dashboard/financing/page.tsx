@@ -127,10 +127,11 @@ function FinancingPageInner() {
           <div className="space-y-4">
             {/* Project Amount */}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">
+              <label htmlFor="fin-amount" className="text-sm font-medium text-foreground">
                 Project Amount ($)
               </label>
               <input
+                id="fin-amount"
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(Number(e.target.value))}
@@ -141,10 +142,11 @@ function FinancingPageInner() {
 
             {/* Interest Rate */}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">
+              <label htmlFor="fin-rate" className="text-sm font-medium text-foreground">
                 Interest Rate (%)
               </label>
               <input
+                id="fin-rate"
                 type="number"
                 value={rate}
                 onChange={(e) => setRate(Number(e.target.value))}
@@ -157,10 +159,11 @@ function FinancingPageInner() {
 
             {/* Term */}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">
+              <label htmlFor="fin-term" className="text-sm font-medium text-foreground">
                 Term (months)
               </label>
               <select
+                id="fin-term"
                 value={term}
                 onChange={(e) => setTerm(Number(e.target.value))}
                 className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"

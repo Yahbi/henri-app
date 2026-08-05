@@ -103,6 +103,20 @@ async function handleCheckoutCompleted(
     return;
   }
 
+  /* Add-on sessions (e.g. the extra-ZIP subscription) carry no `plan` in
+   * metadata. Letting them through rewrote the profile's plan to the `?? "pro"`
+   * default AND repointed stripe_subscription_id at the add-on, orphaning the
+   * customer's real tier subscription — after which billing-sync re-stamped
+   * the wrong plan nightly. Add-ons must never touch plan or the pointer. */
+  if (session.metadata?.addon) {
+    logger.info("checkout.session.completed: add-on session, plan untouched", {
+      sessionId: session.id,
+      addon: session.metadata.addon,
+      userId,
+    });
+    return;
+  }
+
   // Determine plan + trial end from the subscription. Retrieve the
   // subscription so we capture `trial_end` — the TopBar billing pill and
   // the trial-ending-reminder cron both depend on profiles.trial_ends_at.
@@ -207,6 +221,20 @@ async function handleSubscriptionUpdated(
   if (status === "active" || status === "trialing") {
     // Subscription is healthy -- resolve plan from price
     const plan = resolvePlan(priceId);
+
+    /* Never coerce an unrecognized price to "free". `resolvePlan` returns
+     * "free" both for a genuine free account and for any price outside the
+     * four tier price IDs — including the extra-ZIP add-on. Writing that
+     * through zeroed a paying customer's ZIP cap while Stripe kept charging
+     * them. Log it and leave the plan alone so a misconfigured price ID
+     * surfaces rather than silently downgrading someone. */
+    if (plan === "free" && priceId) {
+      logger.warn(
+        "customer.subscription.updated: unrecognized price, plan left unchanged",
+        { customerId, priceId, subscriptionId: subscription.id },
+      );
+      return;
+    }
 
     // Build the update. If the incoming plan matches the profile's
     // `pending_plan` (i.e., a scheduled downgrade has landed), clear it.

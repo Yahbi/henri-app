@@ -25,7 +25,16 @@ export interface IntakeConfirmationInput {
   trade: string;
   zip: string;
   contractorName: string | null;
-  expectedContactLabel: string;
+  /**
+   * A MEASURED typical response time for the matched contractor, or null
+   * when we have no history for them.
+   *
+   * Null is the common case: `profiles.response_time_h` defaults to NULL
+   * and nothing populates it yet. Callers must pass null rather than a
+   * placeholder — the template renders a different, non-committal
+   * sentence for null, instead of promising a clock we can't keep.
+   */
+  expectedContactLabel: string | null;
   appUrl: string;
 }
 
@@ -40,9 +49,24 @@ export async function sendIntakeConfirmation(
   try {
     const resend = new Resend(process.env.RESEND_API_KEY);
     const projectUrl = `${input.appUrl.replace(/\/$/, "")}/homeowner/intakes/${input.intakeId}`;
-    const contractorLine = input.contractorName
-      ? `<p style="margin:8px 0 0;color:#475569;font-size:14px;">You've been matched with <strong>${escapeHtml(input.contractorName)}</strong>. They'll reach out by <strong>${escapeHtml(input.expectedContactLabel)}</strong>.</p>`
-      : `<p style="margin:8px 0 0;color:#475569;font-size:14px;">We're finding a verified local contractor for your project — expect a call within 24 hours.</p>`;
+    /* Three branches, because there are three genuinely different states
+     * and the previous two-branch version asserted things we cannot back:
+     *
+     *   - "expect a call within 24 hours" was sent on the UNMATCHED
+     *     branch, i.e. at the exact moment the route flagged the intake
+     *     as awaiting coverage. Nobody was going to call.
+     *   - "verified local contractor" implied a licence check against a
+     *     state board. src/lib/license/verify.ts contacts no board.
+     *   - "They'll reach out by <label>" rendered a placeholder string
+     *     when response time was unmeasured, which is the normal case.
+     *
+     * A measured ETA is stated as typical, never as a commitment. */
+    const p = `<p style="margin:8px 0 0;color:#475569;font-size:14px;">`;
+    const contractorLine = !input.contractorName
+      ? `${p}We don't have a contractor covering ${escapeHtml(input.zip)} for ${escapeHtml(input.trade)} yet. We'll email you as soon as one does — your project details are saved.</p>`
+      : input.expectedContactLabel
+        ? `${p}You've been matched with <strong>${escapeHtml(input.contractorName)}</strong>, who typically responds within <strong>${escapeHtml(input.expectedContactLabel)}</strong>.</p>`
+        : `${p}You've been matched with <strong>${escapeHtml(input.contractorName)}</strong>. They'll be in touch to arrange a time that works for you.</p>`;
 
     const subject = `Your Henri intake #${input.intakeId.slice(0, 8)} — ${input.trade}`;
 

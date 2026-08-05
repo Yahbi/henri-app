@@ -96,10 +96,17 @@ const plans: Plan[] = [
     price: "$1,499",
     period: "/mo",
     description: "Full platform access for serious contractors.",
+    // 2026-08-04 truthfulness pass: "Daily license verification (compliance)"
+    // removed. It was sold as a paid plan feature but nothing enforces it —
+    // `src/lib/license/verify.ts` makes no HTTP call to any licensing board,
+    // and no lead-delivery path gates on license status. The compliance
+    // dashboard itself is real (`/dashboard/compliance`), so the bullet now
+    // names the surface that actually ships. Restore the verification bullet
+    // only after enforcement lands.
     features: [
       "12 ZIP territories",
       "Everything in Starter",
-      "Daily license verification (compliance)",
+      "Compliance dashboard",
       "Storm Center dashboard",
       "Priority email support",
     ],
@@ -201,9 +208,16 @@ export function PricingSection() {
                * have a slot cap (Founder today). */}
               {plan.scarcity && (
                 <div className="flex items-center justify-between gap-2 bg-warm/10 border-b border-warm/35 px-4 py-2 text-[11px] font-semibold text-warm">
+                  {/* 2026-08-04: before /api/founder-seats resolves, the
+                    * placeholder rendered the literal "Only 100 of 100 spots
+                    * left" — a scarcity claim asserting no scarcity, and a
+                    * count we hadn't actually measured yet. Until the live
+                    * count arrives we state the cap only. */}
                   <span className="inline-flex items-center gap-1.5">
                     <Flame className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    Only {plan.scarcity.remaining} of {plan.scarcity.total} spots left
+                    {founderSeats
+                      ? `Only ${plan.scarcity.remaining} of ${plan.scarcity.total} spots left`
+                      : `Limited to ${plan.scarcity.total} Founder seats`}
                   </span>
                   <span className="text-[10px] font-normal text-warm/80 tracking-wide uppercase">
                     Price locked forever

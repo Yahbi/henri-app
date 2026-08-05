@@ -39,8 +39,11 @@ export function HowItWorks({ permitsLabel, activeStatesLabel }: HowItWorksProps)
     {
       number: 3,
       title: "You Work the List",
+      // 2026-08-04 truthfulness pass: was "50-template". Live query
+      //   select count(*) from outreach_templates where is_default = true
+      // returns 42 (7 trades × 3 stages × 2 channels, migration 00047).
       description:
-        "Hot leads sort to the top. Outreach via the 50-template per-trade library (or your own saved templates).",
+        "Hot leads sort to the top. Outreach via the 42-template per-trade library (or your own saved templates).",
       icon: Trophy,
     },
   ] as const;
@@ -80,7 +83,7 @@ export function HowItWorks({ permitsLabel, activeStatesLabel }: HowItWorksProps)
               >
                 <CardContent className="flex flex-col items-center gap-4 p-8">
                   {/* Number badge */}
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cta text-sm font-bold text-cta-foreground">
                     {step.number}
                   </div>
 

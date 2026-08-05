@@ -211,7 +211,7 @@ export default function MessagesPage() {
                   <div key={i} className={`flex ${msg.role === "outbound" ? "justify-end" : "justify-start"}`}>
                     <div className={`max-w-xs rounded-xl px-3 py-2 text-xs ${
                       msg.role === "outbound"
-                        ? "bg-primary text-white"
+                        ? "bg-cta text-cta-foreground"
                         : "bg-card border border-border text-foreground"
                     }`}>
                       <p>{msg.text}</p>
@@ -249,7 +249,7 @@ export default function MessagesPage() {
               <button
                 onClick={handleSend}
                 disabled={!draft.trim() || addNote.isPending}
-                className="p-2 bg-primary text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+                className="p-2 bg-cta text-cta-foreground rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
                 aria-label="Log note"
               >
                 <Send className="h-4 w-4" />

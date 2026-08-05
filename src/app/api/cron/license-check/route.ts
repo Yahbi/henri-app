@@ -23,11 +23,27 @@ async function handler(request: NextRequest): Promise<NextResponse> {
   try {
     const supabase = createAdminClient();
 
-    // Fetch all active licenses that need re-checking
+    // Fetch licenses that need re-checking.
+    //
+    // This used to filter `.in("verification_status", ["verified","pending"])`,
+    // which matched NOTHING: onboarding writes `verified_state_roster`,
+    // `manual_review`, `missing_in_roster` or `pending_verification`
+    // (src/app/onboarding/license/page.tsx:191-199), and the compliance
+    // route writes `pending_verification`. Not one of those is in that
+    // list, so the query always returned zero rows and every downstream
+    // branch — including the expired/revoked notification path below —
+    // was unreachable. The table is empty today (no contractor has
+    // completed onboarding), which is why it never surfaced.
+    //
+    // An allowlist is the wrong shape here: it silently drops any status
+    // added later. Re-check everything except rows already terminal, so
+    // a new status value degrades to "gets checked" rather than
+    // "silently skipped".
+    const TERMINAL_STATUSES = ["revoked", "expired"];
     const { data: licenses, error } = await supabase
       .from("contractor_licenses")
       .select("id, contractor_id, license_number, license_state, verification_status")
-      .in("verification_status", ["verified", "pending"]);
+      .not("verification_status", "in", `(${TERMINAL_STATUSES.join(",")})`);
 
     if (error) {
       logger.error("License fetch error", { error: String(error) });

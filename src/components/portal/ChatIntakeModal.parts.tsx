@@ -112,7 +112,7 @@ export function ProgressDots({ step }: { step: number }) {
 export function HenriBubble({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cta text-sm font-bold text-cta-foreground">
         H
       </div>
       <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-primary-10 px-4 py-3 text-sm text-foreground">
@@ -268,7 +268,7 @@ export function MatchCard({
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-center gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-lg font-bold text-white">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cta text-lg font-bold text-cta-foreground">
           {initials}
         </div>
         <div className="flex-1">

@@ -78,6 +78,17 @@ export function NotificationDropdown() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
+  /* Close on Escape — outside-click was the only dismiss path, which left
+   * keyboard users stuck inside the panel once they tabbed into it. */
+  useEffect(() => {
+    if (!open) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [open]);
+
   return (
     <div className="relative" ref={panelRef}>
       <button
@@ -92,7 +103,7 @@ export function NotificationDropdown() {
       >
         <Bell className="h-4 w-4" />
         {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] bg-primary text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5">
+          <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] bg-cta text-cta-foreground text-[10px] font-bold rounded-full flex items-center justify-center px-0.5">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}

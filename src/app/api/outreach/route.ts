@@ -2,18 +2,15 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
 import { OutreachQueueBodySchema, parseBody } from "@/lib/schemas/api";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* ─── GET /api/outreach — outreach history + stats for the current contractor ─── */
 export async function GET() {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const { user } = gate;
 
     /* Fetch outreach queue items (most recent 50) */
     const { data: outreachRows, error: oErr } = await supabase
@@ -129,13 +126,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const { user } = gate;
 
     const raw = await request.json().catch(() => ({}));
     const parsed = parseBody(OutreachQueueBodySchema, raw);

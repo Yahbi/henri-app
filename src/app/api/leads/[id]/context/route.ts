@@ -9,6 +9,7 @@ import {
   type DerivedEnrichments,
 } from "@/lib/enrichment/derived";
 import type { Lead } from "@/types/lead";
+import { isUuid } from "@/lib/validation/params";
 import type {
   AddressPermitHistory,
   HistoryPermit,
@@ -149,6 +150,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    if (!isUuid(id)) {
+      return NextResponse.json({ error: "Malformed lead id" }, { status: 400 });
+    }
     const supabase = await createClient();
     const gate = await requireContractor(supabase);
     if (gate.response) return gate.response;

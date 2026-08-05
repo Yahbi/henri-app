@@ -102,7 +102,11 @@ export function CommandPalette() {
       label: (lead.address as string) ?? "Unknown address",
       sublabel: `${lead.trade ?? ""} · Score ${lead.score ?? 0}`,
       category: "lead" as const,
-      action: () => navigate(`/dashboard?lead=${lead.id}`),
+      // `?focus=` is the param the dashboard actually honors (see the
+      // focusLeadId effect in (dashboard)/dashboard/page.tsx). The earlier
+      // `?lead=` was read by nothing, so picking a lead in the palette
+      // navigated to /dashboard and silently did nothing.
+      action: () => navigate(`/dashboard?focus=${lead.id}`),
     })),
   ], [leads, navigate]);
 
@@ -172,6 +176,9 @@ export function CommandPalette() {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter" && flat[activeIndex]) {
+      // preventDefault so the keypress doesn't also submit an ancestor form
+      // (the palette can mount inside one) after we've navigated away.
+      e.preventDefault();
       flat[activeIndex].action();
     }
   }, [flat, activeIndex]);

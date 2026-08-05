@@ -261,6 +261,85 @@ describe("buildScoreSignalBreakdown — empty case", () => {
   });
 });
 
+/* ── Permit value vs property value (audit 2026-08-04) ────────────────
+ *
+ * `scoreValue` pushes two differently-sourced factors into the same
+ * untagged array: "High-value permit ($120K)" (the permit's own declared
+ * value) and "High-value property ($600K)" (the assessed-value bonus).
+ * `detailFor("permit_value")` matched on /high value|\$\d|value/i, which
+ * caught BOTH — so a lead with no permit value but a $600K assessment
+ * rendered "Permit value 5/20 — High-value property ($600K)" and a
+ * contractor reasonably read that as a $600K permit. The breakdown is the
+ * one surface the wedge promises will always be honest. */
+describe("buildScoreSignalBreakdown — permit value never shows the property's value", () => {
+  const noPermitValueButRichProperty: ScoringSignals = {
+    ...emptySignals,
+    permitValue: null,
+    propertyValue: 600_000,
+  };
+
+  const resultWithPropertyBonus: ScoreResult = {
+    ...emptyResult,
+    value: 5, // 2 baseline + 3 property bonus — none of it from the permit
+    factors: ["High-value property ($600K)"],
+  };
+
+  it("does not attribute the property assessment to the permit", () => {
+    const breakdown = buildScoreSignalBreakdown(
+      resultWithPropertyBonus,
+      noPermitValueButRichProperty,
+    );
+    const row = breakdown.find((r) => r.signal === "permit_value");
+    expect(row?.detail).not.toMatch(/high-value property/i);
+    expect(row?.detail).toMatch(/no permit value/i);
+  });
+
+  it("names the property bonus explicitly instead of hiding it", () => {
+    const breakdown = buildScoreSignalBreakdown(
+      resultWithPropertyBonus,
+      noPermitValueButRichProperty,
+    );
+    const row = breakdown.find((r) => r.signal === "permit_value");
+    expect(row?.detail).toMatch(/property assessed at/i);
+    expect(row?.detail).toMatch(/600,000/);
+  });
+
+  it("still surfaces a real permit-value factor when one exists", () => {
+    const withBoth: ScoringSignals = {
+      ...populatedSignals,
+      permitValue: 120_000,
+      propertyValue: 600_000,
+    };
+    const result: ScoreResult = {
+      ...populatedResult,
+      value: 20,
+      // Order matters: the property factor is pushed AFTER the permit one
+      // by scoreValue, but a naive first-match would still have to pick
+      // the permit factor.
+      factors: ["High-value permit ($120K)", "High-value property ($600K)"],
+    };
+    const row = buildScoreSignalBreakdown(result, withBoth)
+      .find((r) => r.signal === "permit_value");
+    expect(row?.detail).toBe("High-value permit ($120K)");
+  });
+
+  it("picks the permit factor even when the property factor is listed first", () => {
+    const withBoth: ScoringSignals = {
+      ...populatedSignals,
+      permitValue: 120_000,
+      propertyValue: 600_000,
+    };
+    const result: ScoreResult = {
+      ...populatedResult,
+      value: 20,
+      factors: ["High-value property ($600K)", "Substantial permit ($120K)"],
+    };
+    const row = buildScoreSignalBreakdown(result, withBoth)
+      .find((r) => r.signal === "permit_value");
+    expect(row?.detail).toBe("Substantial permit ($120K)");
+  });
+});
+
 describe("buildScoreSignalBreakdown — clamping invariants", () => {
   it("rounds non-integer values", () => {
     const fractional: ScoreResult = { ...populatedResult, freshness: 12.7 };

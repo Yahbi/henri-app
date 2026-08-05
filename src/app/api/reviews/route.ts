@@ -9,20 +9,23 @@ import {
 import { generateResponseDraft } from "@/lib/reviews/response-generator";
 import { logger } from "@/lib/logger";
 import { ReviewSubmitBodySchema, parseBody } from "@/lib/schemas/api";
+import { clampLimit, isUuid } from "@/lib/validation/params";
 
 /* ─── GET /api/reviews — list reviews for a contractor (public) ─── */
 export async function GET(request: NextRequest) {
   try {
     const contractorId = request.nextUrl.searchParams.get("contractor_id");
 
-    if (!contractorId) {
+    /* Validate before it reaches Postgres — an unparseable uuid comes back
+     * as a 22P02 that would otherwise surface as an opaque 500. */
+    if (!isUuid(contractorId)) {
       return NextResponse.json(
-        { error: "contractor_id query parameter is required" },
+        { error: "contractor_id must be a valid UUID" },
         { status: 400 }
       );
     }
 
-    const limit = Number(request.nextUrl.searchParams.get("limit")) || 20;
+    const limit = clampLimit(request.nextUrl.searchParams.get("limit"), 20, 100);
     const supabase = createAdminClient();
 
     // The reviews table has no `status` column (migration 00016 schema:

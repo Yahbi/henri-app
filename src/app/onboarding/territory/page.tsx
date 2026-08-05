@@ -3,25 +3,79 @@
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Search, MapPin, Check, X, Loader2 } from "lucide-react";
+import { Search, MapPin, Check, X, Loader2, AlertCircle } from "lucide-react";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
 import { useUser } from "@/hooks/useUser";
 import { createClient } from "@/lib/supabase/client";
 import { isGodModeEmail } from "@/lib/auth/god-mode";
 import { cn } from "@/lib/utils/cn";
+import { PLAN_ZIP_LIMITS } from "@/lib/plans/constants";
 
-/* ── Plan ZIP limits ── */
+/* ── Plan ZIP limits ──
+ * Sourced from the shared constant so this page can't drift from
+ * pricing / settings / the claim_territory cap (migration 00088).
+ * The local copy that used to live here duplicated all four tiers.
+ * `free` isn't a paid tier and has no constant — 1 ZIP locally. */
 const PLAN_LIMITS: Record<string, number> = {
-  founder: 3,
-  starter: 5,
-  pro: 12,
-  enterprise: 20,
+  ...PLAN_ZIP_LIMITS,
   free: 1,
 };
 
 /* ── ZIP metadata by city (names curated; availability fetched live) ── */
 type ZipMeta = { zip: string; name: string };
-type ZipWithAvailability = ZipMeta & { available: boolean; loading: boolean };
+type ZipWithAvailability = ZipMeta & {
+  available: boolean;
+  loading: boolean;
+  /** null when the availability probe failed — NOT the same as 0. */
+  slotsUsed: number | null;
+  slotsTotal: number | null;
+  /** True when we could not determine occupancy. Renders as "unknown",
+   *  never as a green "Available" check. */
+  unknown: boolean;
+};
+
+/** Per-ZIP availability derived from the get_zip_availability payload. */
+type ZipSlots = {
+  available: boolean;
+  slotsUsed: number | null;
+  slotsTotal: number | null;
+  unknown: boolean;
+};
+
+const UNKNOWN_SLOTS: ZipSlots = {
+  // Fail *closed* on the display: an unknown ZIP is not asserted to be
+  // available. Selection is still permitted — the server is the real
+  // authority (claim_territory) — but the UI must not render a green
+  // check it cannot back up.
+  available: true,
+  slotsUsed: null,
+  slotsTotal: null,
+  unknown: true,
+};
+
+/**
+ * Read occupancy from the RPC payload.
+ *
+ * Until 2026-08-04 both call sites did `available: !data?.is_claimed`.
+ * `get_zip_availability` has never returned an `is_claimed` key (see
+ * supabase/migrations/00008_ziplock_rpc.sql), so the expression was
+ * `!undefined` — a hardcoded `true`. Every ZIP always displayed
+ * "Available", which made the "Taken" badge and the whole Join-waitlist
+ * flow unreachable and steered contractors into occupied ZIPs that then
+ * failed at Confirm, after payment.
+ */
+function readSlots(data: unknown): ZipSlots {
+  const d = data as { slots_used?: unknown; slots_total?: unknown } | null;
+  if (!d || typeof d.slots_used !== "number" || typeof d.slots_total !== "number") {
+    return UNKNOWN_SLOTS;
+  }
+  return {
+    available: d.slots_used < d.slots_total,
+    slotsUsed: d.slots_used,
+    slotsTotal: d.slots_total,
+    unknown: false,
+  };
+}
 
 const CITY_ZIPS: Record<string, { city: string; state: string; zips: ZipMeta[] }> = {
   "Los Angeles, CA": {
@@ -166,12 +220,19 @@ export default function TerritoryPage() {
   const [plan, setPlan] = useState("starter");
   const [saving, setSaving] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
+  // ZIPs this session successfully claimed. Tracked separately from
+  // `selectedZips` so a partial failure can't strand the contractor:
+  // the claimed ones are removed from the selection (so a retry doesn't
+  // re-POST them) but still count toward finishing onboarding.
+  const [claimedZips, setClaimedZips] = useState<string[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
-  // availabilityMap: zip -> { available, loading } — populated when a city is selected
-  const [availabilityMap, setAvailabilityMap] = useState<Record<string, { available: boolean; loading: boolean }>>({});
+  // availabilityMap: zip -> slots + loading — populated when a city is selected
+  const [availabilityMap, setAvailabilityMap] = useState<
+    Record<string, ZipSlots & { loading: boolean }>
+  >({});
   // Direct ZIP entry
   const [zipInput, setZipInput] = useState("");
-  const [zipCheckResult, setZipCheckResult] = useState<{ available: boolean; zip: string } | null>(null);
+  const [zipCheckResult, setZipCheckResult] = useState<(ZipSlots & { zip: string }) | null>(null);
   const [zipCheckLoading, setZipCheckLoading] = useState(false);
   // Waitlist status per ZIP — "joining" | "joined" | "error"
   const [waitlistStatus, setWaitlistStatus] = useState<Record<string, "joining" | "joined" | "error">>({});
@@ -193,7 +254,7 @@ export default function TerritoryPage() {
     setAvailabilityMap((prev) => {
       const next = { ...prev };
       for (const z of cityData.zips) {
-        if (!next[z.zip]) next[z.zip] = { available: true, loading: true };
+        if (!next[z.zip]) next[z.zip] = { ...UNKNOWN_SLOTS, loading: true };
       }
       return next;
     });
@@ -208,12 +269,12 @@ export default function TerritoryPage() {
           chunk.map(async (z) => {
             try {
               const r = await fetch(`/api/territories/${z.zip}`, { cache: "no-store" });
-              if (!r.ok) return { zip: z.zip, available: true };
-              const data = await r.json();
-              // is_claimed comes from the ZipAvailability type
-              return { zip: z.zip, available: !data?.is_claimed };
+              // A failed probe is "unknown", not "available" — the old
+              // code asserted availability on every error path.
+              if (!r.ok) return { zip: z.zip, ...UNKNOWN_SLOTS };
+              return { zip: z.zip, ...readSlots(await r.json()) };
             } catch {
-              return { zip: z.zip, available: true };
+              return { zip: z.zip, ...UNKNOWN_SLOTS };
             }
           }),
         );
@@ -221,7 +282,8 @@ export default function TerritoryPage() {
         setAvailabilityMap((prev) => {
           const next = { ...prev };
           for (const r of results) {
-            next[r.zip] = { available: r.available, loading: false };
+            const { zip, ...slots } = r;
+            next[zip] = { ...slots, loading: false };
           }
           return next;
         });
@@ -234,11 +296,17 @@ export default function TerritoryPage() {
   }, [cityData]);
 
   const zipsWithAvailability: ZipWithAvailability[] = cityData
-    ? cityData.zips.map((z) => ({
-        ...z,
-        available: availabilityMap[z.zip]?.available ?? true,
-        loading: availabilityMap[z.zip]?.loading ?? true,
-      }))
+    ? cityData.zips.map((z) => {
+        const a = availabilityMap[z.zip];
+        return {
+          ...z,
+          available: a?.available ?? true,
+          slotsUsed: a?.slotsUsed ?? null,
+          slotsTotal: a?.slotsTotal ?? null,
+          unknown: a?.unknown ?? true,
+          loading: a?.loading ?? true,
+        };
+      })
     : [];
 
   const filteredCities = CITY_OPTIONS.filter((c) =>
@@ -260,11 +328,12 @@ export default function TerritoryPage() {
     setZipCheckResult(null);
     try {
       const r = await fetch(`/api/territories/${z}`, { cache: "no-store" });
-      if (!r.ok) { setZipCheckResult({ available: true, zip: z }); return; }
-      const data = await r.json();
-      setZipCheckResult({ available: !data?.is_claimed, zip: z });
+      // Same rule as the city grid: a failed probe reports "unknown",
+      // never a green "available".
+      if (!r.ok) { setZipCheckResult({ zip: z, ...UNKNOWN_SLOTS }); return; }
+      setZipCheckResult({ zip: z, ...readSlots(await r.json()) });
     } catch {
-      setZipCheckResult({ available: true, zip: z });
+      setZipCheckResult({ zip: z, ...UNKNOWN_SLOTS });
     } finally {
       setZipCheckLoading(false);
     }
@@ -293,7 +362,13 @@ export default function TerritoryPage() {
   }, []);
 
   const handleConfirm = async () => {
-    if (selectedZips.length === 0) return;
+    // Either there's something new to claim, or a previous partial run
+    // already claimed at least one ZIP and the contractor just needs to
+    // finish. Both paths must be reachable — otherwise a partial failure
+    // leaves the Confirm button permanently disabled with territories
+    // claimed but onboarding_completed still false (middleware then
+    // bounces them straight back here, forever).
+    if (selectedZips.length === 0 && claimedZips.length === 0) return;
     setSaving(true);
     setClaimError(null);
     try {
@@ -351,23 +426,78 @@ export default function TerritoryPage() {
         }),
       );
 
-      const failures = claimResults.filter((r) => !r.ok);
+      // `claim_territory` raises "Contractor already holds an active
+      // territory in ZIP X" when the contractor owns it already. That is
+      // a 409, but the desired end state is reached — treat it as
+      // success. Without this, any retry after a partial failure failed
+      // on MORE ZIPs than the first attempt (every ZIP claimed on run 1
+      // now reports "already holds"), which made the state unescapable.
+      const alreadyHeld = (msg: string | undefined) =>
+        !!msg && /already holds an active territory/i.test(msg);
+      const succeeded = claimResults.filter((r) => r.ok || alreadyHeld(r.error));
+      const failures = claimResults.filter((r) => !r.ok && !alreadyHeld(r.error));
+
+      const newlyClaimed = succeeded.map((r) => r.zip);
+      const allClaimed = [...new Set([...claimedZips, ...newlyClaimed])];
+
       if (failures.length > 0) {
+        // Prune the ZIPs that DID land from the selection so a retry only
+        // re-attempts genuine failures, but keep them in `claimedZips` so
+        // the contractor can still finish onboarding with what they hold.
+        if (newlyClaimed.length > 0) {
+          setSelectedZips((prev) => prev.filter((z) => !newlyClaimed.includes(z)));
+          setClaimedZips(allClaimed);
+        }
+
+        // A contractor who has ALREADY BEEN CHARGED must never be left
+        // with territories claimed and `onboarding_completed` false —
+        // middleware would bounce them out of /dashboard indefinitely.
+        // Flip the flag as soon as at least one territory is held.
+        let completionFailed = false;
+        if (allClaimed.length > 0) {
+          const { error: completeErr } = await supabase
+            .from("profiles")
+            .update({ onboarding_completed: true })
+            .eq("id", user.id);
+          completionFailed = !!completeErr;
+        }
+
         setClaimError(
-          `Couldn't claim ${failures.length} ZIP(s): ${failures
-            .map((f) => `${f.zip} (${f.error ?? "unknown"})`)
-            .join(", ")}`,
+          [
+            newlyClaimed.length > 0 ? `Claimed ${newlyClaimed.join(", ")}.` : null,
+            `Couldn't claim ${failures.length} ZIP(s): ${failures
+              .map((f) => `${f.zip} (${f.error ?? "unknown"})`)
+              .join(", ")}.`,
+            allClaimed.length > 0 && !completionFailed
+              ? "Your claimed ZIPs are active — pick replacements for the rest, or continue to the dashboard."
+              : null,
+            completionFailed
+              ? "We couldn't finish setting up your account. Retry, or contact support@meethenri.com."
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" "),
         );
         setSaving(false);
         return;
       }
 
       // Mark onboarding complete — prereqs were verified above, before
-      // any territory was claimed.
-      await supabase
+      // any territory was claimed. The error was previously discarded,
+      // so a failed update sent the contractor to /dashboard only for
+      // middleware to bounce them straight back here.
+      const { error: completeErr } = await supabase
         .from("profiles")
         .update({ onboarding_completed: true })
         .eq("id", user.id);
+      if (completeErr) {
+        setClaimedZips(allClaimed);
+        setClaimError(
+          `Your territories (${allClaimed.join(", ")}) are claimed, but we couldn't finish setting up your account: ${completeErr.message}. Retry, or contact support@meethenri.com.`,
+        );
+        setSaving(false);
+        return;
+      }
 
       router.push("/dashboard");
     } catch (err) {
@@ -404,7 +534,17 @@ export default function TerritoryPage() {
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               Choose up to <span className="font-semibold text-primary">{maxZips} ZIP codes</span> in your service area.
-              Each ZIP is exclusive to one contractor per trade.
+              {/* Copy corrected 2026-08-04. This read "Each ZIP is exclusive
+                  to one contractor per trade", which the backend does not
+                  implement: get_zip_availability / claim_territory expose
+                  slots_total = 3 per ZIP and never consider trade at all
+                  (supabase/migrations/00008_ziplock_rpc.sql). Exclusivity in
+                  Henri is enforced per PERMIT (the wedge lock), not per ZIP.
+                  Restated to what the code actually guarantees — the
+                  product question of which model is intended is flagged in
+                  the audit report, not decided here. */}
+              {" "}Each ZIP has a limited number of contractor slots, and every
+              permit inside it is locked to one contractor at a time.
             </p>
           </div>
 
@@ -417,7 +557,7 @@ export default function TerritoryPage() {
                 className={cn(
                   "flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors",
                   searchMode === "zip"
-                    ? "bg-primary text-white"
+                    ? "bg-cta text-cta-foreground"
                     : "bg-muted text-muted-foreground hover:bg-accent"
                 )}
               >
@@ -429,7 +569,7 @@ export default function TerritoryPage() {
                 className={cn(
                   "flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors",
                   searchMode === "city"
-                    ? "bg-primary text-white"
+                    ? "bg-cta text-cta-foreground"
                     : "bg-muted text-muted-foreground hover:bg-accent"
                 )}
               >
@@ -491,25 +631,33 @@ export default function TerritoryPage() {
                   <button
                     onClick={checkZipDirect}
                     disabled={zipInput.length !== 5 || zipCheckLoading}
-                    className="px-3 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50 transition-opacity"
+                    className="px-3 py-2.5 rounded-lg bg-cta text-cta-foreground text-sm font-semibold disabled:opacity-50 transition-opacity"
                   >
                     {zipCheckLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Check"}
                   </button>
                 </div>
                 {zipCheckResult && (
-                  <div className={cn(
+                  <div role="status" className={cn(
                     "flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm",
-                    zipCheckResult.available
-                      ? "border-[#3D9970]/30 bg-[rgba(61,153,112,0.06)]"
-                      : "border-destructive/30 bg-destructive/5"
+                    zipCheckResult.unknown
+                      ? "border-border bg-bg-subtle"
+                      : zipCheckResult.available
+                        ? "border-[#3D9970]/30 bg-[rgba(61,153,112,0.06)]"
+                        : "border-destructive/30 bg-destructive/5"
                   )}>
                     <div className="flex items-center gap-2">
-                      {zipCheckResult.available
-                        ? <Check className="h-4 w-4 text-[#3D9970]" />
-                        : <X className="h-4 w-4 text-destructive" />}
+                      {zipCheckResult.unknown
+                        ? <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                        : zipCheckResult.available
+                          ? <Check className="h-4 w-4 text-[#3D9970]" />
+                          : <X className="h-4 w-4 text-destructive" />}
                       <span className="font-medium text-foreground">ZIP {zipCheckResult.zip}</span>
                       <span className="text-muted-foreground">
-                        {zipCheckResult.available ? "— available" : "— already taken"}
+                        {zipCheckResult.unknown
+                          ? "— couldn't check right now"
+                          : zipCheckResult.available
+                            ? `— available (${zipCheckResult.slotsUsed ?? 0} of ${zipCheckResult.slotsTotal ?? 3} slots taken)`
+                            : "— all slots taken"}
                       </span>
                     </div>
                     {zipCheckResult.available && !selectedZips.includes(zipCheckResult.zip) && selectedZips.length < maxZips && (
@@ -525,8 +673,13 @@ export default function TerritoryPage() {
                     )}
                     {!zipCheckResult.available && (
                       waitlistStatus[zipCheckResult.zip] === "joined" ? (
+                        /* Copy fix 2026-08-04: joinWaitlist() only inserts a
+                         * zip_waitlist row — nothing in the codebase reads
+                         * that table or sends mail, so "we'll email you when
+                         * it opens" promised a notification that does not
+                         * exist. State what actually happened instead. */
                         <span className="text-xs font-semibold text-[#3D9970] ml-2 text-right">
-                          On the waitlist - we&apos;ll email you when it opens
+                          On the waitlist for this ZIP
                         </span>
                       ) : (
                         <button
@@ -561,12 +714,20 @@ export default function TerritoryPage() {
               <span className={cn(
                 "text-xs font-bold px-2 py-0.5 rounded-full",
                 selectedZips.length >= maxZips
-                  ? "bg-primary text-white"
+                  ? "bg-cta text-cta-foreground"
                   : "bg-primary-10 text-primary"
               )}>
                 {selectedZips.length} / {maxZips}
               </span>
             </div>
+            {/* The Add button just disappears once the cap is hit, and
+                toggleZip silently refuses. Say why. */}
+            {selectedZips.length >= maxZips && (
+              <p className="mt-1 text-[11px] text-muted-foreground" role="status">
+                You&apos;ve used all {maxZips} ZIPs on the {plan} plan. Remove one
+                to swap, or pick a larger plan.
+              </p>
+            )}
           </div>
 
           {/* ZIP list */}
@@ -615,8 +776,10 @@ export default function TerritoryPage() {
                       </button>
                       {isTaken ? (
                         wl === "joined" ? (
+                          /* See the copy note on the direct-ZIP branch above:
+                             the waitlist records interest, it does not notify. */
                           <span className="text-[10px] font-semibold text-[#3D9970] text-right leading-tight">
-                            On the waitlist - we&apos;ll email you when it opens
+                            On the waitlist
                           </span>
                         ) : (
                           <div className="flex items-center gap-2 shrink-0">
@@ -639,11 +802,18 @@ export default function TerritoryPage() {
                       ) : (
                         <span className={cn(
                           "shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full",
-                          isSelected && "bg-primary text-white",
+                          isSelected && "bg-cta text-cta-foreground",
                           z.loading && "bg-muted text-muted-foreground",
-                          !z.loading && z.available && !isSelected && "bg-[rgba(61,153,112,0.1)] text-[#3D9970]"
+                          !z.loading && z.unknown && !isSelected && "bg-muted text-muted-foreground",
+                          !z.loading && !z.unknown && z.available && !isSelected && "bg-[rgba(61,153,112,0.1)] text-[#3D9970]"
                         )}>
-                          {z.loading ? "Checking..." : isSelected ? "Selected" : "Available"}
+                          {z.loading
+                            ? "Checking..."
+                            : isSelected
+                              ? "Selected"
+                              : z.unknown
+                                ? "Unknown"
+                                : `${z.slotsUsed ?? 0}/${z.slotsTotal ?? 3} taken`}
                         </span>
                       )}
                     </div>
@@ -668,22 +838,27 @@ export default function TerritoryPage() {
           {/* Confirm button */}
           <div className="px-6 py-4 border-t border-border shrink-0">
             {claimError && (
-              <div className="mb-3 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+              <div
+                role="alert"
+                className="mb-3 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive"
+              >
                 {claimError}
               </div>
             )}
             <button
               onClick={handleConfirm}
-              disabled={selectedZips.length === 0 || saving}
+              disabled={(selectedZips.length === 0 && claimedZips.length === 0) || saving}
               className={cn(
                 "w-full py-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2",
-                selectedZips.length > 0
-                  ? "bg-primary text-white hover:opacity-90"
+                selectedZips.length > 0 || claimedZips.length > 0
+                  ? "bg-cta text-cta-foreground hover:opacity-90"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
             >
               {saving ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> Claiming territories...</>
+              ) : selectedZips.length === 0 && claimedZips.length > 0 ? (
+                `Finish with ${claimedZips.length} claimed territor${claimedZips.length === 1 ? "y" : "ies"}`
               ) : (
                 `Confirm ${selectedZips.length} territor${selectedZips.length === 1 ? "y" : "ies"} & launch dashboard`
               )}
@@ -691,14 +866,17 @@ export default function TerritoryPage() {
           </div>
         </div>
 
-        {/* Right panel — Map placeholder (Mapbox would render here) */}
+        {/* Right panel — selection summary. Headed "Territory Map" until
+            2026-08-04, which promised a map this step has never rendered
+            (no Mapbox on the onboarding route). Renamed to describe what
+            the panel actually shows. */}
         <div className="flex-1 bg-bg-subtle relative flex items-center justify-center">
           <div className="text-center space-y-4 p-8">
             <div className="w-16 h-16 mx-auto rounded-2xl bg-primary-10 flex items-center justify-center">
               <MapPin className="h-8 w-8 text-primary" />
             </div>
             <h2 className="font-heading text-2xl font-normal text-foreground">
-              Territory Map
+              Your selection
             </h2>
             <p className="text-sm text-muted-foreground max-w-sm">
               {selectedCity
@@ -708,7 +886,7 @@ export default function TerritoryPage() {
             {selectedZips.length > 0 && (
               <div className="flex flex-wrap gap-2 justify-center mt-4">
                 {selectedZips.map((zip) => (
-                  <span key={zip} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-white text-xs font-semibold">
+                  <span key={zip} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cta text-cta-foreground text-xs font-semibold">
                     <MapPin className="h-3 w-3" />
                     {zip}
                     <button onClick={() => toggleZip(zip)} aria-label="Remove ZIP" className="ml-0.5 hover:opacity-70">

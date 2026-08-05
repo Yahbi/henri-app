@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/utils/rate-limit";
 import { logger } from "@/lib/logger";
+import { isZip5, sanitizeFilterText } from "@/lib/validation/params";
 
 /* ─── GET /api/contractors/search — public contractor search for homeowners ─── */
 export async function GET(request: NextRequest) {
@@ -13,12 +14,15 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const zip = searchParams.get("zip");
-    const trade = searchParams.get("trade");
+    /* `trade` lands in a PostgREST ilike filter — strip the characters that
+     * carry meaning there (`,` `(` `)` `%` `_`) so a crafted value can't
+     * widen or restructure the filter. */
+    const trade = sanitizeFilterText(searchParams.get("trade"), 40);
     const sort = searchParams.get("sort") ?? "rating";
 
-    if (!zip) {
+    if (!isZip5(zip)) {
       return NextResponse.json(
-        { error: "zip query parameter is required" },
+        { error: "zip must be a 5-digit US ZIP code" },
         { status: 400 }
       );
     }
@@ -30,7 +34,8 @@ export async function GET(request: NextRequest) {
       .from("territories")
       .select("contractor_id")
       .eq("zip", zip)
-      .eq("status", "active");
+      .eq("status", "active")
+      .limit(200);
 
     if (tErr) {
       logger.error("Territory lookup error", { error: tErr instanceof Error ? tErr.message : String(tErr) });

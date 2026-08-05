@@ -186,6 +186,10 @@ export default function JobsPage() {
   const { data: leads, isLoading, error, refetch } = useLeads({ filters: { status: ["won"] } });
   const updateStatus = useUpdateLeadStatus();
   const [movingId, setMovingId] = useState<string | null>(null);
+  // Stage-move failures used to be invisible: the Supabase error field was
+  // never read and a mutateAsync rejection left `movingId` set, so the card
+  // spun forever with no explanation.
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   const grouped = useMemo<Record<JobStage, Lead[]>>(() => {
     const groups: Record<JobStage, Lead[]> = {
@@ -200,6 +204,7 @@ export default function JobsPage() {
 
   async function handleMoveStage(lead: Lead, nextStage: JobStage) {
     setMovingId(lead.id);
+    setMoveError(null);
     // Phase 2.1: write the new stage to the dedicated `job_stage` column
     // (one migration in `supabase/manual-apply-phase1.sql`) AND strip any
     // legacy `{"job_stage":"…"}` JSON prefix out of notes so old data
@@ -213,18 +218,29 @@ export default function JobsPage() {
       /* no legacy prefix — keep notes as-is */
     }
 
-    const supabase = (await import("@/lib/supabase/client")).createClient();
-    await supabase
-      .from("leads")
-      .update({ job_stage: nextStage, notes: cleanNotes || null })
-      .eq("id", lead.id);
+    try {
+      const supabase = (await import("@/lib/supabase/client")).createClient();
+      const { error: updateError } = await supabase
+        .from("leads")
+        .update({ job_stage: nextStage, notes: cleanNotes || null })
+        .eq("id", lead.id);
+      if (updateError) throw updateError;
 
-    // Invalidate leads cache via updateStatus (status stays 'won').
-    await updateStatus.mutateAsync({
-      leadId: lead.id,
-      update: { status: "won" as LeadStatus, notes: cleanNotes || undefined },
-    });
-    setMovingId(null);
+      // Invalidate leads cache via updateStatus (status stays 'won').
+      await updateStatus.mutateAsync({
+        leadId: lead.id,
+        update: { status: "won" as LeadStatus, notes: cleanNotes || undefined },
+      });
+    } catch (err) {
+      setMoveError(
+        err instanceof Error
+          ? `Couldn't move that job — ${err.message}`
+          : "Couldn't move that job — try again.",
+      );
+    } finally {
+      // Always clear the spinner, otherwise a failed move locks the card.
+      setMovingId(null);
+    }
   }
 
   const totalJobs = (leads ?? []).length;
@@ -259,6 +275,22 @@ export default function JobsPage() {
               <p className="text-2xl font-heading font-normal text-foreground mt-1">{stat.value}</p>
             </Card>
           ))}
+        </div>
+      )}
+
+      {moveError && (
+        <div
+          role="alert"
+          className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        >
+          <span>{moveError}</span>
+          <button
+            type="button"
+            onClick={() => setMoveError(null)}
+            className="font-medium underline underline-offset-2 hover:opacity-80"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

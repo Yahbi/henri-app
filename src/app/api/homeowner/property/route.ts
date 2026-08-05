@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { logApiError } from "@/lib/log";
 
@@ -22,6 +23,16 @@ type PropertyRow = {
   lot_sqft: number | null;
   updated_at?: string;
 };
+
+/* ── PATCH body schema ── */
+const PropertyPatchSchema = z.object({
+  zip: z.string().regex(/^\d{5}$/u, "zip must be a 5-digit US ZIP").nullish(),
+  home_value: z.number().finite().min(0).max(1_000_000_000).nullish(),
+  mortgage: z.number().finite().min(0).max(1_000_000_000).nullish(),
+  year_built: z.number().int().min(1600).max(2200).nullish(),
+  home_sqft: z.number().int().min(0).max(1_000_000).nullish(),
+  lot_sqft: z.number().int().min(0).max(100_000_000).nullish(),
+});
 
 export async function GET() {
   try {
@@ -63,9 +74,19 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await request.json().catch(() => ({}))) as Partial<
-      Omit<PropertyRow, "owner_id" | "updated_at">
-    >;
+    /* Zod-validated: these columns are numeric/text in Postgres, so an
+     * unvalidated `home_value: "lots"` used to surface as a 500 rather than
+     * a 400. Bounds are generous but finite. */
+    const parsed = PropertyPatchSchema.safeParse(
+      await request.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Invalid request" },
+        { status: 400 },
+      );
+    }
+    const body = parsed.data;
 
     const patch: Partial<PropertyRow> = {
       owner_id: user.id,

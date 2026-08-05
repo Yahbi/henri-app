@@ -20,18 +20,22 @@ import type { CrossTradeSuggestion } from "@/lib/predictive/rules";
  *   - No rules fired for this lead
  *
  * The forward action is the user's vision realized: "If a permit is
- * created for a pool, send it to the landscaper". Clicking the button
- * dispatches a POST to /api/leads/forward (TODO: route to be wired in
- * a follow-up; for now the button is a no-op + toast). The exclusivity
- * lock is per-(lead_id, trade) so the same permit can hold a roofing
- * lock for contractor A AND a landscaping lock for contractor B
+ * created for a pool, send it to the landscaper". It is opt-in: the
+ * Forward button renders ONLY when the caller supplies `onForward`.
+ * Until 2026-08-04 the button rendered unconditionally and flipped to
+ * "Forwarded" even though no caller passed a handler and
+ * /api/leads/forward was never built — i.e. it told the contractor a
+ * lead had been routed when nothing had happened. The exclusivity lock
+ * is per-(lead_id, trade) so the same permit can hold a roofing lock
+ * for contractor A AND a landscaping lock for contractor B
  * simultaneously — no conflict.
  */
 interface CrossTradeOpportunitiesProps {
   suggestions: CrossTradeSuggestion[] | null | undefined;
   leadId: string;
-  /** Optional callback for the forward action. When omitted the
-   *  button shows a toast saying "coming soon". */
+  /** Optional callback for the forward action. When omitted the Forward
+   *  button is not rendered at all — a button that reports success
+   *  without doing anything is worse than no button. */
   onForward?: (suggestion: CrossTradeSuggestion) => void | Promise<void>;
 }
 
@@ -42,17 +46,20 @@ export function CrossTradeOpportunities({
 }: CrossTradeOpportunitiesProps) {
   const [forwarding, setForwarding] = useState<string | null>(null);
   const [forwarded, setForwarded] = useState<Set<string>>(new Set());
+  const [forwardError, setForwardError] = useState<string | null>(null);
 
   if (!suggestions || suggestions.length === 0) return null;
 
   const handleForward = async (s: CrossTradeSuggestion) => {
-    if (forwarded.has(s.rule)) return;
+    if (!onForward || forwarded.has(s.rule)) return;
     setForwarding(s.rule);
+    setForwardError(null);
     try {
-      if (onForward) {
-        await onForward(s);
-      }
+      await onForward(s);
+      // Only claim "Forwarded" once the handler actually resolved.
       setForwarded((prev) => new Set(prev).add(s.rule));
+    } catch {
+      setForwardError(s.rule);
     } finally {
       setForwarding(null);
     }
@@ -93,19 +100,26 @@ export function CrossTradeOpportunities({
                     {s.reason}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  disabled={isForwarding || isForwarded}
-                  onClick={() => handleForward(s)}
-                  data-lead-id={leadId}
-                  className="shrink-0 inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isForwarded ? "Forwarded" : isForwarding ? "..." : "Forward"}
-                  {!isForwarded && !isForwarding && (
-                    <ArrowRight className="h-2.5 w-2.5" />
-                  )}
-                </button>
+                {onForward && (
+                  <button
+                    type="button"
+                    disabled={isForwarding || isForwarded}
+                    onClick={() => handleForward(s)}
+                    data-lead-id={leadId}
+                    className="shrink-0 inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isForwarded ? "Forwarded" : isForwarding ? "..." : "Forward"}
+                    {!isForwarded && !isForwarding && (
+                      <ArrowRight className="h-2.5 w-2.5" />
+                    )}
+                  </button>
+                )}
               </div>
+              {forwardError === s.rule && (
+                <p role="alert" className="text-[10px] text-destructive">
+                  Couldn&apos;t forward that suggestion — try again.
+                </p>
+              )}
             </div>
           );
         })}

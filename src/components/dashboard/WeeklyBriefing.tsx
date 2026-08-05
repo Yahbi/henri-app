@@ -61,10 +61,13 @@ export function WeeklyBriefingBanner({
 
   // If the contractor dismissed THIS week's briefing, hide it (re-renders
   // again next Monday once a fresh row lands).
+  // Rows written before `period_start` was populated have no week of their
+  // own — fall back to the current ISO week so dismissal still works. With
+  // the previous `null` the X button was focusable but inert.
   const briefingWeek = briefing.period_start
     ? isoWeekKey(new Date(briefing.period_start))
-    : null;
-  if (briefingWeek && dismissedWeek === briefingWeek) return null;
+    : isoWeekKey(new Date());
+  if (dismissedWeek === briefingWeek) return null;
 
   const onToggle = () => {
     const next = !collapsed;
@@ -77,7 +80,6 @@ export function WeeklyBriefingBanner({
   };
 
   const onDismiss = () => {
-    if (!briefingWeek) return;
     setDismissedWeek(briefingWeek);
     try {
       localStorage.setItem(DISMISS_KEY, briefingWeek);

@@ -47,14 +47,14 @@ function statusIcon(status: string, expiryDate: string | null) {
       ? Math.ceil((new Date(expiryDate).getTime() - Date.now()) / 86_400_000)
       : null;
     if (daysUntilExpiry !== null && daysUntilExpiry < 60) {
-      return <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0" />;
+      return <AlertTriangle className="h-5 w-5 text-warning shrink-0" />;
     }
     return <CheckCircle className="h-5 w-5 text-green-500 shrink-0" />;
   }
   if (status === "failed" || status === "expired") {
     return <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />;
   }
-  return <Clock className="h-5 w-5 text-yellow-400 shrink-0" />;
+  return <Clock className="h-5 w-5 text-warning shrink-0" />;
 }
 
 function statusLabel(status: string) {
@@ -74,8 +74,8 @@ function permitStatusBadge(status: string) {
     new: { label: "New", cls: "bg-blue-500/10 text-blue-400" },
     contacted: { label: "Contacted", cls: "bg-blue-500/10 text-blue-400" },
     quoted: { label: "Quoted", cls: "bg-blue-500/10 text-blue-400" },
-    proposal: { label: "Proposal", cls: "bg-yellow-500/10 text-yellow-400" },
-    under_review: { label: "Under Review", cls: "bg-yellow-500/10 text-yellow-400" },
+    proposal: { label: "Proposal", cls: "bg-warning/10 text-warning" },
+    under_review: { label: "Under Review", cls: "bg-warning/10 text-warning" },
     submitted: { label: "Submitted", cls: "bg-blue-500/10 text-blue-400" },
     won: { label: "Won", cls: "bg-green-500/10 text-green-400" },
     lost: { label: "Lost", cls: "bg-red-500/10 text-red-400" },
@@ -266,10 +266,11 @@ export default function CompliancePage() {
     refresh,
   } = useCompliance();
 
-  const { data: leads, isLoading: leadsLoading } = useLeads();
+  const { data: leads, isLoading: leadsLoading, error: leadsError, refetch: refetchLeads } = useLeads();
 
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState("");
+  const [checkFailed, setCheckFailed] = useState(false);
 
   // Map hook license to LicenseRecord interface used by existing UI
   const license: LicenseRecord | null = useMemo(
@@ -315,6 +316,7 @@ export default function CompliancePage() {
   async function runComplianceCheck() {
     setChecking(true);
     setCheckMsg("");
+    setCheckFailed(false);
     try {
       // Trigger a server-side re-check (license + permit expirations),
       // then refresh the local compliance snapshot so the new state
@@ -338,6 +340,7 @@ export default function CompliancePage() {
       if (result.permits.expiring_in_30d > 0) pieces.push(`${result.permits.expiring_in_30d} expiring in 30d`);
       setCheckMsg(pieces.join(" · "));
     } catch {
+      setCheckFailed(true);
       setCheckMsg("Check failed — please try again.");
     } finally {
       setChecking(false);
@@ -354,17 +357,22 @@ export default function CompliancePage() {
       </div>
 
       {/* API Warnings */}
+      {/* Warning banners use the semantic --destructive / --warning tokens,
+       * which are defined for light, dusk AND dark. The previous
+       * text-red-200 / text-yellow-200 ramps are dark-theme values and
+       * measured ~1.05:1 against their own tint on the default light
+       * theme — the banners were effectively blank coloured strips, and
+       * several of these warnings render nowhere else on the page. */}
       {warnings.length > 0 && warnings.map((w, i) => {
         const isHighSeverity = w.toLowerCase().includes("expired") || w.toLowerCase().includes("no license") || w.toLowerCase().includes("no insurance");
         const borderCls = isHighSeverity
-          ? "border-red-500/30 bg-red-500/10"
-          : "border-yellow-500/30 bg-yellow-500/10";
-        const iconCls = isHighSeverity ? "text-red-400" : "text-yellow-400";
-        const textCls = isHighSeverity ? "text-red-200" : "text-yellow-200";
+          ? "border-destructive/30 bg-destructive/10"
+          : "border-warning/30 bg-warning/10";
+        const textCls = isHighSeverity ? "text-destructive" : "text-warning";
         return (
-          <div key={i} className={`rounded-lg border ${borderCls} px-4 py-3`}>
+          <div key={i} role="alert" className={`rounded-lg border ${borderCls} px-4 py-3`}>
             <div className="flex items-center gap-2">
-              <AlertTriangle className={`h-4 w-4 ${iconCls} shrink-0`} />
+              <AlertTriangle className={`h-4 w-4 ${textCls} shrink-0`} aria-hidden="true" />
               <p className={`text-sm ${textCls} font-medium`}>{w}</p>
             </div>
           </div>
@@ -373,13 +381,13 @@ export default function CompliancePage() {
 
       {/* Permit Expiration Warnings */}
       {warnings.length === 0 && expiringPermits.length > 0 && (
-        <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 space-y-1">
+        <div role="alert" className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 space-y-1">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-yellow-400 shrink-0" />
-            <p className="text-sm text-yellow-200 font-medium">Permit Expiration Warning</p>
+            <AlertTriangle className="h-4 w-4 text-warning shrink-0" aria-hidden="true" />
+            <p className="text-sm text-warning font-medium">Permit Expiration Warning</p>
           </div>
           {expiringPermits.map((p) => (
-            <p key={p.id} className="text-xs text-yellow-300/80 ml-6">
+            <p key={p.id} className="text-xs text-warning ml-6">
               {p.permit_type} at {p.address}{p.city ? `, ${p.city}` : ""} — expires in {daysUntil(p.expiry_date)} days
             </p>
           ))}
@@ -431,7 +439,7 @@ export default function CompliancePage() {
                 {license.license_state}{license.license_type ? ` · ${license.license_type}` : ""}
               </p>
               {license.expiry_date && (
-                <p className={`text-xs font-medium ${expiryDays !== null && expiryDays < 60 ? "text-yellow-500" : "text-muted-foreground"}`}>
+                <p className={`text-xs font-medium ${expiryDays !== null && expiryDays < 60 ? "text-warning" : "text-muted-foreground"}`}>
                   Expires {formatDate(license.expiry_date, { month: "short", day: "numeric", year: "numeric" })}
                   {expiryDays !== null && expiryDays < 60 && ` — ${expiryDays} days remaining`}
                 </p>
@@ -445,7 +453,7 @@ export default function CompliancePage() {
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-yellow-500" />
+              <AlertTriangle className="h-5 w-5 text-warning" />
               <div>
                 <p className="text-sm font-medium text-foreground">No license on file</p>
                 <a href="/onboarding/license" className="text-xs text-primary hover:underline">Add your license</a>
@@ -513,7 +521,7 @@ export default function CompliancePage() {
             </div>
             <a
               href="/settings/account"
-              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity"
+              className="inline-flex items-center gap-2 rounded-md bg-cta px-4 py-2 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity"
             >
               Connect your insurance
             </a>
@@ -536,6 +544,22 @@ export default function CompliancePage() {
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-4 w-3/4" />
+            </div>
+          ) : leadsError ? (
+            /* A lead-fetch failure must not read as "no permits" — that is
+             * the difference between an outage and a genuinely empty
+             * territory. */
+            <div role="alert" className="flex items-center justify-between gap-3 p-4">
+              <p className="text-sm text-muted-foreground">
+                Couldn&apos;t load your permits &mdash; check your connection and retry.
+              </p>
+              <button
+                type="button"
+                onClick={() => refetchLeads()}
+                className="text-sm font-medium text-primary underline underline-offset-2 hover:opacity-80"
+              >
+                Retry
+              </button>
             </div>
           ) : permitCount === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 space-y-2">
@@ -571,7 +595,7 @@ export default function CompliancePage() {
                       </td>
                       <td className="px-4 py-3">
                         {p.expiry_date ? (
-                          <span className={days !== null && days <= 30 ? "text-yellow-400 font-medium" : "text-muted-foreground"}>
+                          <span className={days !== null && days <= 30 ? "text-warning font-medium" : "text-muted-foreground"}>
                             {formatDate(p.expiry_date, { month: "short", day: "numeric" })}
                             {days !== null && days <= 30 && days > 0 && ` (${days}d)`}
                           </span>
@@ -638,12 +662,19 @@ export default function CompliancePage() {
         <button
           onClick={runComplianceCheck}
           disabled={checking || isLoading}
-          className="flex items-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+          className="flex items-center gap-2 rounded-md bg-cta px-5 py-2.5 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
         >
           <RefreshCw className={`h-4 w-4 ${checking ? "animate-spin" : ""}`} />
           {checking ? "Checking..." : "Run Compliance Check"}
         </button>
-        {checkMsg && <p className="text-sm text-muted-foreground">{checkMsg}</p>}
+        {checkMsg && (
+          <p
+            role="status"
+            className={`text-sm ${checkFailed ? "text-destructive" : "text-muted-foreground"}`}
+          >
+            {checkMsg}
+          </p>
+        )}
       </div>
     </div>
   );

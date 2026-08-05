@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
+import { isUuid } from "@/lib/validation/params";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,9 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
   if (guard.response) return guard.response;
 
   const { id: leadId } = await ctx.params;
+  if (!isUuid(leadId)) {
+    return NextResponse.json({ error: "Malformed lead id" }, { status: 400 });
+  }
 
   // Verify the lead is visible to the caller (RLS-scoped) before logging.
   const { data: lead } = await supabase

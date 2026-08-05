@@ -10,14 +10,9 @@ import { requireContractor } from "@/lib/auth/requireContractor";
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const { user } = gate;
 
     const status = request.nextUrl.searchParams.get("status");
 
@@ -70,7 +65,7 @@ export async function POST(req: NextRequest) {
     if (gate.response) return gate.response;
     const user = gate.user;
 
-    const raw = await req.json();
+    const raw = await req.json().catch(() => null);
     const parsed = parseBody(EstimateCreateBodySchema, raw);
     if (parsed.response) return parsed.response;
     const {

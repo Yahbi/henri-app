@@ -77,9 +77,27 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  // Contractor-only surfaces, for both the auth gate and the role gate
+  // below.
+  //
+  // `/settings/*` is the trap here: those pages live at
+  // src/app/(dashboard)/settings/**, so they LOOK dashboard-scoped in the
+  // source tree, but `(dashboard)` is a Next.js route GROUP — it
+  // contributes nothing to the URL. The real path is /settings/billing,
+  // which no `startsWith("/dashboard")` check ever matched. Result: every
+  // gate below (auth, role, onboarding-step) skipped the entire settings
+  // surface, so a homeowner could open contractor billing and a
+  // contractor mid-onboarding could reach it before paying.
+  //
+  // Note this is distinct from /dashboard/settings/*, a SEPARATE set of
+  // pages under src/app/(dashboard)/dashboard/settings/** which were
+  // always covered by the /dashboard prefix.
+  const isContractorPath =
+    pathname.startsWith("/dashboard") || pathname.startsWith("/settings");
+
   // Protected routes: require authentication
   if (!user) {
-    if (pathname.startsWith("/dashboard") || pathname.startsWith("/homeowner") || pathname.startsWith("/onboarding")) {
+    if (isContractorPath || pathname.startsWith("/homeowner") || pathname.startsWith("/onboarding")) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("redirect", pathname);
       return NextResponse.redirect(loginUrl);
@@ -117,8 +135,8 @@ export async function middleware(request: NextRequest) {
     return redirectWithReason("/dashboard", "contractor_area");
   }
 
-  // Homeowner trying to access contractor dashboard → redirect to homeowner
-  if (role === "homeowner" && pathname.startsWith("/dashboard")) {
+  // Homeowner trying to access contractor dashboard or settings → redirect
+  if (role === "homeowner" && isContractorPath) {
     return redirectWithReason("/homeowner", "homeowner_area");
   }
 
@@ -127,8 +145,10 @@ export async function middleware(request: NextRequest) {
     return redirectWithReason("/homeowner", "homeowner_area");
   }
 
-  // Contractor who hasn't completed onboarding → redirect to onboarding
-  if (role === "contractor" && !onboardingDone && pathname.startsWith("/dashboard")) {
+  // Contractor who hasn't completed onboarding → redirect to onboarding.
+  // Covers /settings/* too: it is a contractor surface reachable before
+  // payment, and /settings/billing in particular was loadable mid-funnel.
+  if (role === "contractor" && !onboardingDone && isContractorPath) {
     return redirectWithReason("/onboarding/license", "onboarding_required");
   }
 

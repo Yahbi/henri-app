@@ -145,10 +145,15 @@ function ChevronDown({ className = "" }: { className?: string }) {
 // they leaked internal infrastructure and the word "scrape" into
 // user-facing copy, violating the never-reveal-sourcing rule. The
 // verifiability rationale lives in THIS comment, not in the UI.
-// Note on the states number: "30+" here is a COVERAGE claim (the DB
-// holds permits from 38 states); the homepage's live label counts
-// states with new permits in the last 30 days (a smaller, ingest-
-// dependent number). Both are true; they measure different things.
+// Note on the states number: "30+" here is a COVERAGE claim — the DB
+// holds permits from more than 30 states.
+// 2026-08-04 CORRECTION: the paragraph that used to sit here claimed the
+// homepage label "counts states with new permits in the last 30 days (a
+// smaller, ingest-dependent number)". That was wrong in both halves —
+// `getLandingStats().activeStates` was a hand-curated constant, not a
+// 30-day query, and it was smaller because it was stale, not because it
+// measured recency. Do not reason about the homepage label from here;
+// read src/lib/stats/landing.ts for whatever it computes today.
 // 2026-06-10: crossed 1.5M clean permits (1,553,689 = 1,800,380 raw minus
 // 246,691 junk-state rows; live query). Bumped per the truthfulness rule.
 // 2026-08-04: live count is now 2,193,974 permits — the "1.5M+" here had gone
@@ -169,10 +174,15 @@ const STATS = [
 // to the pattern level per CLAUDE.md truthfulness rules.
 const PROBLEMS = [
   "Your lead is re-sold to multiple contractors at once. Angi's own onboarding flow tells homeowners they will be \u201cmatched with up to four local pros,\u201d and HomeAdvisor/Porch work the same way \u2014 first to call wins, and it is rarely you.",
-  "Pay-per-lead marketplaces charge per contact and do not refund bad leads. A contractor running the math on published lead prices typically spends several hundred dollars on contacts for every job closed.",
+  "Pay-per-lead marketplaces charge you per contact, whether or not the contact ever answers, and bad contacts are rarely refunded. Your cost per closed job is whatever the marketplace decides it is.",
   "Lead quality is fabricated. The FTC fined HomeAdvisor $7.2M in 2023 for deceptive lead-quality marketing (FTC v. HomeAdvisor, FTC file no. 192-3124).",
   "Long-term auto-renewing contracts with substantial cancellation penalties are common in the referral-marketplace category \u2014 surfaced repeatedly in BBB complaint narratives. Even when leads convert poorly, you're locked in.",
-  "Contractor satisfaction averages 1.96 / 5 across 3,000+ BBB reviews (BBB complaint corpus, 2024). Angi Inc.'s (NASDAQ: ANGI) annual revenue has declined materially from its 2021 peak, per the company's public 10-K filings.",
+  // 2026-08-04 truthfulness pass: dropped "Contractor satisfaction averages
+  // 1.96 / 5 across 3,000+ BBB reviews (BBB complaint corpus, 2024)". Same
+  // unsourced competitor rating that was already pulled from the comparison
+  // table below for defamation risk \u2014 it had survived here. The Angi Inc.
+  // revenue sentence stays: it cites the company's own public 10-K filings.
+  "Angi Inc.'s (NASDAQ: ANGI) annual revenue has declined materially from its 2021 peak, per the company's public 10-K filings \u2014 the model is shrinking, and the squeeze lands on contractors.",
 ];
 
 // 2026-04-30: removed "You own your ZIP. One roofer per ZIP \u2014 period.
@@ -220,7 +230,10 @@ const STEPS = [
   },
   {
     title: "You receive the lead",
-    desc: "The scored, enriched lead appears in your dashboard. You compose outreach from a per-trade template library (40+ system defaults across roofing, HVAC, plumbing, electrical, solar, ADU, general remodel) or a saved template of your own.",
+    // Template count verified by live query 2026-08-04:
+    //   select count(*) from outreach_templates where is_default = true → 42
+    // (7 trades × 3 stages × 2 channels, seeded by migration 00047).
+    desc: "The scored, enriched lead appears in your dashboard. You compose outreach from a per-trade template library (42 system defaults across roofing, HVAC, plumbing, electrical, solar, ADU, general remodel) or a saved template of your own.",
   },
   {
     title: "You close the job",
@@ -249,36 +262,52 @@ const FEATURES = [
   {
     badge: null,
     icon: <TerritoryIcon />,
-    title: "Per-trade ZIP territories",
-    desc: "Founder/Starter/Pro/Enterprise plans include 3/5/12/20 ZIP territories respectively. A roofer and an HVAC contractor can both hold the same ZIP without conflict \u2014 trades are independent.",
+    title: "ZIP territories",
+    // 2026-08-04 truthfulness pass: previous copy said "A roofer and an HVAC
+    // contractor can both hold the same ZIP without conflict \u2014 trades are
+    // independent." The `territories` table (migration 00003) has NO trade
+    // column; exclusivity is per (zip, slot_number) with slot_number 1..3.
+    // So territories are slot-limited, not trade-scoped. Copy now describes
+    // the mechanism that actually ships.
+    desc: "Founder/Starter/Pro/Enterprise plans include 3/5/12/20 ZIP territories respectively. Each ZIP has a limited number of contractor slots \u2014 claim yours and hold it for as long as your subscription stays active.",
   },
   {
     badge: null,
     icon: <OutreachIcon />,
     title: "Per-trade outreach templates",
-    desc: "50 system-default outreach templates across 7 trades (roofing, HVAC, plumbing, electrical, solar, ADU, general remodel) seeded into your library. Customize, save your own, or use as-is.",
+    // 42, not 50 \u2014 live query 2026-08-04 (see STEPS comment above).
+    desc: "42 system-default outreach templates across 7 trades (roofing, HVAC, plumbing, electrical, solar, ADU, general remodel) seeded into your library. Customize, save your own, or use as-is.",
   },
   {
     badge: null,
     icon: <CanvassIcon />,
+    // "roof age" dropped 2026-08-04: no roof-age field exists on any lead or
+    // property record, and no free national roof-age dataset backs it.
     title: "Canvass targeting",
-    desc: "Door-knock target lists built from permit data and roof age. Storm overlay shows which doors to knock first. Property data visible on each address.",
+    desc: "Door-knock target lists built from permit data and property context. The storm overlay shows which doors to knock first. Property detail is visible on each address.",
   },
   {
     badge: "New",
     icon: <StormIcon />,
     title: "Storm Center",
-    desc: "Live NOAA radar plus a daily NOAA storm-events feed. When severe weather hits a ZIP you cover, Henri flags affected properties and surfaces a storm-impact urgency boost on the lead score.",
+    // Agency name removed 2026-08-04 per the never-reveal-sourcing rule.
+    desc: "Live weather radar plus a daily severe-weather feed. When severe weather hits a ZIP you cover, Henri flags affected properties and surfaces a storm-impact urgency boost on the lead score.",
   },
 ];
 
 const COMPARISON_ROWS = [
+  // 2026-08-04 truthfulness pass: the competitor columns carried specific
+  // dollar ranges ($300\u2013$2,500+ / $10\u2013$200 per lead / $250\u2013$500+) with no
+  // citation behind any of them. Per CLAUDE.md, an unprovable number does
+  // not ship. Replaced with each vendor's PRICING MODEL, which is stated
+  // publicly by the vendors themselves and needs no number to be true.
+  // Henri's own figure stays \u2014 it is our published price list.
   {
-    feature: "Monthly cost",
-    henri: "$149\u2013$2,555 flat",
-    angi: "$300\u2013$2,500+",
-    thumbtack: "$10\u2013$200/lead",
-    acculynx: "$250\u2013$500+",
+    feature: "Pricing model",
+    henri: "$149\u2013$2,555 flat monthly",
+    angi: "Membership + per-lead fees",
+    thumbtack: "Per-lead fees",
+    acculynx: "Per-seat license, quoted",
   },
   // "Lead exclusivity" row removed 2026-04-30 \u2014 see plan file. The
   // lock concept exists in code but no UI path acquires one, so the
@@ -337,12 +366,15 @@ const COMPARISON_ROWS = [
     thumbtack: { text: "No", cross: true },
     acculynx: { text: "Manual only", partial: true },
   },
+  // "12-month lock-in" (Angi) and "Annual contract" (AccuLynx) were stated
+  // as fact with no citation \u2014 softened 2026-08-04 to the claim we can
+  // actually stand behind: Henri has no contract term, the others do.
   {
     feature: "Cancel anytime",
-    henri: { text: "\u2713", check: true },
-    angi: { text: "12-month lock-in", cross: true },
+    henri: { text: "\u2713 No contract term", check: true },
+    angi: { text: "Contract terms apply", cross: true },
     thumbtack: { text: "\u2713", check: true },
-    acculynx: { text: "Annual contract", cross: true },
+    acculynx: { text: "Contract terms apply", cross: true },
   },
   // Competitor rating row removed pending a sourced citation. Publishing
   // specific ratings ("Angi 1.96/5") without a link to the underlying
@@ -375,15 +407,23 @@ const FAQ_ITEMS = [
   // answer was overclaiming. See ~/.claude/plans/whats-the-14-days-purring-papert.md.
   {
     q: "What trades does Henri cover?",
-    a: "Henri covers all residential and light commercial trades: Roofing, Solar, HVAC, Electrical, Plumbing, Addition, ADU, Windows, Painting, Landscaping, General Remodel, and Foundation. Each trade is sold as a separate territory \u2014 a roofer and an HVAC contractor can both own the same ZIP without conflict.",
+    // 2026-08-04: removed "Each trade is sold as a separate territory \u2014 a
+    // roofer and an HVAC contractor can both own the same ZIP without
+    // conflict." Territories are not trade-scoped in the schema.
+    a: "Henri covers all residential and light commercial trades: Roofing, Solar, HVAC, Electrical, Plumbing, Addition, ADU, Windows, Painting, Landscaping, General Remodel, and Foundation. Your lead feed is filtered to the trade you sign up under.",
   },
   {
     q: "Can I change my ZIP territories?",
     a: "Territory changes take effect at the start of your next billing cycle. If the ZIP you want is available at that time, it will be assigned to you. You cannot swap territories mid-cycle \u2014 this ensures lead continuity for both you and the homeowners in your area.",
   },
   {
+    // 2026-08-04 truthfulness pass: was "We verify your license before your
+    // first lead is delivered, and our compliance system checks license
+    // status daily. If your license expires or is revoked, lead delivery is
+    // paused until the issue is resolved." None of the three enforcement
+    // claims hold — see the TrustSignals.tsx comment for the code walk.
     q: "Do I need a valid contractor license?",
-    a: "Yes. A valid, active contractor license is required to use Henri. We verify your license before your first lead is delivered, and our compliance system checks license status daily. If your license expires or is revoked, lead delivery is paused until the issue is resolved.",
+    a: "Yes. A valid, active contractor license is required to use Henri. At signup we match your license number against the public license roster we hold for your state — nine states are covered today, and licenses from other states go to manual review. You are responsible for keeping your license current while you're subscribed.",
   },
   {
     q: "Can I cancel my subscription?",
@@ -405,7 +445,9 @@ const FAQ_ITEMS = [
 // infrastructure exists but no UI acquires a lock and no cron enforces
 // the forfeit, so the claim was overclaiming.
 const PROOF_STATS = [
-  { num: "Daily", label: "Permit catalog refreshed every day at 2 AM UTC" },
+  // 2026-08-04: dropped the "at 2 AM UTC" suffix — same internal-schedule
+  // leak the STATS/FEATURES strings were cleaned of on 2026-06-09.
+  { num: "Daily", label: "Permit catalog refreshed every day" },
   { num: "Flat", label: "Monthly subscription \u2014 no per-lead fees, no 12-month contracts" },
   { num: "24 hrs", label: "Free trial to explore the full platform before any charge" },
   { num: "Any time", label: "Cancel from your dashboard \u2014 takes effect at end of billing cycle" },
@@ -449,12 +491,20 @@ function ComparisonCell({
 
 /* ─── FAQ accordion item ────────────────────────────────────────────── */
 
+/* Accordion a11y (2026-08-04): the trigger was a bare <button> with only
+ * aria-expanded — no type (so it would submit if ever nested in a form),
+ * no aria-controls pointing at the panel it opens, and the collapsed panel
+ * stayed in the accessibility tree at max-h-0, so screen readers announced
+ * every answer regardless of open state. Added type/id/aria-controls and
+ * hid the closed panel from assistive tech. */
 function FAQItem({
+  id,
   question,
   answer,
   open,
   onToggle,
 }: {
+  id: string;
   question: string;
   answer: string;
   open: boolean;
@@ -463,9 +513,12 @@ function FAQItem({
   return (
     <div className="border-b border-border">
       <button
+        type="button"
+        id={`${id}-trigger`}
         onClick={onToggle}
-        className="flex w-full items-center justify-between gap-3 py-5 text-left text-[15.5px] font-semibold text-foreground"
+        className="flex w-full items-center justify-between gap-3 py-5 text-left text-[15.5px] font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-expanded={open}
+        aria-controls={`${id}-panel`}
       >
         {question}
         <ChevronDown
@@ -475,6 +528,10 @@ function FAQItem({
         />
       </button>
       <div
+        id={`${id}-panel`}
+        role="region"
+        aria-labelledby={`${id}-trigger`}
+        aria-hidden={!open}
         className={`overflow-hidden text-[14.5px] leading-[1.75] text-muted-foreground transition-all duration-300 ${
           open ? "max-h-[500px] pb-5" : "max-h-0"
         }`}
@@ -521,7 +578,7 @@ export default function ContractorsPage() {
             <div className="mb-9 flex flex-wrap gap-3">
               <Link
                 href="#pricing"
-                className="inline-block rounded-[10px] bg-primary px-8 py-3.5 text-[15px] font-semibold text-white transition-colors hover:bg-primary/90"
+                className="inline-block rounded-[10px] bg-cta px-8 py-3.5 text-[15px] font-semibold text-cta-foreground transition-colors hover:bg-primary/90"
               >
                 See pricing &amp; territories
               </Link>
@@ -551,55 +608,65 @@ export default function ContractorsPage() {
           <div className="relative hidden overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-lg lg:block">
             {/* Glow */}
             <div className="pointer-events-none absolute -right-[60px] -top-[60px] h-[200px] w-[200px] rounded-full bg-primary/[0.18] blur-2xl" />
+            {/* 2026-08-04 truthfulness pass on this mock card. Previously it
+              * showed scores of 94 / 88 / 76 all badged "Hot" with "2 min
+              * ago" / "8 min ago" timestamps. Two problems: (a) the live max
+              * lead score is 69 and zero leads currently reach the Hot band
+              * (>=75), so the card advertised an outcome the scorer cannot
+              * produce; (b) minute-level timestamps implied real-time
+              * ingestion, contradicting the daily catalog cadence stated
+              * everywhere else on this page. Scores now sit in the real
+              * observed range with the matching Warm band, and timestamps
+              * are day-grain. */}
             <p className="relative mb-3.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-              Example view &mdash; ZIP 90278 &middot; Redondo Beach
+              Illustrative example &mdash; ZIP 90278 &middot; Redondo Beach
             </p>
             <div className="relative mb-3.5 flex flex-col gap-2">
               {/* Lead 1 */}
               <div className="flex items-center gap-2.5 rounded-[9px] border border-border bg-card p-2.5">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-extrabold text-white">
-                  94
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cta text-[11px] font-extrabold text-cta-foreground">
+                  68
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-semibold text-foreground">
                     1842 Redondo Ave
                   </div>
                   <div className="text-[11px] text-muted-foreground">
-                    Roofing &middot; $74K permit &middot; 2 min ago
+                    Roofing &middot; $74K permit &middot; Today
                   </div>
                 </div>
                 <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                  Hot
+                  Warm
                 </span>
               </div>
               {/* Lead 2 */}
               <div className="flex items-center gap-2.5 rounded-[9px] border border-border bg-card p-2.5">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-extrabold text-white">
-                  88
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cta text-[11px] font-extrabold text-cta-foreground">
+                  61
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-semibold text-foreground">
                     6201 W 83rd St
                   </div>
                   <div className="text-[11px] text-muted-foreground">
-                    Roof Replace &middot; Cascade signal &middot; 8 min ago
+                    Roof Replace &middot; Cascade signal &middot; Today
                   </div>
                 </div>
                 <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                  Hot
+                  Warm
                 </span>
               </div>
               {/* Lead 3 */}
               <div className="flex items-center gap-2.5 rounded-[9px] border border-border bg-card p-2.5">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-yellow-600 text-[11px] font-extrabold text-white">
-                  76
+                  54
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-semibold text-foreground">
                     1058 N Pacific Ave
                   </div>
                   <div className="text-[11px] text-muted-foreground">
-                    ADU + Roof &middot; Owner-occupied &middot; 31 min ago
+                    ADU + Roof &middot; Owner-occupied &middot; Yesterday
                   </div>
                 </div>
                 <span className="shrink-0 rounded bg-yellow-600/15 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-700 dark:text-yellow-500">
@@ -607,9 +674,13 @@ export default function ContractorsPage() {
                 </span>
               </div>
             </div>
+            {/* 2026-08-04: was "Your territory. Only you see these leads."
+              * The `territories` table has three claimable slots per ZIP and
+              * no trade column, so sole visibility is not what ships. */}
             <div className="relative border-t border-border pt-2.5 text-center text-[11.5px] text-muted-foreground">
-              Your territory. <strong className="text-primary">Only you</strong>{" "}
-              see these leads.
+              Scored and sorted so the{" "}
+              <strong className="text-primary">highest-intent permits</strong>{" "}
+              surface first.
             </div>
           </div>
         </div>
@@ -647,10 +718,14 @@ export default function ContractorsPage() {
               Lead gen is <em className="text-primary">broken</em> for
               contractors
             </h2>
+            {/* 2026-08-04: dropped "Henri was built by contractors who got
+              * tired of paying $2,500 per closed job." Neither half is
+              * provable — the $2,500 figure has no source and the origin
+              * story overstates who built the product. */}
             <p className="text-base leading-relaxed text-muted-foreground">
               Every major platform optimizes for homeowner volume at your
-              expense. Henri was built by contractors who got tired of paying
-              $2,500 per closed job.
+              expense. You pay for the introduction, not the outcome — and you
+              pay again for the same homeowner your competitors just called.
             </p>
           </div>
 
@@ -701,11 +776,15 @@ export default function ContractorsPage() {
             <p className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-primary">
               How Henri works
             </p>
+            {/* 2026-08-04: was "…to you on the phone in under 5 minutes."
+              * The catalog refreshes daily, which every other line on this
+              * page states correctly. The headline promised a cadence the
+              * pipeline does not run at. */}
             <h2 className="font-heading text-[clamp(28px,3.5vw,42px)] font-normal leading-[1.2] tracking-tight">
-              From permit filing to
+              From permit filing to a
               <br />
-              <em className="text-primary">you on the phone</em> in under 5
-              minutes
+              <em className="text-primary">scored, enriched lead</em> in your
+              dashboard
             </h2>
           </div>
 
@@ -757,7 +836,7 @@ export default function ContractorsPage() {
                 className="group rounded-[14px] border border-border bg-card p-7 transition-all hover:-translate-y-0.5 hover:border-primary hover:shadow-lg hover:shadow-primary/10"
               >
                 {f.badge && (
-                  <span className="mb-2.5 inline-block rounded bg-primary px-1.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-white">
+                  <span className="mb-2.5 inline-block rounded bg-cta px-1.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-cta-foreground">
                     {f.badge}
                   </span>
                 )}
@@ -854,9 +933,13 @@ export default function ContractorsPage() {
               <br />
               <em className="text-primary">years</em> of Henri
             </h2>
+            {/* 2026-08-04: "one roofer per ZIP, per trade" removed — the
+              * territories table has three slots per ZIP and no trade
+              * column, so the claim describes a mechanism that isn't built. */}
             <p className="text-base leading-relaxed text-[#9E9C92]">
-              No per-lead fees. No setup costs. No contracts. Own your territory
-              &mdash; one roofer per ZIP, per trade.
+              No per-lead fees. No setup costs. No contracts. Claim the ZIP
+              territories your plan includes and keep them while you&apos;re
+              subscribed.
             </p>
           </div>
 
@@ -894,7 +977,7 @@ export default function ContractorsPage() {
               </div>
               <Link
                 href="/pricing"
-                className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-[9px] bg-primary px-6 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+                className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-[9px] bg-cta px-6 text-sm font-semibold text-cta-foreground transition-colors hover:bg-primary/90"
               >
                 See all plans &rarr;
               </Link>
@@ -935,6 +1018,7 @@ export default function ContractorsPage() {
             {FAQ_ITEMS.map((item, i) => (
               <FAQItem
                 key={i}
+                id={`contractor-faq-${i}`}
                 question={item.q}
                 answer={item.a}
                 open={openFaq === i}
@@ -955,24 +1039,32 @@ export default function ContractorsPage() {
             <br />
             <em className="text-primary">open right now</em>.
           </h2>
-          <p className="mb-9 text-[17px] leading-relaxed text-white/55">
-            Claim your ZIPs before another contractor does. The first contractor in
-            a territory owns it for as long as they stay subscribed. Start your
+          {/* 2026-08-04: "The first contractor in a territory owns it" implied
+            * sole ownership of a ZIP. Slots are limited (three per ZIP) but
+            * not singular — copy now says what the schema enforces. Body text
+            * also bumped from text-white/55 to text-white/70 for contrast. */}
+          <p className="mb-9 text-[17px] leading-relaxed text-white/70">
+            Each ZIP has a limited number of contractor slots, and yours stays
+            yours for as long as your subscription is active. Start your
             24-hour free trial today &mdash; credit card required.
           </p>
           <div className="flex flex-wrap justify-center gap-3.5">
             <Link
               href="/signup?role=contractor"
-              className="inline-block rounded-[11px] bg-primary px-10 py-4 text-base font-semibold text-white transition-colors hover:bg-primary/90"
+              className="inline-block rounded-[11px] bg-cta px-10 py-4 text-base font-semibold text-cta-foreground transition-colors hover:bg-primary/90"
             >
               Claim your territory
             </Link>
-            <Link
-              href="/signup?role=contractor"
+            {/* 2026-08-04: this button said "Talk to sales" and pointed at
+              * /signup — the label promised a conversation and delivered a
+              * signup form. Now opens a real mail path to the sales address
+              * already used by the billing surface. */}
+            <a
+              href="mailto:sales@meethenri.com?subject=Henri%20for%20Contractors%20%E2%80%94%20sales%20enquiry"
               className="inline-block rounded-[11px] border border-white/20 px-8 py-4 text-base font-medium text-white/70 transition-colors hover:border-white/45 hover:text-white"
             >
               Talk to sales
-            </Link>
+            </a>
           </div>
         </div>
       </section>

@@ -49,6 +49,9 @@ function BlastPageInner() {
   const [homeCount, setHomeCount] = useState(0);
   const [estimateSource, setEstimateSource] = useState<"data" | "density">("density");
   const [estimateLoading, setEstimateLoading] = useState(false);
+  // The insert's error field was never read, so a failed queue still
+  // rendered the green "Blast queued" confirmation.
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const won: Lead[] = useMemo(() => wonLeads ?? [], [wonLeads]);
   const selectedLead = won.find((l) => l.id === selectedLeadId) ?? won[0];
@@ -100,18 +103,34 @@ function BlastPageInner() {
   async function handleSend() {
     if (!user || !selectedLead) return;
     setSending(true);
-    const supabase = createClient();
-    await supabase.from("blast_campaigns").insert({
-      contractor_id: user.id,
-      job_type: selectedLead.permit_type ?? selectedLead.trade ?? "General",
-      radius_miles: parseFloat(radius),
-      target_count: homeCount,
-      status: "queued",
-    });
-    setSending(false);
-    setSent(true);
-    await loadBlasts();
-    setTimeout(() => setSent(false), 4000);
+    setSendError(null);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.from("blast_campaigns").insert({
+        contractor_id: user.id,
+        job_type: selectedLead.permit_type ?? selectedLead.trade ?? "General",
+        radius_miles: parseFloat(radius),
+        target_count: homeCount,
+        status: "queued",
+        // `lead_id` and `channels` are real columns on blast_campaigns
+        // (migration 00011) that this form collected and then discarded —
+        // the SMS/Email toggles had no effect on the queued row at all.
+        lead_id: selectedLead.id,
+        channels,
+      });
+      if (error) throw new Error(error.message);
+      setSent(true);
+      await loadBlasts();
+      setTimeout(() => setSent(false), 4000);
+    } catch (err) {
+      setSendError(
+        err instanceof Error
+          ? `Couldn't queue that blast — ${err.message}`
+          : "Couldn't queue that blast — try again.",
+      );
+    } finally {
+      setSending(false);
+    }
   }
 
   const toggleChannel = (ch: "sms" | "email") =>
@@ -201,17 +220,35 @@ function BlastPageInner() {
 
           <Card className="p-5 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Message Preview</h3>
+            {/* Truthfulness: the preview used to hardcode "a roof
+                replacement" regardless of the selected job's trade AND an
+                unsourced "15% off estimates" the contractor never
+                configured — both sitting directly above a live send
+                button. Derive the trade from the selected lead and drop
+                the invented discount. */}
             <div className="rounded-md bg-bg-subtle p-4 text-sm text-foreground leading-relaxed">
               <p>Hi neighbor!</p>
               <p className="mt-2">
-                We just completed a roof replacement at{" "}
+                We just completed{" "}
+                {selectedLead?.trade
+                  ? `a ${selectedLead.trade.toLowerCase()} job`
+                  : "a job"}{" "}
+                at{" "}
                 <span className="font-medium">{selectedLead?.address ?? "your neighbor's home"}</span>.
                 As a local homeowner, you may want a free inspection before the next storm season.
-                We are offering neighbors 15% off estimates through the end of the month.
               </p>
               <p className="mt-2">Reply YES for a free estimate.</p>
             </div>
           </Card>
+
+          {sendError && (
+            <div
+              role="alert"
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
+              {sendError}
+            </div>
+          )}
 
           {sent ? (
             <div className="w-full flex items-center justify-center gap-2 rounded-md bg-green-600 px-5 py-2.5 text-sm font-medium text-white">
@@ -220,9 +257,17 @@ function BlastPageInner() {
             </div>
           ) : (
             <button
+              type="button"
               onClick={handleSend}
-              disabled={sending || won.length === 0}
-              className="w-full flex items-center justify-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+              disabled={sending || won.length === 0 || (!channels.sms && !channels.email)}
+              title={
+                !channels.sms && !channels.email
+                  ? "Pick at least one channel"
+                  : won.length === 0
+                    ? "Close a deal first — blasts are anchored to a completed job"
+                    : undefined
+              }
+              className="w-full flex items-center justify-center gap-2 rounded-md bg-cta px-5 py-2.5 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               <Send className="h-4 w-4" />
               {sending ? "Queuing..." : `Send Blast to ${homeCount} Homes`}

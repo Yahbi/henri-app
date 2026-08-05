@@ -5,6 +5,7 @@ import { hasResend } from "@/lib/env";
 import { EstimatePatchBodySchema, parseBody } from "@/lib/schemas/api";
 import { logger } from "@/lib/logger";
 import { requireContractor } from "@/lib/auth/requireContractor";
+import { isUuid } from "@/lib/validation/params";
 
 /* ─── GET /api/estimates/[id] — single estimate detail ─── */
 export async function GET(
@@ -13,6 +14,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    if (!isUuid(id)) {
+      return NextResponse.json({ error: "Malformed estimate id" }, { status: 400 });
+    }
     const supabase = await createClient();
 
     const {
@@ -71,6 +75,9 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    if (!isUuid(id)) {
+      return NextResponse.json({ error: "Malformed estimate id" }, { status: 400 });
+    }
     const supabase = await createClient();
     /* PATCH is contractor-only (homeowner uses /api/quotes/[id] PATCH for
      * tier-selection). Replace the bare auth.getUser() with the role gate

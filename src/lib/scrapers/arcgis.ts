@@ -2,12 +2,31 @@
  * ArcGIS Feature Service scraper
  *
  * ArcGIS REST endpoints follow the pattern:
- *   {base}/query?where=1=1&outFields=*&f=json&resultOffset={n}&resultRecordCount=1000
+ *   {base}/query?where=1=1&outFields=*&f=json&resultOffset={n}&resultRecordCount={k}
  *
  * Response shape:
  *   { features: [{ attributes: { PERMIT_NUM: "...", ... }, geometry: { x: lng, y: lat } }] }
  *
  * Note: ArcGIS geometry uses x = longitude, y = latitude (opposite of typical lat/lng order).
+ *
+ * PAGINATION (fixed 2026-08-04)
+ * -----------------------------
+ * The old loop hard-coded a 1000-row page and stopped when
+ * `exceededTransferLimit` was absent. Two ways that lost data:
+ *
+ *   1. `exceededTransferLimit` is an OPTIONAL field. Plenty of servers
+ *      (and every `MapServer` on older ArcGIS builds) simply never send it,
+ *      so paging stopped dead after page 0 — one page, ever.
+ *   2. When a server's `maxRecordCount` is below 1000 it silently returns
+ *      fewer rows than asked for. The old `features.length < 1000` check
+ *      read that as "last page" and quit. Columbus caps at 500 and was
+ *      ingesting ~0.15% of its catalog.
+ *
+ * The loop now pages on `resultOffset` / `resultRecordCount` and keeps going
+ * while the returned feature count equals the page size it actually asked
+ * for, honouring the server's advertised `maxRecordCount` when that is
+ * smaller, and adopting the server's real cap at runtime if it silently
+ * truncates a page while still flagging `exceededTransferLimit`.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -22,7 +41,16 @@ import {
   parseMoney,
   BROWSER_UA,
 } from "./normalizer";
-import type { ScrapeResult } from "@/types/permits";
+import {
+  type ScrapeReport,
+  type ScrapeOutcome,
+  collectObservedKeys,
+  emptyReport,
+  isMappingFailure,
+  looksLikeNonPermitDataset,
+} from "./types";
+import { coordinatePair } from "./geo";
+import { extractContactWithProvenance } from "@/lib/ingest/extract-contact";
 
 interface ArcGISSource {
   source_key: string;
@@ -49,10 +77,12 @@ interface ArcGISResponse {
   exceededTransferLimit?: boolean;
 }
 
+export const DEFAULT_PAGE_SIZE = 1000;
+
 async function fetchArcGISPage(
   baseUrl: string,
   offset: number,
-  limit: number = 1000
+  limit: number = DEFAULT_PAGE_SIZE
 ): Promise<ArcGISResponse> {
   const url = `${baseUrl}/query?where=1%3D1&outFields=*&f=json&resultOffset=${offset}&resultRecordCount=${limit}&returnGeometry=true`;
 
@@ -75,6 +105,81 @@ async function fetchArcGISPage(
     }
   }
   throw new Error("Max retries exceeded");
+}
+
+/**
+ * Layer metadata cache: endpoint -> advertised maxRecordCount (or null).
+ *
+ * One extra request per endpoint per process, not per run — a serverless
+ * instance handles many sources, so this amortises well. Best-effort: any
+ * failure returns null and we fall back to runtime inference.
+ */
+const maxRecordCountCache = new Map<string, number | null>();
+
+export async function fetchMaxRecordCount(endpoint: string): Promise<number | null> {
+  const cached = maxRecordCountCache.get(endpoint);
+  if (cached !== undefined) return cached;
+
+  let value: number | null = null;
+  try {
+    const res = await fetch(`${endpoint}?f=json`, {
+      headers: { "User-Agent": BROWSER_UA },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.ok) {
+      const meta = (await res.json()) as { maxRecordCount?: unknown };
+      const n = Number(meta?.maxRecordCount);
+      if (Number.isFinite(n) && n > 0) value = Math.floor(n);
+    }
+  } catch {
+    // Metadata is a nicety, never a blocker — runtime inference covers us.
+    value = null;
+  }
+  maxRecordCountCache.set(endpoint, value);
+  return value;
+}
+
+/** Test seam — lets unit tests exercise the paging loop deterministically. */
+export function __resetMaxRecordCountCache(): void {
+  maxRecordCountCache.clear();
+}
+
+/**
+ * Decide the next paging step from one page's result.
+ *
+ * Pure so the pagination rules — the exact thing that was broken — can be
+ * unit-tested without a network.
+ *
+ *   - `count === 0`                        -> stop, feed exhausted
+ *   - `count === requested`                -> keep paging (the primary rule;
+ *                                             NOT dependent on the optional
+ *                                             `exceededTransferLimit` flag)
+ *   - `count < requested` + limit flagged  -> the server capped us below what
+ *                                             we asked for. Adopt `count` as
+ *                                             the real page size and continue.
+ *   - `count < requested`, no flag         -> genuine last page, stop
+ */
+export interface PageDecision {
+  /** Continue paging? */
+  next: boolean;
+  /** Page size to request next time (may shrink to the server's real cap). */
+  pageSize: number;
+  /** True when we concluded the feed is exhausted. */
+  reachedEnd: boolean;
+}
+
+export function decideNextPage(
+  count: number,
+  requested: number,
+  exceededTransferLimit: boolean | undefined,
+): PageDecision {
+  if (count <= 0) return { next: false, pageSize: requested, reachedEnd: true };
+  if (count >= requested) return { next: true, pageSize: requested, reachedEnd: false };
+  if (exceededTransferLimit === true) {
+    // Server truncated the page but says more rows exist: it caps at `count`.
+    return { next: true, pageSize: count, reachedEnd: false };
+  }
+  return { next: false, pageSize: requested, reachedEnd: true };
 }
 
 /** Normalise an ArcGIS field value — attributes keys may be UPPER or mixed case */
@@ -127,139 +232,330 @@ export function resolveId(
   return null;
 }
 
+export interface ArcGISScrapeOptions {
+  maxPages?: number;
+  pageSize?: number;
+  /** Row offset to resume from. See src/lib/scrapers/cursor.ts. */
+  startOffset?: number;
+}
+
 export async function scrapeArcGISSource(
   source: ArcGISSource,
-  maxPages: number = 20
-): Promise<ScrapeResult> {
-  const result: ScrapeResult = { inserted: 0, updated: 0, errors: 0 };
+  options: ArcGISScrapeOptions = {},
+): Promise<ScrapeReport> {
+  const maxPages = options.maxPages ?? 20;
+  const requestedPageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
+  const startOffset = Math.max(0, options.startOffset ?? 0);
+
   const supabase = createAdminClient();
   const BATCH_SIZE = 100;
 
+  // Respect the server's advertised cap when it is smaller than what we want.
+  const advertised = await fetchMaxRecordCount(source.endpoint);
+  let pageSize =
+    advertised !== null ? Math.min(requestedPageSize, advertised) : requestedPageSize;
+
+  let offset = startOffset;
+  let fetched = 0;
+  let mapped = 0;
+  let usable = 0;
+  let updated = 0;
+  let errors = 0;
+  let pages = 0;
+  let reachedEnd = false;
+  let observedKeys: string[] = [];
+  let detail: string | null = null;
+  let outcome: ScrapeOutcome;
+  let writeAttempts = 0;
+  let writeFailures = 0;
+  let lastPageFingerprint: string | null = null;
+
   for (let page = 0; page < maxPages; page++) {
-    const offset = page * 1000;
     let data: ArcGISResponse;
 
     try {
-      data = await fetchArcGISPage(source.endpoint, offset);
+      data = await fetchArcGISPage(source.endpoint, offset, pageSize);
     } catch (err) {
-      logger.error("ArcGIS fetch error", {
-        source_key: source.source_key,
-        page,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      result.errors++;
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("ArcGIS fetch error", { source_key: source.source_key, page, offset, error: message });
+      errors++;
+      if (page === 0) {
+        return emptyReport({
+          errors,
+          outcome: "fetch_failed",
+          detail: message,
+          nextOffset: startOffset,
+          reachedEnd: false,
+          pageSize,
+        });
+      }
+      detail = `page ${page} fetch failed: ${message}`;
       break;
     }
 
     if (data.error) {
-      logger.error("ArcGIS API error", {
-        source_key: source.source_key,
-        error: data.error.message,
-      });
+      const message = data.error.message ?? "unknown ArcGIS error";
+      logger.error("ArcGIS API error", { source_key: source.source_key, error: message });
+      if (page === 0) {
+        return emptyReport({
+          errors,
+          outcome: "upstream_error",
+          detail: message,
+          nextOffset: startOffset,
+          reachedEnd: false,
+          pageSize,
+        });
+      }
+      detail = `page ${page} upstream error: ${message}`;
       break;
     }
 
     const features = data.features ?? [];
-    if (features.length === 0) break;
+    const decision = decideNextPage(features.length, pageSize, data.exceededTransferLimit);
+
+    if (features.length === 0) {
+      // End of the feed — wrap so the next run re-sweeps from the top.
+      reachedEnd = true;
+      offset = 0;
+      break;
+    }
+
+    pages++;
+    if (observedKeys.length === 0) {
+      observedKeys = collectObservedKeys(features[0]?.attributes);
+      // Registry mis-registration guard: refuse to write business-licence /
+      // footprint / utility rows into `permits` at all.
+      const nonPermit = looksLikeNonPermitDataset(observedKeys);
+      if (nonPermit) {
+        return emptyReport({
+          errors,
+          outcome: "unsupported",
+          observedKeys,
+          detail: nonPermit,
+          nextOffset: startOffset,
+          reachedEnd: false,
+          pageSize,
+        });
+      }
+    }
+    fetched += features.length;
+
+    // Some legacy servers ignore `resultOffset` entirely and hand back page 0
+    // forever. Detect it by fingerprinting the page rather than looping until
+    // maxPages, which would burn the whole time budget re-writing one page.
+    const fingerprint = `${features.length}:${JSON.stringify(
+      features[0]?.attributes ?? {},
+    ).slice(0, 200)}`;
+    if (lastPageFingerprint !== null && fingerprint === lastPageFingerprint) {
+      detail = "server ignores resultOffset — identical page returned twice";
+      logger.warn("arcgis.pagination_not_supported", {
+        source_key: source.source_key,
+        offset,
+      });
+      reachedEnd = true;
+      offset = 0;
+      break;
+    }
+    lastPageFingerprint = fingerprint;
 
     const seen = new Set<string>();
-    const normalized = features
-      .map((feature): Record<string, unknown> | null => {
-        try {
-          const attr = feature.attributes;
-          const rawId = resolveId(attr, source.id_field);
-          if (!rawId) return null;
+    let pageMapped = 0;
+    let pageUsable = 0;
+    const normalized: Record<string, unknown>[] = [];
 
-          // ArcGIS feeds sometimes emit the same permit twice in one page
-          // (different inspection rows, for instance). Upsert errors with
-          // "cannot affect row a second time" unless we dedupe.
-          const key = `${source.city.toLowerCase()}_${rawId}`;
-          if (seen.has(key)) return null;
-          seen.add(key);
+    for (const feature of features) {
+      try {
+        const attr = feature.attributes;
+        const rawId = resolveId(attr, source.id_field);
+        if (!rawId) continue;
 
-          const rawAddress = getField(attr, source.address_field) ?? "";
-          const rawDate = getField(attr, source.date_field);
-          const rawValue = getField(attr, source.value_field);
+        // ArcGIS feeds sometimes emit the same permit twice in one page
+        // (different inspection rows, for instance). Upsert errors with
+        // "cannot affect row a second time" unless we dedupe.
+        const key = `${source.city.toLowerCase()}_${rawId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
 
-          // ArcGIS geometry: x = longitude, y = latitude
-          const geomLng = feature.geometry?.x ?? null;
-          const geomLat = feature.geometry?.y ?? null;
+        const rawAddress = getField(attr, source.address_field) ?? "";
+        const rawDate = getField(attr, source.date_field);
+        const rawValue = getField(attr, source.value_field);
 
-          // Validate WGS84 bounds (skip state-plane / web-mercator / projected
-          // coords — Louisville etc. ship EPSG:3857 geometry but include real
-          // lat/lng as attributes too).
-          let lat = geomLat !== null && Math.abs(geomLat) <= 90 ? geomLat : null;
-          let lng = geomLng !== null && Math.abs(geomLng) <= 180 ? geomLng : null;
+        // ArcGIS geometry: x = longitude, y = latitude.
+        // Both halves are validated TOGETHER (see geo.ts): a lone latitude is
+        // always a wrong mapping, never real data. Falls back to explicit
+        // LATITUDE / LONGITUDE attributes for feeds (Louisville etc.) that
+        // ship EPSG:3857 geometry alongside real WGS84 columns.
+        const geo =
+          coordinatePair(feature.geometry?.y ?? null, feature.geometry?.x ?? null) ??
+          coordinatePair(
+            parseCoord(attr.LATITUDE ?? attr.latitude ?? attr.Latitude),
+            parseCoord(attr.LONGITUDE ?? attr.longitude ?? attr.Longitude),
+          );
 
-          if (lat === null || lng === null) {
-            const attrLatRaw = attr.LATITUDE ?? attr.latitude ?? attr.Latitude;
-            const attrLngRaw = attr.LONGITUDE ?? attr.longitude ?? attr.Longitude;
-            const attrLat = attrLatRaw != null ? parseCoord(attrLatRaw) : null;
-            const attrLng = attrLngRaw != null ? parseCoord(attrLngRaw) : null;
-            if (attrLat !== null && Math.abs(attrLat) <= 90) lat = attrLat;
-            if (attrLng !== null && Math.abs(attrLng) <= 180) lng = attrLng;
-          }
+        // Dedicated ZIP attribute FIRST — a structured column always beats
+        // parsing free text. The old order asked extractZip first, and since
+        // that returned the house number for any address starting with five
+        // digits, this fallback was effectively dead code.
+        const zipFromAttr = (() => {
+          const raw = attr.ZIPCODE ?? attr.ZIP ?? attr.zipcode ?? attr.zip
+            ?? attr.ZIP_CODE ?? attr.zip_code ?? attr.PostalCode ?? attr.POSTAL_CODE;
+          if (raw == null) return null;
+          const m = String(raw).match(/\b(\d{5})\b/);
+          return m ? m[1] : null;
+        })();
+        const zipFromAddress = rawAddress ? extractZip(rawAddress) : null;
+        const resolvedZip = zipFromAttr ?? zipFromAddress;
+        const zipTrusted = zipFromAttr !== null;
 
-          const resolvedZip = (rawAddress ? extractZip(rawAddress) : null) ?? (() => {
-            // Fallback to explicit ZIPCODE / ZIP attributes when the
-            // address field doesn't carry one (Louisville etc.).
-            const raw = attr.ZIPCODE ?? attr.ZIP ?? attr.zipcode ?? attr.zip;
-            if (raw == null) return null;
-            const m = String(raw).match(/\b(\d{5})\b/);
-            return m ? m[1] : null;
-          })();
+        const issuedDate = parseDate(rawDate);
 
-          return {
-            source_id:       `${source.city.toLowerCase().replace(/\s+/g, "_")}_${rawId}`,
-            source_city:     source.city,
-            city:            source.city,
-            // Derive state from address/ZIP so junk 'US' source states
-            // (e.g. auto-discovered sources) still yield correct rows.
-            state:           deriveState(rawAddress || null, resolvedZip, source.state),
-            source_type:     "arcgis",
-            permit_number:   rawId,
-            permit_type:     classifyPermitType(getField(attr, source.type_field) ?? ""),
-            status:          normalizeStatus(getField(attr, source.status_field) ?? ""),
-            description:     getField(attr, source.desc_field),
-            address:         rawAddress || null,
-            zip:             resolvedZip,
-            latitude:        lat,
-            longitude:       lng,
-            issued_date:     parseDate(rawDate),
-            estimated_value: parseMoney(rawValue),
-            contractor_name: null,
-            raw_json:        attr,
-            updated_at:      new Date().toISOString(),
-          };
-        } catch {
-          result.errors++;
-          return null;
+        pageMapped++;
+        if (rawAddress || issuedDate !== null) pageUsable++;
+
+        const row: Record<string, unknown> = {
+          source_id:       `${source.city.toLowerCase().replace(/\s+/g, "_")}_${rawId}`,
+          source_city:     source.city,
+          city:            source.city,
+          // Derive state from address/ZIP so junk 'US' source states
+          // (e.g. auto-discovered sources) still yield correct rows — but a
+          // free-text-parsed ZIP must never override the declared state.
+          state:           deriveState(rawAddress || null, resolvedZip, source.state, zipTrusted),
+          source_type:     "arcgis",
+          permit_number:   rawId,
+          permit_type:     classifyPermitType(getField(attr, source.type_field) ?? ""),
+          status:          normalizeStatus(getField(attr, source.status_field) ?? ""),
+          description:     getField(attr, source.desc_field),
+          address:         rawAddress || null,
+          zip:             resolvedZip,
+          latitude:        geo?.lat ?? null,
+          longitude:       geo?.lng ?? null,
+          issued_date:     issuedDate,
+          estimated_value: parseMoney(rawValue),
+          // `contractor_name` is DELIBERATELY ABSENT from the base payload.
+          //
+          // It used to be `contractor_name: null`. The upsert runs with
+          // merge-duplicates, so PostgREST compiles every supplied column
+          // into ON CONFLICT DO UPDATE SET — meaning each re-scrape BLANKED
+          // contractor names that scripts/backfill-contact-from-raw.ts had
+          // recovered. The loss was unrecoverable: the same backfill also
+          // writes applicant_name, which the ArcGIS payload does not touch,
+          // so the row permanently dropped out of that script's
+          // `.is("applicant_name", null)` re-scan. An absent key is left
+          // untouched by ON CONFLICT DO UPDATE.
+          raw_json:        attr,
+          updated_at:      new Date().toISOString(),
+        };
+
+        // Populate the denormalised contact columns from the raw attributes —
+        // ArcGIS feeds such as Bozeman MT ship CONTRACTOR_EMAIL and
+        // CONTRACTOR_PHONE_1, which previously reached raw_json but never a
+        // column. Only non-null values are added, so a sparse re-fetch can
+        // never blank a value an earlier pass won.
+        const contact = extractContactWithProvenance(attr);
+        const applicant = contact.owner_name ?? contact.applicant_name;
+        if (applicant) row.applicant_name = applicant;
+        if (contact.contractor_name) row.contractor_name = contact.contractor_name;
+        if (applicant || contact.contractor_name) {
+          row.contact_source = contact.source;
+          row.contact_confidence = contact.confidence;
+          row.contact_extracted_at = new Date().toISOString();
         }
-      })
-      .filter((r): r is Record<string, unknown> => r !== null);
+
+        normalized.push(row);
+      } catch {
+        errors++;
+      }
+    }
+
+    mapped += pageMapped;
+    usable += pageUsable;
+
+    // MAPPING-FAILURE GATE (page 0 only) — see socrata.ts for the rationale.
+    // ArcGIS matters most here: `resolveId` falls back to OBJECTID, which
+    // almost always resolves, so a broken mapping used to produce a full page
+    // of ID-only rows with no address and no date. Those upserted cleanly and
+    // the run was recorded as a success.
+    if (page === 0 && isMappingFailure(features.length, pageMapped, pageUsable)) {
+      return emptyReport({
+        errors,
+        outcome: "mapping_failed",
+        fetched,
+        mapped,
+        usable,
+        skipped: fetched - mapped,
+        observedKeys,
+        detail:
+          pageMapped === 0
+            ? `no feature yielded an id via id_field='${source.id_field}' or the fallback chain`
+            : `${pageMapped} features had ids but none had an address or date ` +
+              `(address_field='${source.address_field}', date_field='${source.date_field}')`,
+        nextOffset: startOffset,
+        reachedEnd: false,
+        pageSize,
+        pages,
+      });
+    }
 
     // Upsert in batches
     for (let i = 0; i < normalized.length; i += BATCH_SIZE) {
       const batch = normalized.slice(i, i + BATCH_SIZE);
+      writeAttempts++;
       const { data: upserted, error } = await supabase
         .from("permits")
         .upsert(batch, { onConflict: "source_city,source_id" })
         .select("id");
 
       if (error) {
-        result.errors += batch.length;
+        errors += batch.length;
+        writeFailures++;
+        detail = `upsert failed: ${error.message}`;
         logger.error("ArcGIS upsert error", {
           source_key: source.source_key,
           error: error.message,
         });
       } else {
-        result.updated += upserted?.length ?? 0;
+        updated += upserted?.length ?? 0;
       }
     }
 
-    // Stop if we got fewer records than the page size (last page)
-    if (features.length < 1000 || !data.exceededTransferLimit) break;
+    offset += features.length;
+    pageSize = decision.pageSize;
+
+    if (!decision.next) {
+      reachedEnd = decision.reachedEnd;
+      if (reachedEnd) offset = 0;
+      break;
+    }
   }
 
-  return result;
+  if (writeAttempts > 0 && writeFailures === writeAttempts) {
+    outcome = "write_failed";
+    detail = detail ?? "every upsert batch failed";
+  } else if (fetched === 0) {
+    outcome = "empty";
+  } else if (isMappingFailure(fetched, mapped, usable)) {
+    outcome = "mapping_failed";
+    detail =
+      detail ??
+      `${fetched} features fetched, ${mapped} mapped, ${usable} usable — field mapping does not match payload`;
+  } else {
+    outcome = "ok";
+  }
+
+  return {
+    inserted: 0,
+    updated,
+    errors,
+    outcome,
+    fetched,
+    mapped,
+    usable,
+    skipped: fetched - mapped,
+    nextOffset: reachedEnd ? 0 : offset,
+    reachedEnd,
+    observedKeys,
+    detail,
+    pageSize,
+    pages,
+  };
 }

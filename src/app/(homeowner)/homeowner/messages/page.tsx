@@ -99,27 +99,32 @@ function HomeownerMessagesPage() {
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  const refresh = useCallback(async () => {
+  // Returns the refreshed threads so callers can verify a write landed.
+  // `selectedId` is applied through the functional setter rather than a
+  // dependency, so `refresh` is stable and the mount effect doesn't
+  // re-fire (and re-fetch) every time a thread is selected.
+  const refresh = useCallback(async (): Promise<Thread[] | null> => {
     try {
       const res = await fetch("/api/homeowner/messages");
       if (!res.ok) {
         setError("Couldn't load messages.");
-        return;
+        return null;
       }
       const body = (await res.json()) as { threads: Thread[] };
-      setThreads(body.threads ?? []);
-      if (!selectedId && body.threads.length > 0) {
-        setSelectedId(body.threads[0].lead_id);
-      }
+      const next = body.threads ?? [];
+      setThreads(next);
+      setSelectedId((current) => current ?? next[0]?.lead_id ?? null);
+      return next;
     } catch {
       setError("Network error.");
+      return null;
     } finally {
       setLoading(false);
     }
-  }, [selectedId]);
+  }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
   const selected = useMemo(
@@ -135,24 +140,44 @@ function HomeownerMessagesPage() {
 
   async function handleSend() {
     if (!draft.trim() || !selected || sending) return;
+    const outgoing = draft.trim();
+    const leadId = selected.lead_id;
     setSending(true);
     try {
       const res = await fetch("/api/homeowner/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lead_id: selected.lead_id,
-          message: draft.trim(),
-        }),
+        body: JSON.stringify({ lead_id: leadId, message: outgoing }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setError(body.error ?? "Send failed");
         return;
       }
+
+      // A 200 here is NOT proof the message was stored. The API appends
+      // to `leads.notes` through the user-scoped Supabase client, and
+      // `leads` has a contractor-only RLS policy — a homeowner's UPDATE
+      // matches zero rows, which PostgREST reports as success with no
+      // error. Without this check the UI cleared the input and showed a
+      // sent-looking thread while nothing had been written, and the
+      // message vanished on the next refresh. Verify against the
+      // refetched thread and tell the truth when it isn't there.
+      const next = await refresh();
+      const landed =
+        next === null ||
+        (next.find((t) => t.lead_id === leadId)?.notes ?? "").includes(outgoing);
+
+      if (!landed) {
+        setError(
+          "We couldn't deliver that message — it wasn't saved. Contact your contractor directly for now; we're fixing this.",
+        );
+        // Keep the draft so the homeowner doesn't lose what they wrote.
+        return;
+      }
+
       setDraft("");
       setError(null);
-      await refresh();
     } catch {
       setError("Send failed — retry");
     } finally {
@@ -248,7 +273,7 @@ function HomeownerMessagesPage() {
                   <div
                     className={`max-w-[70%] rounded-lg px-3 py-2 text-sm ${
                       m.role === "homeowner"
-                        ? "bg-primary text-white"
+                        ? "bg-cta text-cta-foreground"
                         : "bg-muted text-foreground"
                     }`}
                   >
@@ -299,7 +324,7 @@ function HomeownerMessagesPage() {
                 type="submit"
                 disabled={sending || !draft.trim()}
                 aria-label="Send message"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-cta px-3 py-2 text-sm font-semibold text-cta-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 <Send className="h-4 w-4" />
                 {sending ? "Sending…" : "Send"}

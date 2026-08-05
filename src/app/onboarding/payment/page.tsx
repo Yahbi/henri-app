@@ -27,6 +27,10 @@ export default function PaymentPage() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Already paying. /api/checkout now 409s on a duplicate, but the UI
+  // shouldn't offer an action that can only fail — and a second Stripe
+  // subscription on the same customer is a double charge.
+  const [alreadySubscribed, setAlreadySubscribed] = useState(false);
   // devMode + its render branch were removed entirely. Prior code flipped
   // `setDevMode(true)` on any Stripe failure and let users skip payment,
   // which leaked into production preview builds. Any checkout error now
@@ -43,12 +47,19 @@ export default function PaymentPage() {
         if (user) {
           const { data: profile } = await supabase
             .from("profiles")
-            .select("plan")
+            .select("plan, stripe_subscription_id")
             .eq("id", user.id)
             .single();
 
           if (profile?.plan) {
             setSelectedPlan(profile.plan);
+          }
+          // stripe_subscription_id is written only by the
+          // checkout.session.completed webhook, so it's the honest
+          // "already paying" fact (stripe_customer_id is stamped before
+          // payment and would false-positive on an abandoned checkout).
+          if (profile?.stripe_subscription_id) {
+            setAlreadySubscribed(true);
           }
         }
       } catch {
@@ -133,8 +144,13 @@ export default function PaymentPage() {
 
         <CardContent>
           {loading ? (
-            <div className="flex items-center justify-center py-12">
+            <div
+              className="flex items-center justify-center py-12"
+              role="status"
+              aria-live="polite"
+            >
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <span className="sr-only">Loading your selected plan…</span>
             </div>
           ) : (
             <div className="space-y-6">
@@ -168,6 +184,19 @@ export default function PaymentPage() {
                       You won&apos;t be charged until your trial ends
                     </span>
                   </div>
+
+                  {/* A user who picked the wrong tier previously had no way
+                      back from this step — the "go back" link only rendered
+                      in the no-plan branch. The plan step re-reads
+                      profiles.plan, so the current selection is preserved. */}
+                  <div className="mt-3 border-t border-border pt-3">
+                    <Link
+                      href="/onboarding/plan"
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Change plan
+                    </Link>
+                  </div>
                 </div>
               )}
 
@@ -197,27 +226,75 @@ export default function PaymentPage() {
                 </div>
               )}
 
-              {/* CTA */}
-              <Button
-                variant="primary"
-                size="lg"
-                className="w-full"
-                disabled={!plan || processing}
-                onClick={handleStartTrial}
-              >
-                {processing ? (
-                  <span className="flex items-center gap-2">
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                    Redirecting to checkout...
-                  </span>
-                ) : (
-                  "Start my free trial"
-                )}
-              </Button>
+              {/* Already-subscribed short-circuit — offering checkout
+                  again would open a second concurrent Stripe
+                  subscription (double charge). */}
+              {alreadySubscribed ? (
+                <div className="space-y-3">
+                  <div
+                    className="rounded-lg border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success"
+                    role="status"
+                  >
+                    Your subscription is already active — no need to pay again.
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    className="w-full"
+                    onClick={() => { window.location.href = "/onboarding/territory"; }}
+                  >
+                    Continue to territory selection
+                  </Button>
+                  <p className="text-center text-xs text-muted-foreground">
+                    Need a different plan?{" "}
+                    <Link href="/settings/billing" className="text-primary hover:underline">
+                      Change it in billing settings
+                    </Link>{" "}
+                    instead — that swaps your existing subscription rather than
+                    starting a second one.
+                  </p>
+                </div>
+              ) : (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="w-full"
+                  disabled={!plan || processing}
+                  onClick={handleStartTrial}
+                >
+                  {processing ? (
+                    <span className="flex items-center gap-2">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                      Redirecting to checkout...
+                    </span>
+                  ) : (
+                    "Start my free trial"
+                  )}
+                </Button>
+              )}
 
+              {/* Terms + Privacy were plain text; both pages exist at
+                  /terms and /privacy, so a user asked to agree to them
+                  had no way to read them. Now linked. */}
               <p className="text-xs text-center text-muted-foreground">
-                By continuing, you agree to our Terms of Service and Privacy
-                Policy. Cancel anytime during your trial.
+                By continuing, you agree to our{" "}
+                <Link
+                  href="/terms"
+                  target="_blank"
+                  className="text-primary hover:underline"
+                >
+                  Terms of Service
+                </Link>{" "}
+                and{" "}
+                <Link
+                  href="/privacy"
+                  target="_blank"
+                  className="text-primary hover:underline"
+                >
+                  Privacy Policy
+                </Link>
+                . A card is required to start the 24-hour trial. Cancel anytime
+                before it ends and you won&apos;t be charged.
               </p>
             </div>
           )}

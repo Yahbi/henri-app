@@ -50,7 +50,24 @@ const categoryLabels: Record<string, { label: string; color: string }> = {
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function MaintenanceCalendar() {
+interface MaintenanceCalendarProps {
+  /** Opens the intake chat with the task's trade prefilled. The
+   *  per-task "Book a Pro" button had no onClick at all before
+   *  2026-08-04 — clicking it did nothing. */
+  onBookPro?: (trade: string) => void;
+}
+
+/** Map a task category to the trade the intake flow understands. */
+const CATEGORY_TRADE: Record<MaintenanceTask["category"], string> = {
+  hvac: "hvac",
+  plumbing: "plumbing",
+  electrical: "electrical",
+  exterior: "roofing",
+  interior: "general remodel",
+  seasonal: "general remodel",
+};
+
+export function MaintenanceCalendar({ onBookPro }: MaintenanceCalendarProps = {}) {
   const currentMonth = new Date().getMonth();
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
@@ -115,7 +132,13 @@ export function MaintenanceCalendar() {
     <div className="rounded-xl border border-border bg-card p-6 space-y-5">
       <div>
         <h2 className="text-lg font-heading font-normal text-foreground">Maintenance Calendar</h2>
-        <p className="text-xs text-muted-foreground mt-1">Keep your home in top shape with personalized reminders</p>
+        {/* "personalized reminders" claimed two things that don't exist:
+            nothing personalises this list (it's the same seasonal
+            checklist for every home) and nothing sends a reminder. */}
+        <p className="text-xs text-muted-foreground mt-1">
+          A seasonal home-maintenance checklist. Tick items off as you go —
+          we save your progress.
+        </p>
       </div>
 
       {/* Month selector */}
@@ -127,7 +150,7 @@ export function MaintenanceCalendar() {
             aria-pressed={selectedMonth === i}
             className={`shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
               selectedMonth === i
-                ? "bg-primary text-white"
+                ? "bg-cta text-cta-foreground"
                 : i === currentMonth
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:text-foreground hover:bg-bg-subtle"
@@ -191,8 +214,11 @@ export function MaintenanceCalendar() {
                     <p className="text-xs text-muted-foreground mt-0.5">{task.description}</p>
                     <div className="flex items-center gap-3 mt-1.5">
                       <span className="text-[10px] text-muted-foreground">Est. {task.estimatedCost}</span>
-                      {!done && (
-                        <button className="text-[10px] text-primary hover:underline font-medium">
+                      {!done && onBookPro && (
+                        <button
+                          onClick={() => onBookPro(CATEGORY_TRADE[task.category])}
+                          className="text-[10px] text-primary hover:underline font-medium"
+                        >
                           Book a Pro
                         </button>
                       )}

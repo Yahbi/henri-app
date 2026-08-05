@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
 import { logger } from "@/lib/logger";
@@ -20,6 +21,31 @@ const UPDATABLE_FIELDS: (keyof ContractorProfileUpdate)[] = [
   // whitelist makes the new Settings UI work end-to-end.
   "twilio_tracked_number",
 ];
+
+/* ── PATCH body schema ──
+ * Mirrors UPDATABLE_FIELDS above. Deliberately not `.strict()`: the
+ * whitelist loop in the handler already drops unknown keys, and strict mode
+ * would 400 any client that echoes back read-only fields from a prior GET. */
+const ProfilePatchSchema = z.object({
+  company_name: z
+    .string()
+    .trim()
+    .min(1, "Company name is required")
+    .max(120)
+    .optional(),
+  full_name: z.string().max(120).nullish(),
+  bio: z.string().max(500, "Bio must be 500 characters or fewer").nullish(),
+  trade: z.string().max(80).nullish(),
+  specialties: z
+    .array(z.string().max(80))
+    .max(10, "Maximum 10 specialties allowed")
+    .nullish(),
+  years_experience: z.number().int().min(0).max(100).nullish(),
+  phone: z.string().max(40).nullish(),
+  profile_public: z.boolean().optional(),
+  service_area: z.string().max(200).nullish(),
+  twilio_tracked_number: z.string().max(40).nullish(),
+});
 
 /* ─── GET /api/profile — return full contractor profile with computed fields ─── */
 export async function GET() {
@@ -93,39 +119,28 @@ export async function PATCH(request: NextRequest) {
     if (gate.response) return gate.response;
     const { user } = gate;
 
-    const body = await request.json();
-
-    /* ── Validate ── */
-
-    // company_name is required if provided (cannot be set to empty)
-    if ("company_name" in body && (!body.company_name || !body.company_name.trim())) {
+    /* ── Validate ──
+     * Zod first. Previously a malformed payload threw out of
+     * `request.json()` (500 instead of 400), and `"key" in body` threw a
+     * TypeError whenever the body parsed to null. The schema settles shape
+     * and bounds in one pass; the phone block below still runs because
+     * E.164 coercion is a transform, not a constraint. */
+    const parsedBody = ProfilePatchSchema.safeParse(
+      await request.json().catch(() => null)
+    );
+    if (!parsedBody.success) {
       return NextResponse.json(
-        { error: "Company name is required" },
+        { error: parsedBody.error.issues[0]?.message ?? "Invalid request" },
         { status: 400 }
       );
     }
-
-    // bio max 500 chars
-    if (body.bio && typeof body.bio === "string" && body.bio.length > 500) {
-      return NextResponse.json(
-        { error: "Bio must be 500 characters or fewer" },
-        { status: 400 }
-      );
-    }
-
-    // specialties max 10 items
-    if (body.specialties && Array.isArray(body.specialties) && body.specialties.length > 10) {
-      return NextResponse.json(
-        { error: "Maximum 10 specialties allowed" },
-        { status: 400 }
-      );
-    }
+    const body: Record<string, unknown> = { ...parsedBody.data };
 
     // twilio_tracked_number — accept E.164 (`+14155551234`) or null/empty
     // (clear the field). Defensive normalization happens here so the DB
     // never sees mixed formats. Empty string → null.
     if ("twilio_tracked_number" in body) {
-      const raw = body.twilio_tracked_number;
+      const raw = body.twilio_tracked_number as string | null | undefined;
       if (raw === null || raw === "" || raw === undefined) {
         body.twilio_tracked_number = null;
       } else if (typeof raw !== "string") {

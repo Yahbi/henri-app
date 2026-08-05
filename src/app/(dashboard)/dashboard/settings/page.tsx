@@ -65,21 +65,32 @@ export default function SettingsPage() {
 
   const [signingOut, setSigningOut] = useState(false);
 
-  /* Load saved notification prefs on mount */
+  /* Load saved notification prefs on mount.
+   *
+   * GET /api/profile/notifications responds `{ prefs: {...} }` — the
+   * previous code read `data.sms_new_lead` off the envelope, so every
+   * key was `undefined` and every toggle silently fell back to its
+   * hardcoded default. A contractor who switched SMS off saw it back
+   * ON after any reload (and re-saving pushed the default back to the
+   * DB). Read `data.prefs` and cancel on unmount. */
   useEffect(() => {
+    let cancelled = false;
     fetch("/api/profile/notifications")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data) {
-          setNotifPrefs({
-            sms_new_leads: data.sms_new_lead ?? true,
-            email_new_leads: data.email_new_lead ?? true,
-            weekly_report: data.email_weekly_digest ?? true,
-            storm_alerts: data.sms_storm_alerts ?? false,
-          });
-        }
+        const prefs = data?.prefs;
+        if (cancelled || !prefs) return;
+        setNotifPrefs({
+          sms_new_leads: prefs.sms_new_lead ?? true,
+          email_new_leads: prefs.email_new_lead ?? true,
+          weekly_report: prefs.email_weekly_digest ?? true,
+          storm_alerts: prefs.sms_storm_alerts ?? false,
+        });
       })
       .catch(() => { /* use defaults */ });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function toggleNotif(key: keyof typeof notifPrefs) {
@@ -142,7 +153,16 @@ export default function SettingsPage() {
       await signOut();
       router.push("/login");
     } catch {
+      // Previously this reset the button and said nothing — the user
+      // clicked "Sign out", nothing visibly happened, and they were
+      // still signed in.
       setSigningOut(false);
+      addToast({
+        type: "error",
+        title: "Couldn't sign out",
+        description: "Check your connection and try again.",
+        duration: 6000,
+      });
     }
   }
 
@@ -151,6 +171,15 @@ export default function SettingsPage() {
   // /reset-password route no longer exists. Google users manage credentials
   // at myaccount.google.com — see the "Google security" link surfaced
   // lower on this page for the Google-provider branch.
+
+  // Which passwordless provider is behind this session. Supabase stamps
+  // `app_metadata.provider` ("google" | "email") plus a `providers` array
+  // when an account has more than one identity linked.
+  const authProviders = [
+    user?.app_metadata?.provider,
+    ...((user?.app_metadata?.providers as string[] | undefined) ?? []),
+  ].filter(Boolean) as string[];
+  const isGoogleAccount = authProviders.includes("google");
 
   // Beta-locked fallback: Founder ($149, 3 ZIPs) per CLAUDE.md.
   const planSlug = profile?.plan ?? "founder";
@@ -396,13 +425,13 @@ export default function SettingsPage() {
           <button
             onClick={handleSaveNotifs}
             disabled={notifSaving}
-            className="px-5 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="px-5 py-2 text-sm font-medium bg-cta text-cta-foreground rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {notifSaving ? "Saving..." : "Save"}
           </button>
-          {notifSaved && (
-            <span className="text-xs text-green-600">Preferences saved</span>
-          )}
+          <span className="text-xs text-green-600" role="status" aria-live="polite">
+            {notifSaved ? "Preferences saved" : ""}
+          </span>
         </div>
       </Section>
 
@@ -464,22 +493,31 @@ export default function SettingsPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-foreground">Sign-in method</p>
-                {/* Henri is Google-OAuth only per CLAUDE.md. The only
-                 * account surface is Google itself — no Supabase
-                 * password-reset link exists to send. */}
+                {/* Henri is passwordless: Google OAuth + magic-link email
+                 * (Supabase Email OTP), per the CLAUDE.md brand rule as
+                 * amended 2026-04-29. No password is ever stored, so
+                 * there is nothing to reset. Copy previously said
+                 * "Managed by your Google account", which was wrong for
+                 * every magic-link account. */}
                 <p className="text-xs text-muted-foreground">
-                  Managed by your Google account
+                  Passwordless — Google sign-in or a magic link sent to{" "}
+                  {user?.email ?? "your email"}. No password is stored.
                 </p>
               </div>
             </div>
-            <a
-              href="https://myaccount.google.com/security"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-accent transition-colors"
-            >
-              Google security
-            </a>
+            {/* Only surface the Google link for accounts that actually
+             * signed in with Google — it's a dead end for magic-link
+             * accounts, which have no Google credential to manage. */}
+            {isGoogleAccount && (
+              <a
+                href="https://myaccount.google.com/security"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-accent transition-colors"
+              >
+                Google security
+              </a>
+            )}
           </div>
 
           <div className="border-t border-border pt-3">

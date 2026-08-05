@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
 import { requireContractor } from "@/lib/auth/requireContractor";
+import { isUuid } from "@/lib/validation/params";
 
 /* ── Types ── */
 
@@ -78,6 +79,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    if (!isUuid(id)) {
+      return NextResponse.json({ error: "Malformed lead id" }, { status: 400 });
+    }
     const supabase = await createClient();
     const gate = await requireContractor(supabase);
     if (gate.response) return gate.response;

@@ -26,9 +26,25 @@ interface UserProfile {
   licensed_until?: string | null;
   /** Licensing state filed from /api/licenses/verify daily cron. */
   license_state?: string | null;
-  /** Stripe customer ID — present after first checkout. Used to route
-   * plan upgrades through change-plan instead of creating a new subscription. */
+  /** Stripe customer ID — stamped when a checkout SESSION is created,
+   * i.e. BEFORE any payment. Do NOT use this to decide whether someone
+   * is subscribed: an abandoned checkout leaves it populated. Use
+   * `stripe_subscription_id` instead. */
   stripe_customer_id?: string | null;
+  /** Stripe subscription ID — written only by the
+   * checkout.session.completed webhook, so it is the honest "this
+   * account is paying" fact. Settings → Billing routes upgrades through
+   * /api/billing/change-plan when this is set; without it the upgrade
+   * falls through to /api/checkout and Stripe opens a SECOND concurrent
+   * subscription on the same customer (double charge).
+   *
+   * 2026-08-04: this field was previously absent from the SELECT below
+   * while the billing page gated on `stripe_customer_id`, which the
+   * SELECT also omitted — so the guard was permanently false and every
+   * upgrade double-charged. Same precedent as
+   * onboarding/territory/page.tsx and api/territories/route.ts, both of
+   * which already check the subscription id rather than the customer id. */
+  stripe_subscription_id?: string | null;
   /** First-run guided tour completion (or skip) timestamp. Migration
    * 00068. NULL = the contractor hasn't seen / completed the tour yet
    * — `<ContractorTour />` auto-fires when this is null AND
@@ -69,7 +85,7 @@ export function useUser(): UseUserReturn {
     // whole dashboard's profile-dependent state (including the
     // first-run tutorial gate) stuck. The TS type marks all three
     // as optional so the consumer code already tolerates absence.
-    const cols = "id, email, full_name, company_name, phone, trade, plan, onboarding_completed, avg_rating, trial_ends_at, licensed_until, license_state, tutorial_completed_at";
+    const cols = "id, email, full_name, company_name, phone, trade, plan, onboarding_completed, avg_rating, trial_ends_at, licensed_until, license_state, tutorial_completed_at, stripe_customer_id, stripe_subscription_id";
     const result = await supabase
       .from("profiles")
       .select(cols)
@@ -88,7 +104,7 @@ export function useUser(): UseUserReturn {
       if (/tutorial_completed_at|Could not find the column/i.test(msg)) {
         const narrow = await supabase
           .from("profiles")
-          .select("id, email, full_name, company_name, phone, trade, plan, onboarding_completed, avg_rating, trial_ends_at, licensed_until, license_state")
+          .select("id, email, full_name, company_name, phone, trade, plan, onboarding_completed, avg_rating, trial_ends_at, licensed_until, license_state, stripe_customer_id, stripe_subscription_id")
           .eq("id", userId)
           .single();
         if (narrow.data) setProfile(narrow.data as UserProfile);

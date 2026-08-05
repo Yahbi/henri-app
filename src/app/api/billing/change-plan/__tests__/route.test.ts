@@ -45,12 +45,21 @@ vi.mock("@/lib/log", () => ({ logApiError: vi.fn() }));
 
 const mockSubscriptionsList = vi.fn();
 const mockSubscriptionsUpdate = vi.fn();
+/* Downgrades go through Subscription Schedules, not a direct
+ * subscriptions.update. `create` returns phases[0].start_date because the
+ * route reuses it as the first phase's start when rewriting the schedule. */
+const mockSchedulesCreate = vi.fn();
+const mockSchedulesUpdate = vi.fn();
 
 vi.mock("@/lib/stripe/client", () => ({
   getStripe: () => ({
     subscriptions: {
       list: (...args: unknown[]) => mockSubscriptionsList(...args),
       update: (...args: unknown[]) => mockSubscriptionsUpdate(...args),
+    },
+    subscriptionSchedules: {
+      create: (...args: unknown[]) => mockSchedulesCreate(...args),
+      update: (...args: unknown[]) => mockSchedulesUpdate(...args),
     },
   }),
 }));
@@ -107,6 +116,13 @@ beforeEach(() => {
     ],
   });
   mockSubscriptionsUpdate.mockResolvedValue({});
+  // Stripe returns the schedule with its first phase already anchored to
+  // the subscription's current period start.
+  mockSchedulesCreate.mockResolvedValue({
+    id: "sub_sched_1",
+    phases: [{ start_date: FUTURE_PERIOD_END - 30 * 24 * 3600 }],
+  });
+  mockSchedulesUpdate.mockResolvedValue({});
 });
 
 /* ── Tests ─────────────────────────────────────────────────────────────── */
@@ -149,11 +165,40 @@ describe("Billing change-plan (P0-9)", () => {
     expect(body.plan).toBe("founder");
     expect(body.effective).toBeTypeOf("string");
 
-    // Stripe call uses proration_behavior:"none" + billing_cycle_anchor:"unchanged"
-    expect(mockSubscriptionsUpdate).toHaveBeenCalledTimes(1);
-    const updateArgs = mockSubscriptionsUpdate.mock.calls[0][1] as Record<string, unknown>;
-    expect(updateArgs.proration_behavior).toBe("none");
-    expect(updateArgs.billing_cycle_anchor).toBe("unchanged");
+    /* A downgrade must NOT touch the live subscription. The previous
+     * implementation called subscriptions.update() with
+     * proration_behavior:"none", which swapped the price immediately —
+     * so a Pro contractor who had already paid $1,499 dropped from 12
+     * ZIPs to 3 the instant they clicked Continue, with no credit, while
+     * the dialog promised access through the cycle end. The fix is a
+     * two-phase Subscription Schedule; these assertions pin that. */
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+
+    expect(mockSchedulesCreate).toHaveBeenCalledWith({
+      from_subscription: "sub_active",
+    });
+
+    expect(mockSchedulesUpdate).toHaveBeenCalledTimes(1);
+    const [scheduleId, scheduleArgs] = mockSchedulesUpdate.mock.calls[0] as [
+      string,
+      { end_behavior: string; phases: Array<Record<string, unknown>> },
+    ];
+    expect(scheduleId).toBe("sub_sched_1");
+    expect(scheduleArgs.end_behavior).toBe("release");
+    expect(scheduleArgs.phases).toHaveLength(2);
+
+    // Phase 1 keeps the CURRENT price until the period boundary.
+    expect(scheduleArgs.phases[0]).toMatchObject({
+      items: [{ price: "price_pro", quantity: 1 }],
+      end_date: FUTURE_PERIOD_END,
+      proration_behavior: "none",
+    });
+    // Phase 2 starts exactly at the boundary on the NEW price.
+    expect(scheduleArgs.phases[1]).toMatchObject({
+      items: [{ price: "price_founder", quantity: 1 }],
+      start_date: FUTURE_PERIOD_END,
+      proration_behavior: "none",
+    });
 
     // Profile gets pending_plan set (not plan — that flips at next cycle via webhook)
     expect(mockUpdate).toHaveBeenCalledWith(

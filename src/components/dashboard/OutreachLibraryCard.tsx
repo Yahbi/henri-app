@@ -34,33 +34,49 @@ export function OutreachLibraryCard({ onCopied }: { onCopied?: () => void }) {
   const [migrationPending, setMigrationPending] = useState(false);
   const [copying, setCopying] = useState<string | null>(null);
   const [justCopied, setJustCopied] = useState<string | null>(null);
+  // A failed load used to render exactly like "no library exists" (the
+  // component returned null), and a failed copy cleared the spinner with
+  // no message at all.
+  const [loadError, setLoadError] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/outreach/library", { credentials: "include" });
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (!cancelled) setLoadError(true);
+          return;
+        }
         const body = (await res.json()) as {
           templates: LibraryTemplate[];
           migrationPending?: boolean;
         };
         if (!cancelled) {
+          setLoadError(false);
           setTemplates(body.templates ?? []);
           setMigrationPending(!!body.migrationPending);
         }
+      } catch {
+        // The IIFE had no catch, so a network throw escaped as an
+        // unhandled rejection.
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   async function copyToMine(id: string) {
     setCopying(id);
+    setCopyError(null);
     try {
       const res = await fetch("/api/outreach/library", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template_id: id }),
       });
@@ -68,13 +84,36 @@ export function OutreachLibraryCard({ onCopied }: { onCopied?: () => void }) {
         setJustCopied(id);
         setTimeout(() => setJustCopied(null), 1800);
         onCopied?.();
+      } else {
+        setCopyError(id);
       }
+    } catch {
+      setCopyError(id);
     } finally {
       setCopying(null);
     }
   }
 
   if (loading) return null;
+  if (loadError) {
+    return (
+      <div
+        role="alert"
+        className="flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3"
+      >
+        <p className="text-[12px] text-destructive">
+          Couldn&apos;t load the starter template library.
+        </p>
+        <button
+          type="button"
+          onClick={() => { setLoading(true); setReloadKey((k) => k + 1); }}
+          className="text-[12px] font-medium text-destructive underline underline-offset-2 hover:opacity-80"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (migrationPending || templates.length === 0) {
     // Don't render a dead card when the seeds aren't live yet.
     return null;
@@ -126,6 +165,11 @@ export function OutreachLibraryCard({ onCopied }: { onCopied?: () => void }) {
                     <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-3 whitespace-pre-wrap leading-relaxed">
                       {t.body}
                     </p>
+                    {copyError === t.id && (
+                      <p role="alert" className="mt-1 text-[11px] text-destructive">
+                        Couldn&apos;t copy that template — try again.
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"

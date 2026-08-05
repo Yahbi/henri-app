@@ -53,6 +53,10 @@ export interface IntakeStepAreaProps {
   address: string;
   onAddressChange: (value: string) => void;
   onAddressSubmit: () => void;
+  /* Set when the typed value contains no 5-digit ZIP. The API requires
+   * /^\d{5}$/, so without this the flow ran to completion and 400'd at
+   * the terminal step with no way back. */
+  addressError: string | null;
 
   // Step 2 — Timeline
   timeline: string;
@@ -96,7 +100,14 @@ export interface IntakeStepAreaProps {
    * re-POSTs the already-collected payload — the answers are all still in
    * the parent's state, so the homeowner never redoes the steps. */
   submitFailed: boolean;
+  /* "zip" when the server rejected the ZIP, "other" for any other
+   * validation rejection, null when the failure was a network/5xx (the
+   * only case where a plain Retry can ever succeed). */
+  submitFieldError: "zip" | "other" | null;
   onRetrySubmit: () => void;
+  /* Jump back to a specific step so a validation rejection is fixable —
+   * Step 6 renders no Back link by design. */
+  onFixStep: (step: number) => void;
   onClose: () => void;
 }
 
@@ -165,6 +176,7 @@ function Step1Address({
   address,
   onAddressChange,
   onAddressSubmit,
+  addressError,
   onBack,
 }: IntakeStepAreaProps) {
   /* Live input-intent hint — updates as the user types so the disabled-
@@ -176,13 +188,18 @@ function Step1Address({
   const trimmed = address.trim();
   const digitsOnly = /^\d+$/.test(trimmed);
   const isZip = digitsOnly && trimmed.length === 5;
+  // A street address is only accepted when it CONTAINS a ZIP — the API
+  // requires one. Say so up front rather than at the terminal step.
+  const hasEmbeddedZip = !digitsOnly && /\b\d{5}\b/.test(trimmed);
   const hint = !trimmed
     ? null
     : isZip
       ? "ZIP code recognised"
-      : digitsOnly
-        ? `Keep typing — ${5 - trimmed.length} more digit${5 - trimmed.length === 1 ? "" : "s"} for a ZIP`
-        : "Or type the full street address — both work";
+      : hasEmbeddedZip
+        ? "Address with ZIP recognised"
+        : digitsOnly
+          ? `Keep typing — ${5 - trimmed.length} more digit${5 - trimmed.length === 1 ? "" : "s"} for a ZIP`
+          : "A full street address works too — just include the ZIP";
   const tone = isZip ? "text-[color:var(--success,_#3D9970)]" : "text-muted-foreground";
 
   return (
@@ -195,6 +212,8 @@ function Step1Address({
           onChange={(e) => onAddressChange(e.target.value)}
           placeholder="Enter ZIP code or address..."
           aria-label="ZIP code or address"
+          aria-invalid={!!addressError}
+          aria-describedby={addressError ? "intake-address-error" : undefined}
           className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           onKeyDown={(e) => {
             if (e.key === "Enter") onAddressSubmit();
@@ -209,15 +228,25 @@ function Step1Address({
         <button
           onClick={onAddressSubmit}
           disabled={!address.trim()}
-          className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="rounded-lg bg-cta px-4 py-2.5 text-sm font-semibold text-cta-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           Next
         </button>
       </div>
-      {hint && (
-        <p className={`mt-1.5 text-[11px] ${tone}`} aria-live="polite">
-          {hint}
+      {addressError ? (
+        <p
+          id="intake-address-error"
+          role="alert"
+          className="mt-1.5 text-[11px] text-destructive"
+        >
+          {addressError}
         </p>
+      ) : (
+        hint && (
+          <p className={`mt-1.5 text-[11px] ${tone}`} aria-live="polite">
+            {hint}
+          </p>
+        )
       )}
     </div>
   );
@@ -294,7 +323,7 @@ function Step4Description({
       <button
         onClick={onDescriptionSubmit}
         disabled={!description.trim()}
-        className="self-end rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+        className="self-end rounded-lg bg-cta px-5 py-2.5 text-sm font-semibold text-cta-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
       >
         Continue
       </button>
@@ -334,7 +363,7 @@ function RefinementInput({
           <button
             onClick={onRefinementAnswer}
             disabled={!refinementInput.trim()}
-            className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+            className="rounded-lg bg-cta px-4 py-2.5 text-sm font-semibold text-cta-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             Next
           </button>
@@ -448,7 +477,7 @@ function Step5Contact({
       <button
         onClick={onContactSubmit}
         disabled={!consentGiven}
-        className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="rounded-lg bg-cta px-5 py-2.5 text-sm font-semibold text-cta-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
         title={consentGiven ? undefined : "Please check the consent box to continue"}
       >
         Find my contractor
@@ -465,7 +494,9 @@ function Step6Result({
   matchedContractor,
   intakeId,
   submitFailed,
+  submitFieldError,
   onRetrySubmit,
+  onFixStep,
   onClose,
 }: IntakeStepAreaProps) {
   if (isComputing) {
@@ -490,11 +521,35 @@ function Step6Result({
   //      this button re-POSTs the in-memory payload so the homeowner
   //      never redoes the steps.
   if (submitFailed) {
+    // A validation rejection can never be fixed by re-POSTing the same
+    // payload, and Step 6 renders no Back link — so the only control here
+    // used to be a Retry that was guaranteed to fail forever. Offer the
+    // step that actually needs correcting.
+    if (submitFieldError) {
+      return (
+        <div className="flex flex-col gap-2 pt-2">
+          <button
+            onClick={() => onFixStep(submitFieldError === "zip" ? 1 : 0)}
+            className="w-full rounded-lg bg-cta px-5 py-3 text-sm font-semibold text-cta-foreground transition-colors hover:bg-primary/90"
+          >
+            {submitFieldError === "zip"
+              ? "Go back and fix my ZIP code"
+              : "Go back and review my answers"}
+          </button>
+          <button
+            onClick={onClose}
+            className="w-full rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Close
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="pt-2">
         <button
           onClick={onRetrySubmit}
-          className="w-full rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+          className="w-full rounded-lg bg-cta px-5 py-3 text-sm font-semibold text-cta-foreground transition-colors hover:bg-primary/90"
         >
           Retry submission
         </button>
@@ -513,18 +568,43 @@ function Step6Result({
             <MatchCard contractor={matchedContractor} />
           </>
         )}
+        {/* The /portal funnel is anonymous by design (POST /api/intake has
+            no auth), but /homeowner/* is session-gated by middleware — so
+            this button used to hard-navigate every submitter into a login
+            wall for an account they were never asked to create. Explain
+            the step instead of redirecting blindly. */}
+        {intakeId && (
+          <p className="rounded-lg border border-border bg-bg-subtle px-3 py-2.5 text-[11px] leading-snug text-muted-foreground">
+            Your project is saved and we&apos;ve emailed you a confirmation.
+            To track it, sign in with the same email address you gave us —
+            we&apos;ll send a magic link, no password needed.
+          </p>
+        )}
         <button
           onClick={() => {
             if (intakeId) {
-              window.location.href = `/homeowner/intakes/${intakeId}`;
+              // Carry the destination so /login returns the homeowner to
+              // their project after the magic link lands, instead of
+              // dropping them on a generic page.
+              window.location.href = `/login?redirect=${encodeURIComponent(
+                `/homeowner/intakes/${intakeId}`,
+              )}&role=homeowner`;
             } else {
               onClose();
             }
           }}
-          className="mt-2 w-full rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+          className="mt-2 w-full rounded-lg bg-cta px-5 py-3 text-sm font-semibold text-cta-foreground transition-colors hover:bg-primary/90"
         >
-          {intakeId ? "View your project →" : "Done"}
+          {intakeId ? "Sign in to track your project →" : "Done"}
         </button>
+        {intakeId && (
+          <button
+            onClick={onClose}
+            className="w-full rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Maybe later
+          </button>
+        )}
       </div>
     </div>
   );

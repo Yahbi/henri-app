@@ -76,9 +76,14 @@ const HOW_IT_FEELS = [
       "Your contractor receives your scope, timeline, and budget before the first call. They show up prepared, not cold.",
   },
   {
-    scenario: "Verified, licensed pros",
+    // 2026-08-04 truthfulness pass: was "We re-check licenses daily against
+    // the state board, and if one lapses we pause lead delivery for that
+    // contractor until they renew." No board is ever contacted (no HTTP call
+    // exists in src/lib/license/verify.ts) and no delivery path gates on
+    // license status. The roster cross-check at signup is the real mechanism.
+    scenario: "Licensed pros only",
     description:
-      "Every contractor on Henri holds an active state contractor license. We re-check licenses daily against the state board, and if one lapses we pause lead delivery for that contractor until they renew.",
+      "Every contractor gives us their state license number at signup, and we match it against the public license roster we hold for their state before they can be matched to your project. States outside our roster coverage go to manual review.",
   },
 ] as const;
 
@@ -92,16 +97,22 @@ const FAQS = [
     a: "Other platforms sell your information to multiple contractors who all call you at once. Henri matches you with exactly one vetted, licensed contractor. Your information is never sold or shared beyond that single match.",
   },
   {
+    // 2026-08-04 truthfulness pass: dropped "Contractors attest to active
+    // liability insurance at sign-up." There is no insurance field anywhere
+    // in onboarding or the profile schema — nothing collects that attestation.
     q: "How are contractors vetted?",
-    a: "Every contractor on Henri holds a valid, active state contractor license, which we re-check daily against the state license board. Contractors attest to active liability insurance at sign-up. If a license lapses, we pause lead delivery for that contractor until they renew, and you'll be re-matched if needed.",
+    a: "Every contractor must give us a state contractor license number to sign up. We match it against the public license roster we hold for that state — nine states are covered today, and licenses from other states are reviewed manually before the contractor can be matched. If you ever have a concern about a match, tell us and we'll re-match you at no cost.",
   },
   {
     q: "What if I don't like the contractor I'm matched with?",
     a: "Let us know and we will re-match you with a different contractor at no cost. You are never stuck with a match that does not feel right.",
   },
   {
+    // 2026-08-04: was "Most contractors respond within a few hours during
+    // business hours." No response-time cohort exists to derive that from —
+    // Henri is pre-launch. Replaced with what the product actually does.
     q: "How quickly will the contractor contact me?",
-    a: "Most contractors respond within a few hours during business hours. You will receive a notification as soon as your contractor is assigned.",
+    a: "Your contractor receives your project details as soon as you're matched, and you'll get a notification at the same moment. Response times are up to the individual contractor — if you don't hear back, tell us and we'll re-match you at no cost.",
   },
 ] as const;
 
@@ -132,12 +143,18 @@ function ShieldIcon() {
 /*  FAQ Accordion                                                      */
 /* ================================================================== */
 
+/* Accordion a11y (2026-08-04): added type="button", aria-controls → panel id,
+ * a focus-visible ring, and aria-hidden on the collapsed panel. Without the
+ * last one the grid-rows-[0fr] collapse hides the answer visually but leaves
+ * it in the accessibility tree, so a screen reader reads all five answers. */
 function FAQItem({
+  id,
   question,
   answer,
   isOpen,
   onToggle,
 }: {
+  id: string;
   question: string;
   answer: string;
   isOpen: boolean;
@@ -146,9 +163,12 @@ function FAQItem({
   return (
     <div className="border-b border-border">
       <button
+        type="button"
+        id={`${id}-trigger`}
         onClick={onToggle}
-        className="flex w-full items-center justify-between py-5 text-left transition-colors hover:text-primary"
+        className="flex w-full items-center justify-between py-5 text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-expanded={isOpen}
+        aria-controls={`${id}-panel`}
       >
         <span className="text-base font-medium text-foreground">
           {question}
@@ -161,6 +181,10 @@ function FAQItem({
         />
       </button>
       <div
+        id={`${id}-panel`}
+        role="region"
+        aria-labelledby={`${id}-trigger`}
+        aria-hidden={!isOpen}
         className={cn(
           "grid transition-all duration-200 ease-in-out",
           isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
@@ -267,28 +291,34 @@ export default function PortalPage() {
             />
             <button
               type="submit"
-              className="whitespace-nowrap rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary/90"
+              className="whitespace-nowrap rounded-lg bg-cta px-6 py-3 text-sm font-semibold text-cta-foreground shadow-sm transition-colors hover:bg-primary/90"
             >
               Find my contractor &rarr;
             </button>
           </form>
 
-          {/* Trust dots */}
+          {/* Trust dots.
+            * 2026-08-04: "Licensed & insured only" → "Licensed contractors
+            * only". Nothing in onboarding or the profile schema collects an
+            * insurance attestation, so the insured half was unbacked.
+            * Also swapped the four hardcoded `bg-[#3D9970]` literals for the
+            * `bg-success` token — #3D9970 IS the --success value, so this is
+            * the same pixel output via the locked palette. */}
           <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#3D9970]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
               Free for homeowners
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#3D9970]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
               No spam calls
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#3D9970]" />
-              Licensed &amp; insured only
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
+              Licensed contractors only
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#3D9970]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
               1 contractor, not 5
             </span>
           </div>
@@ -307,9 +337,11 @@ export default function PortalPage() {
                describing the model itself, not outcomes we haven't
                earned yet. */}
           <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
+            {/* 2026-08-04: "license-verified" → "license-checked at signup".
+              * Verification is a roster match at signup, not continuous. */}
             <span className="flex items-center gap-2">
               <ShieldIcon />
-              Every contractor license-verified
+              Every contractor license-checked at signup
             </span>
             <span className="flex items-center gap-2">
               <ShieldIcon />
@@ -354,8 +386,11 @@ export default function PortalPage() {
             <h2 className="font-heading text-3xl font-normal tracking-tight text-foreground sm:text-4xl">
               How Henri works
             </h2>
+            {/* 2026-08-04: was "From ZIP code to contractor call in under 5
+              * minutes." Henri controls the intake and the match, not how
+              * fast the contractor picks up the phone. */}
             <p className="mt-4 text-lg text-muted-foreground">
-              From ZIP code to contractor call in under 5 minutes.
+              From ZIP code to a matched contractor in five steps.
             </p>
           </div>
 
@@ -367,7 +402,7 @@ export default function PortalPage() {
                   <div className="absolute left-5 top-12 bottom-0 w-px bg-border" />
                 )}
                 {/* Number badge */}
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-white">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cta text-sm font-semibold text-cta-foreground">
                   {step.num}
                 </div>
                 <div className="pt-1.5">
@@ -402,8 +437,9 @@ export default function PortalPage() {
             {TRADES.map((trade) => (
               <button
                 key={trade.label}
+                type="button"
                 onClick={() => handleTradeClick(trade.label)}
-                className="flex flex-col items-center gap-2 rounded-xl border border-border bg-background p-5 text-sm font-medium text-foreground transition-all duration-150 hover:border-primary/40 hover:bg-primary-04 hover:shadow-sm"
+                className="flex flex-col items-center gap-2 rounded-xl border border-border bg-background p-5 text-sm font-medium text-foreground transition-all duration-150 hover:border-primary/40 hover:bg-primary-04 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <span>{trade.label}</span>
               </button>
@@ -481,6 +517,7 @@ export default function PortalPage() {
             {FAQS.map((faq, i) => (
               <FAQItem
                 key={i}
+                id={`portal-faq-${i}`}
                 question={faq.q}
                 answer={faq.a}
                 isOpen={faqOpen === i}
@@ -509,7 +546,7 @@ export default function PortalPage() {
           </p>
           <Link
             href="/contractors"
-            className="mt-6 inline-block rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+            className="mt-6 inline-block rounded-lg bg-cta px-6 py-3 text-sm font-semibold text-cta-foreground transition-opacity hover:opacity-90"
           >
             Learn more for contractors &rarr;
           </Link>
@@ -524,12 +561,18 @@ export default function PortalPage() {
           <h2 className="font-heading text-3xl font-normal tracking-tight text-white sm:text-4xl">
             Ready to find your contractor?
           </h2>
-          <p className="mx-auto mt-4 max-w-xl text-base text-white/80">
+          {/* text-white/80 → text-white: at 80% opacity over the terracotta
+            * primary the body copy fell to roughly 2.2:1, below even the
+            * large-text AA floor. Full white is the --primary-foreground
+            * token value and the best available here without touching the
+            * locked palette. */}
+          <p className="mx-auto mt-4 max-w-xl text-base text-white">
             It takes 2 minutes. No spam, no commitment, completely free.
           </p>
           <button
+            type="button"
             onClick={() => openChat()}
-            className="mt-8 rounded-lg bg-white px-8 py-3.5 text-sm font-semibold text-primary shadow-lg transition-colors hover:bg-white/90"
+            className="mt-8 rounded-lg bg-white px-8 py-3.5 text-sm font-semibold text-primary shadow-lg transition-colors hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-primary"
           >
             Get matched free &rarr;
           </button>

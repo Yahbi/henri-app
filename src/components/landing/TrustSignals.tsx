@@ -25,9 +25,25 @@ import { ShieldCheck, FileCheck, Ban, Lock, Database } from "lucide-react";
 
 const PILLARS = [
   {
+    // 2026-08-04 truthfulness pass. Previous copy: "License verified daily —
+    // We re-verify your license every 24 hours against the state board. If it
+    // lapses, we pause your leads until it's current." Three claims, two of
+    // them false:
+    //   - "against the state board": `src/lib/license/verify.ts` contains no
+    //     HTTP call to any board. Unconfigured states return `pending`;
+    //     configured non-CA states return `pending`; the one CA path only
+    //     regex-checks the digit count and also returns `pending`.
+    //   - "we pause your leads": nothing in the score cron or the leads API
+    //     reads license status. `leads_paused` exists only as a value
+    //     reported in one compliance JSON response; no delivery path gates
+    //     on it.
+    // What IS real: /api/onboarding/verify-license cross-checks the claimed
+    // (state, license_number) against `state_license_rosters` at signup.
+    // Live count 2026-08-04: 729,776 roster rows across 9 states. Copy is
+    // now sized to exactly that.
     icon: ShieldCheck,
-    title: "License verified daily",
-    body: "We re-verify your license every 24 hours against the state board. If it lapses, we pause your leads until it's current.",
+    title: "License checked at signup",
+    body: "We match your license number against the public license roster we hold for your state — 9 states are covered today, and anything outside them is flagged for manual review. Live state-board re-verification is being rolled out state by state; we'll say so here when it ships.",
   },
   {
     icon: FileCheck,

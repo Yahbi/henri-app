@@ -59,10 +59,7 @@ export async function POST() {
         });
       if (createErr || !created.user) {
         logApiError("dev.autoLogin.createUser", createErr);
-        return NextResponse.json(
-          { error: createErr?.message ?? "Create failed" },
-          { status: 500 }
-        );
+        return NextResponse.json({ error: "Create failed" }, { status: 500 });
       }
       user = created.user;
     } else {
@@ -97,10 +94,7 @@ export async function POST() {
     });
     if (signInErr) {
       logApiError("dev.autoLogin.signIn", signInErr);
-      return NextResponse.json(
-        { error: signInErr.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Sign-in failed" }, { status: 500 });
     }
 
     return NextResponse.json({

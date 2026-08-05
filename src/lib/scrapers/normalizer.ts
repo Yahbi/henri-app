@@ -34,7 +34,9 @@ const STATUS_KEYWORDS: Record<DbPermitStatus, string[]> = {
   ],
   approved: ["approved", "granted", "active"],
   issued: ["issued"],
-  final: ["completed", "closed", "finalized", "done", "final"],
+  // "complete" is listed alongside "completed": whole-token matching means
+  // the two are distinct tokens, and SF ships the bare "COMPLETE".
+  final: ["completed", "complete", "closed", "finalized", "done", "final"],
   expired: ["expired", "lapsed", "void"],
   // Terminal-negative states (denied/cancelled/etc.) collapse into revoked
   // since the DB enum doesn't carry a separate 'denied'.
@@ -57,14 +59,101 @@ export function classifyPermitType(raw: string): PermitType {
   return "other";
 }
 
-/** Map any raw status string to a value the `permit_status` enum accepts. */
+/**
+ * Evaluation order for status matching.
+ *
+ * Terminal-negative states are tested BEFORE the positive ones so a value
+ * like "DISAPPROVED" can never be claimed by the `approved` list. Within the
+ * positives, the more advanced state wins (`issued` before `approved`).
+ */
+const STATUS_ORDER: DbPermitStatus[] = [
+  "revoked",
+  "expired",
+  "final",
+  "issued",
+  "approved",
+  "submitted",
+];
+
+/**
+ * Explicit negations, checked before any keyword matching.
+ *
+ * These are the confirmed false-friends of the old unanchored
+ * `lower.includes(kw)` test:
+ *   "INACTIVE".includes("active")      -> was classified `approved`
+ *   "DISAPPROVED".includes("approved") -> would be classified `approved`
+ *
+ * `INACTIVE` maps to `expired`: the DB enum has no dormant state, and
+ * "no longer active" is far closer to expired than to approved. Getting this
+ * wrong is not cosmetic — `permits.status` drives `opportunity_stage`, so a
+ * dead permit was being rendered to contractors as live work.
+ */
+const STATUS_NEGATIONS: Array<[RegExp, DbPermitStatus]> = [
+  [/\bin[-\s]?active\b/, "expired"],
+  [/\bnon[-\s]?active\b/, "expired"],
+  [/\bdisapprov/, "revoked"],
+  [/\bun[-\s]?approved\b/, "revoked"],
+  [/\bnot\s+approved\b/, "revoked"],
+];
+
+/**
+ * Keywords that are safe to match as a bare substring in the legacy
+ * fallback pass. Deliberately excludes every short/collision-prone token
+ * ("active", "approved", "final", "done", "review", "open", ...) — those are
+ * only ever matched as whole tokens.
+ *
+ * The fallback exists so glued values that the old code handled
+ * ("FINALED", "ISSUEDPERMIT") keep classifying the way they always did.
+ */
+const SAFE_SUBSTRING_KEYWORDS: Array<[DbPermitStatus, string]> = [
+  ["revoked", "revoke"],
+  ["revoked", "cancel"],
+  ["revoked", "withdraw"],
+  ["revoked", "reject"],
+  ["revoked", "denied"],
+  ["expired", "expire"],
+  ["expired", "lapsed"],
+  ["final", "finaled"],
+  ["final", "finalized"],
+  ["final", "completed"],
+  ["issued", "issued"],
+  ["submitted", "submitted"],
+  ["submitted", "pending"],
+];
+
+/**
+ * Map any raw status string to a value the `permit_status` enum accepts.
+ *
+ * Matching is WHOLE-TOKEN, not substring. The previous implementation used
+ * `lower.includes(kw)`, which silently mis-classified real production data:
+ * ~9.8k Elk Grove rows with raw STATUS='INACTIVE' were stored as `approved`
+ * (because "inactive" contains "active"), and ~7k San Francisco rows with
+ * raw status='COMPLETE' fell through to `submitted` (because the `final`
+ * list had "completed" but not "complete", and "complete".includes("completed")
+ * is false).
+ */
 export function normalizeStatus(raw: string): DbPermitStatus {
   const lower = raw.toLowerCase();
 
-  for (const [status, keywords] of Object.entries(STATUS_KEYWORDS) as [DbPermitStatus, string[]][]) {
-    if (keywords.some((kw) => lower.includes(kw))) {
-      return status;
+  // 1. Explicit negations win outright.
+  for (const [re, status] of STATUS_NEGATIONS) {
+    if (re.test(lower)) return status;
+  }
+
+  // 2. Whole-token / token-sequence match. Collapsing every non-alphanumeric
+  //    run to a single space means "APPROVED_2024" and "under-review" still
+  //    match, while "inactive" cannot match "active".
+  const padded = ` ${lower.replace(/[^a-z0-9]+/g, " ").trim()} `;
+  for (const status of STATUS_ORDER) {
+    for (const kw of STATUS_KEYWORDS[status]) {
+      if (padded.includes(` ${kw} `)) return status;
     }
+  }
+
+  // 3. Legacy substring pass, restricted to unambiguous keywords, so glued
+  //    values keep the behaviour they had before token matching landed.
+  for (const [status, kw] of SAFE_SUBSTRING_KEYWORDS) {
+    if (lower.includes(kw)) return status;
   }
 
   // Unknown / empty → use DB default so we never write an invalid enum.
@@ -127,9 +216,35 @@ export function parseDate(raw: string | null): string | null {
 export const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+/**
+ * Extract the 5-digit ZIP from a free-text address.
+ *
+ * THE BUG THIS CLOSES
+ * -------------------
+ * This used to be `address.match(/\b(\d{5})(?:-\d{4})?\b/)` — a NON-global
+ * match, so it returned the FIRST 5-digit run in the string. For any address
+ * whose house number is five digits that is the HOUSE NUMBER, not the ZIP:
+ *
+ *   "11848 HOOPER RD  BAKER LA 70714"      -> "11848"
+ *   "33647 GREENWELL SPRINGS RD, LA 70739" -> "33647"
+ *   "12345 VENTURA BLVD"                   -> "12345"
+ *
+ * ZIP is the territory key for the entire paid product, so a Baton Rouge
+ * property numbered 33647 was being delivered into the Tampa 33647 exclusive
+ * territory. Measured: ~5.9% of sampled permits had `zip` equal to the
+ * leading house number. It also poisoned `permits.state` through
+ * `deriveState`'s zipToState fallback (prefix 118 -> "NY").
+ *
+ * The rule (already proven in the sibling src/lib/ingest/normalize.ts):
+ * take the LAST 5-digit token, and reject it when it sits at index 0 — a
+ * real ZIP is never the first token of an address.
+ */
 export function extractZip(address: string): string | null {
-  const match = address.match(/\b(\d{5})(?:-\d{4})?\b/);
-  return match ? match[1] : null;
+  const matches = [...address.matchAll(/\b(\d{5})(?:-\d{4})?\b/g)];
+  if (matches.length === 0) return null;
+  const last = matches[matches.length - 1];
+  if ((last.index ?? 0) === 0) return null;
+  return last[1];
 }
 
 const VALID_STATES = new Set([
@@ -203,22 +318,44 @@ export function zipToState(zip: string | null): string | null {
   return null;
 }
 
-/** Derive the correct permit state. Prefers an explicit ", ST 12345"
- *  token in the address, then the ZIP-prefix mapping, then the source's
- *  declared state — but never trusts a junk 'US'/''/null source state
- *  when the address can tell us better. */
+/**
+ * Derive the correct permit state.
+ *
+ * Order: explicit ", ST 12345" token in the address, then the ZIP-prefix
+ * mapping, then the source's declared state — never trusting a junk
+ * 'US'/''/null source state when the address can tell us better.
+ *
+ * `zipIsTrusted` (added 2026-08-04) demotes the ZIP below the declared state.
+ * Pass `false` whenever the ZIP was scraped out of free text rather than read
+ * from a dedicated ZIP column: a house number misread as a ZIP used to
+ * OVERRIDE a perfectly good declared state. Measured on live data: 251
+ * sampled permits at Seattle coordinates (47.68 / -122.32) from a feed whose
+ * declared state is "WA" were stored as "NY", because their address began
+ * with a 5-digit house number in the 100xx range. 100% of NY-attributed
+ * permits with an impossible longitude had `zip == leading house number`.
+ *
+ * Defaults to `true` so existing callers keep their behaviour.
+ */
 export function deriveState(
   address: string | null,
   zip: string | null,
   fallback: string | null,
+  zipIsTrusted: boolean = true,
 ): string | null {
   if (address) {
     const m = address.toUpperCase().match(/,?\s*([A-Z]{2})\s+\d{5}(?:-\d{4})?\s*$/);
     if (m && VALID_STATES.has(m[1])) return m[1];
   }
+  const declared =
+    fallback && fallback !== "US" && VALID_STATES.has(fallback) ? fallback : null;
+
+  // An untrusted (free-text-parsed) ZIP must never beat the source's own
+  // declared state.
+  if (!zipIsTrusted && declared) return declared;
+
   const fromZip = zipToState(zip);
   if (fromZip) return fromZip;
-  if (fallback && fallback !== "US" && VALID_STATES.has(fallback)) return fallback;
+  if (declared) return declared;
   // A junk 'US' sentinel (or anything that isn't a real 2-letter state) must
   // not be stored as a state — return null so it never lands in permits.state.
   return null;

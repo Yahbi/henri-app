@@ -83,5 +83,24 @@ export async function getZipAvailability(
     return null;
   }
 
-  return data as ZipAvailability;
+  // Validate the shape instead of asserting it. The blind
+  // `data as ZipAvailability` cast here is what let a wrong interface
+  // (which claimed an `is_claimed` field the RPC never returns) survive
+  // typechecking and silently break the onboarding availability check.
+  const raw = data as Partial<ZipAvailability> | null;
+  if (!raw || typeof raw.slots_used !== "number" || typeof raw.slots_total !== "number") {
+    logger.error("get_zip_availability returned an unexpected shape", {
+      zip,
+      keys: raw ? Object.keys(raw).join(",") : "null",
+    });
+    return null;
+  }
+
+  return {
+    zip: raw.zip ?? zip,
+    slots_used: raw.slots_used,
+    slots_total: raw.slots_total,
+    contractors: raw.contractors ?? [],
+    waitlist_count: raw.waitlist_count ?? 0,
+  };
 }

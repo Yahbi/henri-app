@@ -1,17 +1,16 @@
 import type { PermitSource } from "./sources";
-import type { ScrapeResult } from "@/types/permits";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { BROWSER_UA } from "./normalizer";
+import { normalizeFlatRecord } from "./flat-record";
 import {
-  classifyPermitType,
-  normalizeStatus,
-  parseDate,
-  extractZip,
-  deriveState,
-  parseCoord,
-  parseMoney,
-  BROWSER_UA,
-} from "./normalizer";
+  type ScrapeReport,
+  type ScrapeOutcome,
+  collectObservedKeys,
+  emptyReport,
+  isMappingFailure,
+  looksLikeNonPermitDataset,
+} from "./types";
 
 /** Build Socrata request headers — browser UA (some gov WAFs 403 bot
  *  agents) + app token when available to avoid rate limits. */
@@ -20,6 +19,16 @@ function socrataHeaders(): Record<string, string> {
   const base: Record<string, string> = { "User-Agent": BROWSER_UA };
   if (token) base["X-App-Token"] = token;
   return base;
+}
+
+/** A 4xx that retrying cannot fix — surfaced so callers can fall back. */
+export class HttpClientError extends Error {
+  readonly status: number;
+  constructor(status: number, statusText: string) {
+    super(`HTTP ${status}: ${statusText}`);
+    this.name = "HttpClientError";
+    this.status = status;
+  }
 }
 
 async function fetchWithRetry(
@@ -42,8 +51,12 @@ async function fetchWithRetry(
         }
       }
 
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      throw new HttpClientError(response.status, response.statusText);
     } catch (error) {
+      // A 4xx is deterministic — retrying just burns the time budget.
+      if (error instanceof HttpClientError && error.status < 500 && error.status !== 429) {
+        throw error;
+      }
       if (attempt === retries) throw error;
 
       const delay = Math.pow(2, attempt) * 1000;
@@ -54,145 +67,245 @@ async function fetchWithRetry(
   throw new Error("Max retries exceeded");
 }
 
+export interface SocrataScrapeOptions {
+  pageSize?: number;
+  maxPages?: number;
+  /** Row offset to resume from. See src/lib/scrapers/cursor.ts. */
+  startOffset?: number;
+}
+
+/**
+ * Fetch one Socrata page.
+ *
+ * Ordering by the system field `:id` DESC pulls the NEWEST rows first, so a
+ * cursor walking forward marches back through history. Some endpoints tagged
+ * `socrata` in `permit_sources` are not really Socrata and reject `$order`
+ * with a 400 — rather than let that cull a source that would otherwise work,
+ * we retry once without the clause and remember the downgrade for this run.
+ */
+async function fetchSocrataPage(
+  endpoint: string,
+  pageSize: number,
+  offset: number,
+  ordered: boolean,
+): Promise<{ records: Record<string, unknown>[]; ordered: boolean }> {
+  const base = `${endpoint}?$limit=${pageSize}&$offset=${offset}`;
+  const url = ordered ? `${base}&$order=:id+DESC` : base;
+  try {
+    const response = await fetchWithRetry(url);
+    const json = await response.json();
+    if (!Array.isArray(json)) {
+      throw new Error("response was not a JSON array");
+    }
+    return { records: json as Record<string, unknown>[], ordered };
+  } catch (err) {
+    if (ordered && err instanceof HttpClientError && err.status >= 400 && err.status < 500) {
+      const response = await fetchWithRetry(base);
+      const json = await response.json();
+      if (!Array.isArray(json)) throw new Error("response was not a JSON array");
+      return { records: json as Record<string, unknown>[], ordered: false };
+    }
+    throw err;
+  }
+}
+
 export async function scrapeSocrataSource(
   source: PermitSource,
-  pageSize: number = 1000,
-  maxPages: number = 20
-): Promise<ScrapeResult> {
-  const result: ScrapeResult = { inserted: 0, updated: 0, errors: 0 };
+  options: SocrataScrapeOptions = {},
+): Promise<ScrapeReport> {
+  const pageSize = options.pageSize ?? 1000;
+  const maxPages = options.maxPages ?? 20;
+  const startOffset = Math.max(0, options.startOffset ?? 0);
+
   const supabase = createAdminClient();
   const seen = new Set<string>();
 
-  for (let page = 0; page < maxPages; page++) {
-    const offset = page * pageSize;
-    // Freshness fix (2026-06-10): order by the Socrata system field `:id`
-    // DESC so each run pulls the NEWEST rows first. Without this, paging
-    // from offset 0 in default order only ever saw the oldest ~20k rows
-    // of large datasets, so new permits were never ingested. `:id` is a
-    // universal system column — safe on every Socrata dataset.
-    const url = `${source.endpoint}?$limit=${pageSize}&$offset=${offset}&$order=:id+DESC`;
+  let offset = startOffset;
+  let fetched = 0;
+  let mapped = 0;
+  let usable = 0;
+  let updated = 0;
+  let errors = 0;
+  let pages = 0;
+  let reachedEnd = false;
+  let ordered = true;
+  let observedKeys: string[] = [];
+  let outcome: ScrapeOutcome = "empty";
+  let detail: string | null = null;
+  let writeAttempts = 0;
+  let writeFailures = 0;
 
+  for (let page = 0; page < maxPages; page++) {
     let records: Record<string, unknown>[];
     try {
-      const response = await fetchWithRetry(url);
-      records = await response.json();
+      const res = await fetchSocrataPage(source.endpoint, pageSize, offset, ordered);
+      records = res.records;
+      ordered = res.ordered;
     } catch (err) {
-      logger.error("Socrata fetch error", {
-        city: source.city,
-        page,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      result.errors++;
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("Socrata fetch error", { city: source.city, page, offset, error: message });
+      errors++;
+      // A failure on the very first page means we learned nothing this run —
+      // that is a hard failure the cron must record so error_count climbs.
+      // A failure on a later page still leaves real rows written, so we keep
+      // the partial success and resume from the current offset next time.
+      if (page === 0) {
+        return emptyReport({
+          errors,
+          outcome: "fetch_failed",
+          detail: message,
+          nextOffset: startOffset,
+          reachedEnd: false,
+          pageSize,
+        });
+      }
+      detail = `page ${page} fetch failed: ${message}`;
       break;
     }
 
-    if (!records || !records.length) break;
+    pages++;
 
-  const normalized = records
-    .map((record) => {
-      try {
-        const rawType = String(record[source.typeField] ?? "");
-        const rawStatus = String(record[source.statusField] ?? "");
-        const rawAddress = String(record[source.addressField] ?? "");
-        const rawDate = record[source.dateField]
-          ? String(record[source.dateField])
-          : null;
-        const rawValue = record[source.valueField]
-          ? String(record[source.valueField])
-          : null;
+    if (records.length === 0) {
+      // End of the feed. Wrap so the next run re-sweeps from the newest rows;
+      // every write is an upsert on (source_city, source_id) so re-sweeping is
+      // free of side effects.
+      reachedEnd = true;
+      offset = 0;
+      break;
+    }
 
-        const rawId = String(record[source.idField] ?? "");
-        if (!rawId) return null;
-
-        // Socrata pages can contain duplicate permit numbers; dedupe to
-        // avoid "ON CONFLICT DO UPDATE command cannot affect row a second
-        // time" when the upsert runs.
-        const dedupeKey = `${source.city.toLowerCase()}_${rawId}`;
-        if (seen.has(dedupeKey)) return null;
-        seen.add(dedupeKey);
-
-        const lat = parseCoord(record[source.latField]);
-        const lng = parseCoord(record[source.lngField]);
-
-        // ZIP resolution: prefer one parsed from the address, else fall
-        // back to a dedicated zip column. BLDS-shaped Socrata datasets
-        // (Seattle, Cincinnati, ...) keep the street in `originaladdress1`
-        // and the ZIP in a separate column — without this fallback those
-        // permits land with no ZIP and can never become leads.
-        const resolvedZip = (rawAddress ? extractZip(rawAddress) : null) ?? (() => {
-          for (const k of ["zip", "zip_code", "zipcode", "originalzip", "zip5", "postal_code", "postalcode", "site_zip", "property_zip"]) {
-            const raw = record[k];
-            if (raw == null) continue;
-            const m = String(raw).match(/\b(\d{5})\b/);
-            if (m) return m[1];
-          }
-          return null;
-        })();
-
-        return {
-          source_id:       `${source.city.toLowerCase().replace(/\s+/g, "_")}_${rawId}`,
-          source_city:     source.city,
-          city:            source.city,
-          // Derive state from the address/ZIP so a source with a junk
-          // 'US' state (e.g. auto-discovered) still yields correct rows.
-          state:           deriveState(rawAddress || null, resolvedZip, source.state),
-          source_type:     "socrata",
-          permit_number:   rawId || null,
-          permit_type:     classifyPermitType(rawType),
-          status:          normalizeStatus(rawStatus),
-          description:     record[source.descField] ? String(record[source.descField]) : null,
-          address:         rawAddress || null,
-          zip:             resolvedZip,
-          // Validate WGS84 bounds — skip state-plane projected coordinates
-          latitude:        lat !== null && Math.abs(lat) <= 90 ? lat : null,
-          longitude:       lng !== null && Math.abs(lng) <= 180 ? lng : null,
-          issued_date:     parseDate(rawDate),
-          estimated_value: parseMoney(rawValue),
-          scored_at:       null,
-          raw_json:        record,
-          updated_at:      new Date().toISOString(),
-        };
-      } catch {
-        result.errors++;
-        return null;
+    if (observedKeys.length === 0) {
+      observedKeys = collectObservedKeys(records[0]);
+      // Registry mis-registration guard: refuse to write business-licence /
+      // footprint / utility rows into `permits` at all.
+      const nonPermit = looksLikeNonPermitDataset(observedKeys);
+      if (nonPermit) {
+        return emptyReport({
+          errors,
+          outcome: "unsupported",
+          observedKeys,
+          detail: nonPermit,
+          nextOffset: startOffset,
+          reachedEnd: false,
+          pageSize,
+        });
       }
-    })
-    .filter(
-      (r): r is NonNullable<typeof r> => r !== null && r.source_id !== ""
-    );
+    }
+    fetched += records.length;
 
-    if (!normalized.length) {
-      // Page had rows but all filtered — keep paging unless it was a full page of junk
-      if (records.length < pageSize) break;
-      continue;
+    let pageMapped = 0;
+    let pageUsable = 0;
+    const normalized: Record<string, unknown>[] = [];
+
+    for (const record of records) {
+      try {
+        const { row, usable: rowUsable } = normalizeFlatRecord(record, source, "socrata");
+        if (!row) continue;
+        // Socrata pages can contain duplicate permit numbers; dedupe to avoid
+        // "ON CONFLICT DO UPDATE command cannot affect row a second time".
+        const dedupeKey = String(row.source_id);
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        pageMapped++;
+        if (rowUsable) pageUsable++;
+        normalized.push(row);
+      } catch {
+        errors++;
+      }
+    }
+
+    mapped += pageMapped;
+    usable += pageUsable;
+
+    // MAPPING-FAILURE GATE (page 0 only).
+    //
+    // Before this existed, a source whose field mapping did not match the
+    // payload returned {fetched:N, inserted:0, skipped:N} and was recorded as
+    // a SUCCESS — indistinguishable from a genuinely quiet city. Now the first
+    // page decides: if nothing mapped, we neither write the junk nor keep
+    // paging, and the caller records a mapping failure with the payload keys
+    // attached so an operator can repair the config.
+    if (page === 0 && isMappingFailure(records.length, pageMapped, pageUsable)) {
+      return emptyReport({
+        errors,
+        outcome: "mapping_failed",
+        fetched,
+        mapped,
+        usable,
+        skipped: fetched - mapped,
+        observedKeys,
+        detail:
+          pageMapped === 0
+            ? `no row yielded an id via id_field='${source.idField}'`
+            : `${pageMapped} rows had ids but none had an address or date ` +
+              `(address_field='${source.addressField}', date_field='${source.dateField}')`,
+        nextOffset: startOffset,
+        reachedEnd: false,
+        pageSize,
+        pages,
+      });
     }
 
     // Upsert in batches of 100
     const BATCH_SIZE = 100;
     for (let i = 0; i < normalized.length; i += BATCH_SIZE) {
       const batch = normalized.slice(i, i + BATCH_SIZE);
-
+      writeAttempts++;
       const { data, error } = await supabase
         .from("permits")
         .upsert(batch, { onConflict: "source_city,source_id" })
         .select("id");
 
       if (error) {
-        result.errors += batch.length;
-        logger.error("Socrata upsert error", {
-          city: source.city,
-          error: error.message,
-        });
+        errors += batch.length;
+        writeFailures++;
+        detail = `upsert failed: ${error.message}`;
+        logger.error("Socrata upsert error", { city: source.city, error: error.message });
       } else {
-        // Supabase upsert does not distinguish insert vs update in response,
-        // so we count all successful rows as updates for simplicity
-        result.updated += data?.length ?? 0;
+        // Supabase upsert does not distinguish insert vs update in the
+        // response, so all successful rows are counted as updates.
+        updated += data?.length ?? 0;
       }
     }
 
-    // Stop if we got a short page (last one)
-    if (records.length < pageSize) break;
+    offset += records.length;
+
+    // Short page = last page of the feed.
+    if (records.length < pageSize) {
+      reachedEnd = true;
+      offset = 0;
+      break;
+    }
   }
 
-  return result;
+  if (writeAttempts > 0 && writeFailures === writeAttempts) {
+    outcome = "write_failed";
+    detail = detail ?? "every upsert batch failed";
+  } else if (fetched === 0) {
+    outcome = "empty";
+  } else if (isMappingFailure(fetched, mapped, usable)) {
+    outcome = "mapping_failed";
+    detail =
+      detail ??
+      `${fetched} rows fetched, ${mapped} mapped, ${usable} usable — field mapping does not match payload`;
+  } else {
+    outcome = "ok";
+  }
+
+  return {
+    inserted: 0,
+    updated,
+    errors,
+    outcome,
+    fetched,
+    mapped,
+    usable,
+    skipped: fetched - mapped,
+    nextOffset: reachedEnd ? 0 : offset,
+    reachedEnd,
+    observedKeys,
+    detail,
+    pageSize,
+    pages,
+  };
 }

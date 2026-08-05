@@ -190,13 +190,26 @@ export async function PATCH(
       return NextResponse.json({ success: true, status: "withdrawn", already: true });
     }
 
-    const { error: updateErr } = await supabase
+    /* `.select("id")` is load-bearing, not decoration.
+     *
+     * With no UPDATE policy on homeowner_intakes, RLS narrows this statement
+     * to zero rows: PostgREST returns 204 and supabase-js yields
+     * {data:null, error:null}. The old `if (updateErr)` guard never fired, so
+     * the route answered `{success:true, status:"withdrawn"}` and the UI told
+     * the homeowner their consent was revoked and pending outreach cancelled
+     * — while consent_given_at stayed set and the outreach hygiene gate kept
+     * returning allowed. Asking for the affected row back makes a missing or
+     * regressed policy fail loudly instead of silently.
+     *
+     * The policy itself ships in migration 00116. */
+    const { data: withdrawnRows, error: updateErr } = await supabase
       .from("homeowner_intakes")
       .update({
         status: "withdrawn",
         consent_given_at: null,
       })
-      .eq("id", intakeId);
+      .eq("id", intakeId)
+      .select("id");
 
     if (updateErr) {
       logger.error("Intake withdraw update failed", {
@@ -205,6 +218,20 @@ export async function PATCH(
       });
       return NextResponse.json(
         { error: "Failed to withdraw intake" },
+        { status: 500 },
+      );
+    }
+
+    if (!withdrawnRows || withdrawnRows.length === 0) {
+      logger.error("Intake withdraw affected zero rows — RLS UPDATE lane missing", {
+        intakeId,
+        hint: "apply migration 00116_homeowner_write_lanes.sql",
+      });
+      return NextResponse.json(
+        {
+          error:
+            "Could not withdraw this project. Your consent has NOT been changed — please contact support@meethenri.com.",
+        },
         { status: 500 },
       );
     }

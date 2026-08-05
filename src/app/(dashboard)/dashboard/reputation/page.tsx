@@ -167,10 +167,16 @@ function ReplyModal({ review, onClose }: { review: ReviewItem; onClose: () => vo
     }
   }
 
-  function handleCopy() {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function handleCopy() {
+    // Rejects on insecure origins / denied permission — the unguarded call
+    // left an unhandled rejection and still claimed "Copied".
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setAiError("Your browser blocked clipboard access — select the text and copy manually.");
+    }
   }
 
   return (
@@ -216,7 +222,7 @@ function ReplyModal({ review, onClose }: { review: ReviewItem; onClose: () => vo
                 {copied ? "Copied" : "Copy"}
               </button>
               <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-sm text-foreground hover:bg-bg-subtle transition-colors">Cancel</button>
-              <button onClick={handleSend} disabled={!text.trim() || saving} className="rounded-lg bg-primary px-4 py-1.5 text-sm text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40">
+              <button onClick={handleSend} disabled={!text.trim() || saving} className="rounded-lg bg-cta px-4 py-1.5 text-sm text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-40">
                 {saving ? "Saving…" : "Send Reply"}
               </button>
             </div>
@@ -235,6 +241,9 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
   const [customerName, setCustomerName] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  // requestReview returns {success:false, error} on failure; the result was
+  // discarded, so a failed request just re-enabled the button silently.
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   // Escape-to-close — the modal otherwise had no keyboard dismiss.
   useEffect(() => {
@@ -250,6 +259,7 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
   async function handleSend() {
     if (!recipient.trim() || !customerName.trim()) return;
     setSending(true);
+    setRequestError(null);
     const result = await requestReview({
       customer_name: customerName,
       customer_email: method === "email" ? recipient : undefined,
@@ -260,6 +270,8 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
     if (result.success) {
       setSent(true);
       setTimeout(onClose, 2000);
+    } else {
+      setRequestError(result.error ?? "Couldn't send that request — try again.");
     }
   }
 
@@ -287,16 +299,16 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Customer Name</label>
-          <input type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="John Doe"
+          <label htmlFor="rev-customer-name" className="text-xs font-medium text-muted-foreground mb-1 block">Customer Name</label>
+          <input id="rev-customer-name" type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="John Doe"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
         </div>
 
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">
+          <label htmlFor="rev-recipient" className="text-xs font-medium text-muted-foreground mb-1 block">
             {method === "sms" ? "Phone Number" : "Email Address"}
           </label>
-          <input type={method === "sms" ? "tel" : "email"} value={recipient} onChange={(e) => setRecipient(e.target.value)}
+          <input id="rev-recipient" type={method === "sms" ? "tel" : "email"} value={recipient} onChange={(e) => setRecipient(e.target.value)}
             placeholder={method === "sms" ? "(310) 555-0123" : "customer@email.com"}
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
         </div>
@@ -306,13 +318,19 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
           <div className="rounded-lg bg-bg-subtle p-3 text-xs text-muted-foreground leading-relaxed whitespace-pre-line">{template}</div>
         </div>
 
+        {requestError && (
+          <p role="alert" className="rounded-lg bg-destructive/10 p-2 text-xs text-destructive">
+            {requestError}
+          </p>
+        )}
+
         {sent ? (
           <div className="rounded-lg bg-green-500/10 p-3 text-sm text-green-400 text-center">Review request sent</div>
         ) : (
           <div className="flex gap-2">
             <button onClick={onClose} className="flex-1 rounded-lg border border-border px-4 py-2 text-sm hover:bg-bg-subtle transition-colors">Cancel</button>
             <button onClick={handleSend} disabled={!recipient.trim() || !customerName.trim() || sending}
-              className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-40">
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm text-cta-foreground font-medium hover:opacity-90 transition-opacity disabled:opacity-40">
               {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
               {sending ? "Sending..." : "Send Request"}
             </button>
@@ -399,7 +417,7 @@ function ReputationPageInner() {
           <p className="text-sm text-muted-foreground mt-1">Monitor, respond, and grow your online reviews</p>
         </div>
         <button onClick={() => setRequestOpen(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity">
+          className="flex items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity">
           <Send className="h-3.5 w-3.5" />
           Request Review
         </button>
@@ -514,7 +532,7 @@ function ReputationPageInner() {
               <button key={f} onClick={() => setFilter(f)}
                 aria-pressed={filter === f}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  filter === f ? "bg-primary text-white" : "bg-bg-subtle text-muted-foreground hover:text-foreground"
+                  filter === f ? "bg-cta text-cta-foreground" : "bg-bg-subtle text-muted-foreground hover:text-foreground"
                 }`}>
                 {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
               </button>

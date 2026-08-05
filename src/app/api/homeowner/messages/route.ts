@@ -63,10 +63,33 @@ export async function GET() {
       return NextResponse.json({ threads: [] });
     }
 
-    const { data: leads } = await supabase
+    /* Error is destructured deliberately. `leads` carries no homeowner
+     * SELECT lane until migration 00116 is applied, so this read returns an
+     * empty set and every thread gets filtered out below — previously
+     * surfacing as "No conversations yet" with HTTP 200, indistinguishable
+     * from a homeowner who genuinely has no threads. Report the real state
+     * instead of an empty one. */
+    const { data: leads, error: leadsErr } = await supabase
       .from("leads")
       .select("id, notes, contractor_id")
       .in("id", leadIds);
+
+    if (leadsErr) {
+      logApiError("homeowner.messages.leads", leadsErr);
+      return NextResponse.json({ error: "Failed to load threads" }, { status: 500 });
+    }
+
+    if ((leads ?? []).length === 0) {
+      logApiError("homeowner.messages.leads_empty", {
+        message:
+          "matched intakes resolved to zero readable leads — homeowner SELECT lane on public.leads is missing (apply migration 00116_homeowner_write_lanes.sql)",
+        leadIds: leadIds.length,
+      });
+      return NextResponse.json(
+        { error: "Failed to load threads" },
+        { status: 500 },
+      );
+    }
 
     // Contractor display names from the profiles table.
     const contractorIds = Array.from(

@@ -249,7 +249,7 @@ export default function AccountSettingsPage() {
           <button
             type="submit"
             disabled={saving}
-            className="px-5 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="px-5 py-2 text-sm font-medium bg-cta text-cta-foreground rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {saving ? "Saving..." : "Save changes"}
           </button>

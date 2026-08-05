@@ -125,7 +125,7 @@ export default function NewsTriggersPage() {
       </header>
 
       {error && (
-        <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-4 mb-4 text-[13px] text-rose-700">
+        <div role="alert" className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-4 mb-4 text-[13px] text-rose-700">
           {error}
         </div>
       )}
@@ -189,6 +189,7 @@ export default function NewsTriggersPage() {
             />
             <select
               value={days}
+              aria-label="Time window"
               onChange={(e) => setDays(Number(e.target.value))}
               className="px-3 py-1.5 text-[12px] rounded-md border border-border bg-card"
             >
@@ -242,6 +243,7 @@ export default function NewsTriggersPage() {
                         rel="noreferrer"
                         className="text-fg-subtle hover:text-foreground"
                         title="Open article"
+                        aria-label={`Open article: ${a.title ?? a.url}`}
                       >
                         <ExternalLink className="h-3 w-3 inline" />
                       </a>

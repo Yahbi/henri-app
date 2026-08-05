@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/params";
 
 /* GET /api/intake/[id]/matches -- returns matched contractors for an intake */
 export async function GET(
@@ -9,6 +10,9 @@ export async function GET(
 ) {
   try {
     const { id: intakeId } = await params;
+    if (!isUuid(intakeId)) {
+      return NextResponse.json({ error: "Malformed intake id" }, { status: 400 });
+    }
 
     if (!intakeId) {
       return NextResponse.json({ error: "Intake ID is required" }, { status: 400 });

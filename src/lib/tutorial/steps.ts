@@ -146,7 +146,12 @@ export const CONTRACTOR_TOUR_STEPS: TourStep[] = [
     target: "[data-tour='dashboard-nav-compliance']",
     title: "Compliance",
     content:
-      "Henri re-verifies your contractor license every 24 hours against the state board. If it lapses, lead delivery pauses — you'll see the status here.",
+      // Was: "Henri re-verifies your contractor license every 24 hours
+      // against the state board. If it lapses, lead delivery pauses."
+      // Neither half was true — src/lib/license/verify.ts contacts no
+      // board, and nothing in the scoring or leads path gates on license
+      // status. Describe the check that actually runs.
+      "Your license number is checked against our state licence rosters at signup, and expiry dates are tracked here. Keep this current so your profile stays credible to homeowners.",
     placement: "bottom-start",
     hideOverlay: true,
     floatingOptions: TOPBAR_FLIP,

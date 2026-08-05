@@ -215,11 +215,15 @@ function LicenseVerificationContent() {
       };
 
       // Onboarding resume — when a row already exists for this contractor,
-      // UPDATE it instead of inserting a duplicate.
+      // UPDATE it instead of inserting a duplicate. Target the specific
+      // row id we loaded, not every row owned by the contractor: the
+      // contractor_id filter would overwrite additional licences (a
+      // multi-state contractor's other rows) with this submission.
       const { error: licenseErr } = existingLicense
         ? await supabase
             .from("contractor_licenses")
             .update(licensePayload)
+            .eq("id", existingLicense.id)
             .eq("contractor_id", user.id)
         : await supabase
             .from("contractor_licenses")
@@ -323,16 +327,21 @@ function LicenseVerificationContent() {
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               {/* License Number */}
               <div>
-                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                <label
+                  htmlFor="license_number"
+                  className="text-sm font-medium text-foreground mb-1.5 block"
+                >
                   License Number <span className="text-destructive">*</span>
                 </label>
                 <Input
+                  id="license_number"
                   {...register("license_number")}
                   placeholder="e.g. 1098765"
                   error={!!errors.license_number}
+                  errorMessageId="license_number-error"
                 />
                 {errors.license_number && (
-                  <p className="text-xs text-destructive mt-1">
+                  <p id="license_number-error" className="text-xs text-destructive mt-1">
                     {errors.license_number.message}
                   </p>
                 )}
@@ -340,12 +349,17 @@ function LicenseVerificationContent() {
 
               {/* State */}
               <div>
-                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                <label
+                  htmlFor="license_state"
+                  className="text-sm font-medium text-foreground mb-1.5 block"
+                >
                   State <span className="text-destructive">*</span>
                 </label>
                 <Select
+                  id="license_state"
                   {...register("state")}
                   error={!!errors.state}
+                  errorMessageId="license_state-error"
                 >
                   <option value="">Select a state</option>
                   {US_STATES.map((s) => (
@@ -355,7 +369,7 @@ function LicenseVerificationContent() {
                   ))}
                 </Select>
                 {errors.state && (
-                  <p className="text-xs text-destructive mt-1">
+                  <p id="license_state-error" className="text-xs text-destructive mt-1">
                     {errors.state.message}
                   </p>
                 )}
@@ -363,10 +377,14 @@ function LicenseVerificationContent() {
 
               {/* License Type */}
               <div>
-                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                <label
+                  htmlFor="license_type"
+                  className="text-sm font-medium text-foreground mb-1.5 block"
+                >
                   License Type / Classification
                 </label>
                 <Input
+                  id="license_type"
                   {...register("license_type")}
                   placeholder='e.g. "C-39 Roofing", "General B"'
                 />
@@ -374,10 +392,14 @@ function LicenseVerificationContent() {
 
               {/* Name on License */}
               <div>
-                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                <label
+                  htmlFor="name_on_license"
+                  className="text-sm font-medium text-foreground mb-1.5 block"
+                >
                   Name on License
                 </label>
                 <Input
+                  id="name_on_license"
                   {...register("name_on_license")}
                   placeholder="Full name as shown on license"
                 />
@@ -487,12 +509,19 @@ function LicenseVerificationContent() {
                 <CheckCircle2 className="h-7 w-7 text-[#3D9970]" />
               </div>
               <h3 className="font-heading font-normal text-lg text-foreground mb-1">
-                License submitted for verification
+                {verify.status === "found"
+                  ? "License verified"
+                  : "License submitted for verification"}
               </h3>
+              {/* Two honest outcomes. When the roster cross-check matched
+               * we already stamped verified=true, so telling the user
+               * "we'll verify and notify you" was wrong. When it didn't,
+               * the review is manual and there is no automated approval
+               * notification to promise — say where to check instead. */}
               <p className="text-sm text-muted-foreground mb-6">
-                We&apos;ll verify your license and notify you once it&apos;s
-                approved. You can continue setting up your account in the
-                meantime.
+                {verify.status === "found"
+                  ? `We matched your license against the ${state} state roster. You're all set — keep going.`
+                  : "Your license is on file and pending manual review. That doesn't block you: keep setting up your account, and you can check the status any time in Settings."}
               </p>
               <Button
                 variant="primary"

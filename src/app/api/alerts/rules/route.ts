@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
+import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/params";
 
 export const runtime = "nodejs";
 
@@ -96,7 +98,10 @@ export async function GET() {
     .eq("contractor_id", guard.user.id)
     .order("created_at", { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    logger.error("alerts.rules.list failed", { message: error.message });
+    return NextResponse.json({ error: "Failed to load alert rules" }, { status: 500 });
+  }
   return NextResponse.json({ rules: data ?? [] });
 }
 
@@ -136,7 +141,10 @@ export async function POST(req: NextRequest) {
     )
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    logger.error("alerts.rules.create failed", { message: error.message });
+    return NextResponse.json({ error: "Failed to create alert rule" }, { status: 500 });
+  }
   return NextResponse.json({ rule: data }, { status: 201 });
 }
 
@@ -147,8 +155,8 @@ export async function PATCH(req: NextRequest) {
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
-  if (!id) {
-    return NextResponse.json({ error: "Missing ?id=" }, { status: 400 });
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "Missing or malformed ?id=" }, { status: 400 });
   }
 
   const body = await req.json().catch(() => null);
@@ -205,7 +213,10 @@ export async function PATCH(req: NextRequest) {
     )
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    logger.error("alerts.rules.update failed", { message: error.message });
+    return NextResponse.json({ error: "Failed to update alert rule" }, { status: 500 });
+  }
   return NextResponse.json({ rule: data });
 }
 
@@ -216,8 +227,8 @@ export async function DELETE(req: NextRequest) {
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
-  if (!id) {
-    return NextResponse.json({ error: "Missing ?id=" }, { status: 400 });
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "Missing or malformed ?id=" }, { status: 400 });
   }
 
   const { error } = await supabase
@@ -225,6 +236,9 @@ export async function DELETE(req: NextRequest) {
     .delete()
     .eq("id", id)
     .eq("contractor_id", guard.user.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    logger.error("alerts.rules.delete failed", { message: error.message });
+    return NextResponse.json({ error: "Failed to delete alert rule" }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }

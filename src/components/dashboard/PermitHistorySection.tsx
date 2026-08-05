@@ -226,9 +226,14 @@ export function PermitHistorySection({
                     <div key={year}>
                       <div className="flex items-baseline gap-2 mb-1">
                         <span className="text-[11.5px] font-semibold text-foreground">{year}</span>
+                        {/* Count the rows actually rendered, and say how
+                            many the collapse is holding back — the header
+                            used to advertise 5 projects above one row. */}
                         <span className="text-[10px] text-muted-foreground">
-                          {rows.length} project{rows.length === 1 ? "" : "s"}
+                          {shownRows.length} project{shownRows.length === 1 ? "" : "s"}
                           {yearTotal > 0 && ` · ${fmtMoney(yearTotal)}`}
+                          {rows.length > shownRows.length &&
+                            ` · ${rows.length - shownRows.length} hidden`}
                         </span>
                       </div>
                       <div className="space-y-0.5 pl-1">
@@ -249,7 +254,7 @@ export function PermitHistorySection({
                     onClick={() => setShowAllPrior(true)}
                     className="text-[11px] text-primary font-medium hover:underline mt-1"
                   >
-                    Show all {allRows.length} permits
+                    Show {hiddenCount} more ({allRows.length} total)
                   </button>
                 )}
                 {showAllPrior && hiddenCount > 0 && (
@@ -294,7 +299,7 @@ function LivePermitCard({
   return (
     <div className="rounded-lg border border-primary/30 bg-primary-04 px-3 py-2">
       <div className="flex items-center gap-1.5 flex-wrap mb-1">
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-primary text-white text-[9px] font-bold uppercase tracking-wider">
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-cta text-cta-foreground text-[9px] font-bold uppercase tracking-wider">
           Live permit
         </span>
         {permit.permit_type && (

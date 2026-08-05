@@ -4,6 +4,7 @@ import { logApiError } from "@/lib/log";
 import { personalizeOutreach } from "@/lib/agents/outreach-personalizer";
 import { getMiningLlmClient } from "@/lib/predictive/openai-client";
 import { MessageSendBodySchema, parseBody } from "@/lib/schemas/api";
+import { requireContractor } from "@/lib/auth/requireContractor";
 import type { Lead } from "@/types/lead";
 
 /**
@@ -22,16 +23,15 @@ import type { Lead } from "@/types/lead";
  */
 export async function POST(req: NextRequest) {
   try {
-    const raw = await req.json();
+    const supabase = await createClient();
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const user = gate.user;
+
+    const raw = await req.json().catch(() => null);
     const parsed = parseBody(MessageSendBodySchema, raw);
     if (parsed.response) return parsed.response;
     const { lead_id: leadId, channel, body: text, subject } = parsed.data;
-
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
 
     const { data: lead } = await supabase
       .from("leads")
@@ -101,9 +101,16 @@ export async function POST(req: NextRequest) {
             },
           );
           providerOk = res.ok;
-          if (!res.ok) providerError = (await res.text().catch(() => "")).slice(0, 300);
+          if (!res.ok) {
+            logApiError("messages.send.twilio", {
+              status: res.status,
+              body: (await res.text().catch(() => "")).slice(0, 300),
+            });
+            providerError = "SMS provider rejected the message";
+          }
         } catch (e) {
-          providerError = (e as Error).message;
+          logApiError("messages.send.twilio", e);
+          providerError = "SMS provider unreachable";
         }
       }
     } else {
@@ -140,9 +147,16 @@ export async function POST(req: NextRequest) {
             }),
           });
           providerOk = res.ok;
-          if (!res.ok) providerError = (await res.text().catch(() => "")).slice(0, 300);
+          if (!res.ok) {
+            logApiError("messages.send.resend", {
+              status: res.status,
+              body: (await res.text().catch(() => "")).slice(0, 300),
+            });
+            providerError = "Email provider rejected the message";
+          }
         } catch (e) {
-          providerError = (e as Error).message;
+          logApiError("messages.send.resend", e);
+          providerError = "Email provider unreachable";
         }
       }
     }
@@ -154,7 +168,11 @@ export async function POST(req: NextRequest) {
     // can see what the homeowner received, not the original template.
     const entry = `[out ${channel} ${now.slice(0, 10)}${outreachSource === "llm" ? " AI" : ""}] ${textToSend}`;
     const joined = lead.notes ? `${lead.notes}\n${entry}` : entry;
-    await supabase.from("leads").update({ notes: joined }).eq("id", leadId);
+    await supabase
+      .from("leads")
+      .update({ notes: joined })
+      .eq("id", leadId)
+      .eq("contractor_id", user.id);
 
     return NextResponse.json({
       ok: providerOk,

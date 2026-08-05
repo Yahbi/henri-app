@@ -55,10 +55,20 @@ export function extractOwnerFields(
     ]),
     full: pickRawField(raw, [
       "owner_name", "OwnerName", "OWNER_NAME", "owners_name", "OWNERS_NAME",
+      // Orlando (and other parcel-joined feeds) ship the owner under a
+      // `parcel_`/`property_` prefix. Missing these cost 26,873 owner
+      // names in Orlando alone — the scorer read null and the
+      // contact_completeness signal scored 0 for rows that HAD a name.
+      // Keep in sync with src/lib/scrapers/extract-contact.ts.
+      "parcel_owner_name", "property_owner_name", "parcel_owner", "owner_1",
       "applicant_name", "APPLICANT_NAME", "ApplicantName", "Applicant",
     ]),
     phone: pickRawField(raw, [
       "owner_phone", "OwnerPhone", "OWNER_PHONE", "phone", "PHONE", "Phone",
+      // Same Orlando blind spot — 18,804 phones. Phone fill is the
+      // binding constraint on lead scores (top score is ~69 against a
+      // 75 "hot" threshold), so these keys matter more than most.
+      "contractor_phone_number", "contractor_phone_1", "owner_phone_number",
       "applicant_phone", "APPLICANT_PHONE",
     ]),
     email: pickRawField(raw, [

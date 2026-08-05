@@ -67,13 +67,24 @@ export function AutoFireOutreachToggle({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  // A failed load used to leave prefs at the {enabled:false} default, so
+  // the card asserted "auto-fire is off" when it had simply not loaded.
+  // A failed save silently reverted the toggle with no message.
+  const [loadError, setLoadError] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setLoadError(false);
     try {
       const res = await fetch("/api/outreach/auto-fire", { credentials: "include" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setLoadError(true);
+        return;
+      }
       const body = (await res.json()) as AutoFirePrefs;
       setPrefs(body);
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -85,9 +96,11 @@ export function AutoFireOutreachToggle({
 
   async function save(next: AutoFirePrefs) {
     setSaving(true);
+    setSaveError(null);
     try {
       const res = await fetch("/api/outreach/auto-fire", {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           enabled: next.enabled,
@@ -101,7 +114,13 @@ export function AutoFireOutreachToggle({
         setTimeout(() => setJustSaved(false), 1500);
       } else if (res.status === 503) {
         setPrefs({ ...next, migrationPending: true });
+      } else {
+        // Any other non-OK used to drop the change on the floor — the
+        // toggle visually reverted with nothing to explain why.
+        setSaveError(`Couldn't save (server returned ${res.status}) — try again.`);
       }
+    } catch {
+      setSaveError("Couldn't save — check your connection and try again.");
     } finally {
       setSaving(false);
     }
@@ -147,17 +166,53 @@ export function AutoFireOutreachToggle({
             </p>
           )}
 
+          {loadError && (
+            <div
+              role="alert"
+              className="mt-2 flex items-center gap-2 text-[11px] text-destructive"
+            >
+              <span>
+                Couldn&apos;t load your auto-fire setting — the toggle below
+                may not reflect your saved preference.
+              </span>
+              <button
+                type="button"
+                onClick={() => load()}
+                className="font-medium underline underline-offset-2 hover:opacity-80"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {saveError && (
+            <p role="alert" className="mt-2 text-[11px] text-destructive">
+              {saveError}
+            </p>
+          )}
+
           <div className="mt-3 flex items-center gap-3 flex-wrap">
-            <label className="inline-flex items-center gap-2 cursor-pointer">
-              <span className="text-[12px] text-foreground">Enabled</span>
-              <span
+            {/* Real <button role="switch"> — this was a <span> inside a
+                <label>, so the card's primary control could not be reached
+                or activated from the keyboard at all, and clicking the
+                "Enabled" text (which showed a pointer cursor) did nothing
+                because a <span> is not a labelable element. */}
+            <div className="inline-flex items-center gap-2">
+              <span id="autofire-switch-label" className="text-[12px] text-foreground">
+                Enabled
+              </span>
+              <button
+                type="button"
                 role="switch"
                 aria-checked={prefs.enabled}
-                onClick={() => !saving && save({ ...prefs, enabled: !prefs.enabled })}
+                aria-labelledby="autofire-switch-label"
+                disabled={saving}
+                onClick={() => save({ ...prefs, enabled: !prefs.enabled })}
                 className={cn(
                   "relative h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
                   prefs.enabled ? "bg-primary" : "bg-muted",
-                  saving && "opacity-60",
+                  saving && "opacity-60 cursor-not-allowed",
                 )}
               >
                 <span
@@ -166,8 +221,8 @@ export function AutoFireOutreachToggle({
                     prefs.enabled && "translate-x-4",
                   )}
                 />
-              </span>
-            </label>
+              </button>
+            </div>
 
             <div className="h-4 w-px bg-border" />
 
@@ -221,6 +276,14 @@ export function AutoFireOutreachToggle({
                   </option>
                 ))}
               </select>
+              {/* Channel filter hides templates — say how many, never
+                  silently drop rows. */}
+              {effectiveTemplates.length > filteredTemplates.length && (
+                <span className="text-[10px] text-muted-foreground shrink-0">
+                  {effectiveTemplates.length - filteredTemplates.length} on the
+                  other channel
+                </span>
+              )}
             </label>
             {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           </div>

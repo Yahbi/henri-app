@@ -307,11 +307,22 @@ function SignupInner() {
                 </div>
               </div>
 
+              {/* a11y (2026-08-04): placeholder-only field had no accessible
+                * name. Added a visually hidden label. Also added the same
+                * Enter-to-submit handler /login already had, so the two
+                * passwordless forms behave identically. */}
               <div className="space-y-2">
+                <label htmlFor="magic-link-signup-email" className="sr-only">
+                  Email address
+                </label>
                 <input
+                  id="magic-link-signup-email"
                   type="email"
                   value={magicEmail}
                   onChange={(e) => setMagicEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && termsAccepted) handleMagicLink();
+                  }}
                   placeholder="you@yourcompany.com"
                   className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   autoComplete="email"

@@ -12,9 +12,17 @@ interface FAQItem {
 interface FAQProps {
   permitsLabel: string;
   activeStatesLabel: string;
-  /** Live count of active states for the parenthetical detail in the
-   * coverage answer. We display the actual number alongside the
-   * rounded-down headline label for honesty. */
+  /** Exact count of states Henri holds permit coverage for, shown
+   * alongside the rounded-down headline label so the precise number is
+   * visible too.
+   *
+   * 2026-08-04 truthfulness pass: this was documented and rendered as
+   * "states with new permits in the last 30 days". No 30-day query
+   * exists anywhere in the codebase — the underlying `activeStates`
+   * value was a hand-curated constant, so the recency qualifier
+   * described a measurement that was never taken. The qualifier is
+   * gone; the answer now claims only coverage, which is what the value
+   * actually represents regardless of how it is sourced. */
   activeStatesCount: number;
 }
 
@@ -26,7 +34,7 @@ function buildFaqs({
   return [
     {
       question: "What cities do you cover?",
-      answer: `Henri's permit catalog spans major metropolitan areas in ${activeStatesLabel} US states (${activeStatesCount} states with new permits in the last 30 days, totaling ${permitsLabel} permits). New jurisdictions are added as we onboard their data sources.`,
+      answer: `Henri's permit catalog spans major metropolitan areas in ${activeStatesLabel} US states (${activeStatesCount} states with permit coverage, totaling ${permitsLabel} permits). The catalog refreshes daily, and new jurisdictions are added as we onboard them.`,
     },
     {
       question: "How fast do I get leads?",
@@ -51,11 +59,17 @@ function buildFaqs({
   ];
 }
 
+/* Accordion a11y (2026-08-04): trigger had aria-expanded but no explicit
+ * type, no aria-controls, and no focus-visible ring; the collapsed panel
+ * stayed in the accessibility tree (grid-rows-[0fr] only removes it
+ * visually) so screen readers read every answer at once. */
 function AccordionItem({
+  id,
   item,
   isOpen,
   onToggle,
 }: {
+  id: string;
   item: FAQItem;
   isOpen: boolean;
   onToggle: () => void;
@@ -63,9 +77,12 @@ function AccordionItem({
   return (
     <div className="border-b border-border">
       <button
+        type="button"
+        id={`${id}-trigger`}
         onClick={onToggle}
-        className="flex w-full items-center justify-between py-5 text-left transition-colors hover:text-primary"
+        className="flex w-full items-center justify-between py-5 text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-expanded={isOpen}
+        aria-controls={`${id}-panel`}
       >
         <span className="text-base font-medium text-foreground">
           {item.question}
@@ -78,6 +95,10 @@ function AccordionItem({
         />
       </button>
       <div
+        id={`${id}-panel`}
+        role="region"
+        aria-labelledby={`${id}-trigger`}
+        aria-hidden={!isOpen}
         className={cn(
           "grid transition-all duration-200 ease-in-out",
           isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
@@ -119,6 +140,7 @@ export function FAQ(props: FAQProps) {
           {faqs.map((faq, i) => (
             <AccordionItem
               key={i}
+              id={`landing-faq-${i}`}
               item={faq}
               isOpen={openIndex === i}
               onToggle={() => toggle(i)}

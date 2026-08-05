@@ -47,12 +47,45 @@ interface LeadDrawerHomeownerColumnProps {
   lead: LeadData;
   enrichment: PropertyEnrichment | null | undefined;
   enrichLoading: boolean;
+  /** Permit status resolved by the drawer (`lead.permitStatus` falling back
+   *  to the on-demand `usePermitDetail` row, which is what god-mode pulls
+   *  rely on because they skip the permits embed). Undefined = unknown. */
+  permitStatus?: string | null;
+}
+
+/** Map a `permit_status` enum value (migration 00004: submitted / approved /
+ *  issued / final / expired / revoked) to a truthful label + dot colour.
+ *  Returns null when the status is unknown so the caller can say so rather
+ *  than asserting a state the data doesn't support. */
+function describePermitStatus(
+  status: string | null | undefined,
+): { label: string; dot: string } | null {
+  if (!status) return null;
+  switch (status.toLowerCase()) {
+    case "submitted":
+      return { label: "Submitted", dot: "bg-warning" };
+    case "approved":
+      return { label: "Approved", dot: "bg-success" };
+    case "issued":
+      return { label: "Issued / Active", dot: "bg-success" };
+    case "final":
+      return { label: "Final / Closed", dot: "bg-muted-foreground" };
+    case "expired":
+      return { label: "Expired", dot: "bg-destructive" };
+    case "revoked":
+      return { label: "Revoked", dot: "bg-destructive" };
+    default:
+      // Unknown jurisdiction string — show it verbatim rather than
+      // laundering it into a green "Active".
+      return { label: status, dot: "bg-muted-foreground" };
+  }
 }
 
 export function LeadDrawerHomeownerColumn({
   lead,
   enrichment,
   enrichLoading,
+  permitStatus,
 }: LeadDrawerHomeownerColumnProps) {
   // Sanity-clamp enrichment property values before display — a bad county-GIS
   // join can attach an 8–9 figure "assessed value" to a home. Implausible
@@ -276,7 +309,15 @@ export function LeadDrawerHomeownerColumn({
               <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                 <FileText className="h-3 w-3 shrink-0" />
                 <a
-                  href={lead.businessWebsite}
+                  /* Enrichment sources often store a scheme-less host
+                   * ("acme.com"). Without this, the browser resolves it
+                   * relative to the current path and the link navigates to
+                   * /dashboard/acme.com — a route that doesn't exist. */
+                  href={
+                    /^https?:\/\//i.test(lead.businessWebsite)
+                      ? lead.businessWebsite
+                      : `https://${lead.businessWebsite}`
+                  }
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-primary hover:underline truncate"
@@ -361,23 +402,30 @@ export function LeadDrawerHomeownerColumn({
           </div>
         )}
 
-        {/* Permit status badge — always visible when permit data exists. */}
-        {lead.permitNumber && (
-          <div className="mt-2.5 pt-2 border-t border-border">
-            <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-              Permit Status
-            </h3>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-success shrink-0" />
-              <span className="text-[11px] text-foreground font-medium">
-                Active / Filed
-              </span>
+        {/* Permit status badge. Reads the real `permit_status` value —
+            this block used to hardcode a green "Active / Filed" for every
+            lead with a permit, so finaled / expired / revoked permits were
+            presented as live work and contradicted the timeline panel in
+            the same drawer. */}
+        {lead.permitNumber && (() => {
+          const resolved = describePermitStatus(permitStatus ?? lead.permitStatus);
+          return (
+            <div className="mt-2.5 pt-2 border-t border-border">
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                Permit Status
+              </h3>
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${resolved?.dot ?? "bg-muted-foreground"}`}
+                  aria-hidden="true"
+                />
+                <span className="text-[11px] text-foreground font-medium capitalize">
+                  {resolved?.label ?? "Status unknown"}
+                </span>
+              </div>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-              #{lead.permitNumber}
-            </p>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Action buttons */}
@@ -385,23 +433,29 @@ export function LeadDrawerHomeownerColumn({
         {lead.phone ? (
           <a
             href={`tel:${lead.phone.replace(/\D/g, "")}`}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-white text-xs font-semibold hover:opacity-90 transition-opacity"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-cta text-cta-foreground text-xs font-semibold hover:opacity-90 transition-opacity"
           >
             <Phone className="h-3 w-3" />
             Call
           </a>
         ) : enrichment?.mailing_address ? (
-          <span
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary/10 text-primary text-xs font-semibold cursor-default"
-            title="Use mailing address for direct mail"
-          >
-            <MapPin className="h-3 w-3" />
-            Mail
+          <span className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg bg-primary/10 text-primary text-xs font-semibold cursor-default">
+            <span className="flex items-center gap-1.5">
+              <MapPin className="h-3 w-3" aria-hidden="true" />
+              Mail
+            </span>
+            <span className="text-[9px] font-normal">No phone — mail only</span>
           </span>
         ) : (
-          <span className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-muted text-muted-foreground text-xs font-semibold cursor-default">
-            <Phone className="h-3 w-3" />
-            Call
+          /* Inert lookalike — say why, instead of showing a greyed control
+           * with no explanation (the reason used to live in a `title`,
+           * unreachable by keyboard and touch). */
+          <span className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg bg-muted text-muted-foreground text-xs font-semibold cursor-default">
+            <span className="flex items-center gap-1.5">
+              <Phone className="h-3 w-3" aria-hidden="true" />
+              Call
+            </span>
+            <span className="text-[9px] font-normal">No phone on file</span>
           </span>
         )}
         {lead.email ? (
@@ -413,9 +467,12 @@ export function LeadDrawerHomeownerColumn({
             Email
           </a>
         ) : (
-          <span className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border text-muted-foreground text-xs font-semibold cursor-default">
-            <Mail className="h-3 w-3" />
-            Email
+          <span className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-border text-muted-foreground text-xs font-semibold cursor-default">
+            <span className="flex items-center gap-1.5">
+              <Mail className="h-3 w-3" aria-hidden="true" />
+              Email
+            </span>
+            <span className="text-[9px] font-normal">No email on file</span>
           </span>
         )}
       </div>

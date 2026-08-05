@@ -29,7 +29,17 @@ function formatOnset(onset: string): string {
   }
 }
 
-/* ─── Outreach Templates ─── */
+/* ─── Outreach Templates ───
+ *
+ * Truthfulness rule: a seeded template must never put an unverifiable
+ * claim in the contractor's mouth. Everything the contractor has to
+ * supply is bracketed so it reads as a blank to fill, and no template
+ * asserts a job volume, a carrier relationship, a completed job, or a
+ * discount Henri can't source. (Before 2026-08-04 the "Insurance Claim
+ * Assist" body claimed "processed over 200 storm-related repairs this
+ * year and works directly with all major insurance carriers" and the
+ * "Neighbor Blast" body asserted a completed job plus a 15% discount —
+ * all four fabricated, and unbracketed so they read as pre-verified.) */
 const outreachTemplates = [
   {
     name: "Post-Storm SMS",
@@ -39,12 +49,12 @@ const outreachTemplates = [
   {
     name: "Insurance Claim Assist",
     channel: "Email",
-    template: `Subject: Free Storm Damage Assessment — [ZIP] Area\n\nHi [Name],\n\nWith the recent [Storm Type] event in your area, many homeowners are discovering damage they didn't notice at first. We're offering complimentary inspections and can help document damage for your insurance claim.\n\nOur team has processed over 200 storm-related repairs this year and works directly with all major insurance carriers.\n\nWould you like to schedule a free assessment?\n\nBest,\n[Company]`,
+    template: `Subject: Free Storm Damage Assessment — [ZIP] Area\n\nHi [Name],\n\nWith the recent [Storm Type] event in your area, many homeowners are discovering damage they didn't notice at first. We're offering complimentary inspections and can document what we find so you have it on hand for your insurance claim.\n\nWe're a licensed [Trade] contractor in [ZIP] — license [License #].\n\nWould you like to schedule a free assessment?\n\nBest,\n[Company]`,
   },
   {
     name: "Neighbor Blast",
     channel: "SMS",
-    template: `Hi neighbor! We just completed storm damage repairs at [Address] near you. Many homes in [ZIP] were affected by the recent [Storm Type]. We're offering 15% off inspections for nearby homeowners this month. Reply YES for a free estimate.`,
+    template: `Hi neighbor! We're [Company], a licensed [Trade] contractor working at [Address] near you. Many homes in [ZIP] were affected by the recent [Storm Type]. We're offering free inspections to nearby homeowners — reply YES for a time that works.`,
   },
   {
     name: "Follow-Up (No Response)",
@@ -97,26 +107,57 @@ function stormIcon(type: string) {
 
 function TemplateCard({ tpl }: { tpl: typeof outreachTemplates[0] }) {
   const [copied, setCopied] = useState(false);
+  // navigator.clipboard rejects on insecure origins / denied permission.
+  // Without this the promise rejected unhandled AND the button still said
+  // "Copied", so the contractor pasted nothing.
+  const [copyError, setCopyError] = useState(false);
+
+  async function handleCopy() {
+    setCopyError(false);
+    try {
+      await navigator.clipboard.writeText(tpl.template);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 4000);
+    }
+  }
 
   return (
     <Card className="p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <h3 className="text-sm font-medium text-foreground">{tpl.name}</h3>
           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
             tpl.channel === "SMS" ? "bg-blue-500/10 text-blue-400" : "bg-purple-500/10 text-purple-400"
           }`}>
             {tpl.channel}
           </span>
+          {/* Same affordance the AI review drafts carry — a one-click copy
+              button otherwise reads as "ready to send as-is". */}
+          <span className="text-[10px] text-muted-foreground">
+            — fill the [brackets] before sending
+          </span>
         </div>
         <button
-          onClick={() => { navigator.clipboard.writeText(tpl.template); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-          className="flex items-center gap-1 text-xs text-primary hover:underline font-medium"
+          type="button"
+          onClick={handleCopy}
+          className={`flex items-center gap-1 text-xs font-medium hover:underline ${
+            copyError ? "text-destructive" : "text-primary"
+          }`}
+          aria-label={`Copy the ${tpl.name} template`}
         >
           {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-          {copied ? "Copied" : "Copy"}
+          {copyError ? "Copy blocked" : copied ? "Copied" : "Copy"}
         </button>
       </div>
+      {copyError && (
+        <p role="alert" className="text-[11px] text-destructive">
+          Your browser blocked clipboard access — select the text below and
+          copy manually.
+        </p>
+      )}
       <div className="rounded-md bg-bg-subtle p-3 text-xs text-muted-foreground leading-relaxed whitespace-pre-line max-h-28 overflow-y-auto">
         {tpl.template}
       </div>
@@ -207,7 +248,9 @@ export default function StormPage() {
         <div className="flex items-center gap-3">
           {/* Storm Mode Toggle */}
           <button
+            type="button"
             onClick={() => setStormMode(!stormMode)}
+            aria-pressed={stormMode}
             className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
               stormMode
                 ? "border-red-500/40 bg-red-500/10 text-red-400"

@@ -55,7 +55,7 @@ export default function RootError({
         <button
           type="button"
           onClick={reset}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+          className="rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity"
         >
           Try again
         </button>

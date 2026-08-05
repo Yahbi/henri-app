@@ -18,10 +18,14 @@ export default function HomeownerLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const [upgrading, setUpgrading] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // A failed upgrade previously just reset the button — the user clicked
+  // "I'm also a contractor", nothing happened, and nothing said why.
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
 
   async function handleUpgrade() {
     if (upgrading) return;
     setUpgrading(true);
+    setUpgradeError(null);
     try {
       const res = await fetch("/api/profile/upgrade-to-contractor", {
         method: "POST",
@@ -29,14 +33,19 @@ export default function HomeownerLayout({ children }: { children: React.ReactNod
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         redirect?: string;
+        error?: string;
       };
       if (res.ok && body.ok) {
         window.location.href = body.redirect ?? "/onboarding/license";
-      } else {
-        setUpgrading(false);
+        return;
       }
+      setUpgrading(false);
+      setUpgradeError(
+        body.error ?? `Couldn't switch your account to contractor (HTTP ${res.status}).`,
+      );
     } catch {
       setUpgrading(false);
+      setUpgradeError("Couldn't reach the server. Check your connection and retry.");
     }
   }
 
@@ -137,6 +146,15 @@ export default function HomeownerLayout({ children }: { children: React.ReactNod
           })}
         </div>
       </nav>
+
+      {upgradeError && (
+        <div
+          role="alert"
+          className="border-b border-destructive/30 bg-destructive/5 px-6 py-2 text-center text-xs text-destructive"
+        >
+          {upgradeError}
+        </div>
+      )}
 
       <main id="main-content" className="flex-1" tabIndex={-1}>{children}</main>
 

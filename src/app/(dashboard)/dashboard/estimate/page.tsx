@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Printer, X, Send, Copy, Check } from "lucide-react";
+import { Plus, Trash2, X, Send, Copy, Check } from "lucide-react";
 import { useLeads } from "@/hooks/useLeads";
 import { useEstimates, type EstimateCreateInput } from "@/hooks/useEstimates";
 import { getTradeTierPrices } from "@/lib/constants/trade-costs";
@@ -119,10 +119,11 @@ function SendModal({ id, total, address, onClose }: { id: string; total: number;
         </div>
 
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">
+          <label htmlFor="send-est-recipient" className="text-xs font-medium text-muted-foreground mb-1 block">
             {method === "email" ? "Email Address" : "Phone Number"}
           </label>
           <input
+            id="send-est-recipient"
             type={method === "email" ? "email" : "tel"}
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
@@ -151,7 +152,19 @@ function SendModal({ id, total, address, onClose }: { id: string; total: number;
             )}
             <div className="flex gap-2">
               <button
-                onClick={() => { navigator.clipboard.writeText(message); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                type="button"
+                onClick={async () => {
+                  // Rejects on insecure origins / denied permission — the
+                  // unguarded call left an unhandled rejection AND still
+                  // said "Copied".
+                  try {
+                    await navigator.clipboard.writeText(message);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  } catch {
+                    setSendError("Your browser blocked clipboard access — select the preview text and copy manually.");
+                  }
+                }}
                 className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm hover:bg-bg-subtle transition-colors"
               >
                 {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
@@ -185,7 +198,7 @@ function SendModal({ id, total, address, onClose }: { id: string; total: number;
                   }
                 }}
                 disabled={!recipient.trim() || sending}
-                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm text-white font-medium hover:opacity-90 disabled:opacity-40 transition-opacity"
+                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm text-cta-foreground font-medium hover:opacity-90 disabled:opacity-40 transition-opacity"
               >
                 <Send className="h-3.5 w-3.5" />
                 {sending ? "Sending…" : "Send"}
@@ -216,6 +229,15 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
   ]);
 
   const selectedLead = leads?.find((l) => l.id === selectedLeadId);
+
+  // ESC dismiss — the builder had no keyboard exit at all.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   // Phase 1.6 Day 1: auto-prefill tax rate from the lead's ZIP/state
   // when a lead is selected. Resolves via src/lib/tax/zip-fallback.ts:
@@ -313,14 +335,19 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm print:hidden">
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-estimate-title"
+        className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <h2 className="text-base font-semibold text-foreground">New Estimate</h2>
+          <h2 id="new-estimate-title" className="text-base font-semibold text-foreground">New Estimate</h2>
           <div className="flex items-center gap-2">
-            <button onClick={() => window.print()} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" aria-label="Print">
-              <Printer className="h-4 w-4" />
-            </button>
+            {/* Print button removed: this modal carries `print:hidden`, so
+                window.print() printed the dashboard behind it and never the
+                estimate. Save the draft and print from the sent estimate. */}
             <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" aria-label="Close">
               <X className="h-4 w-4" />
             </button>
@@ -361,9 +388,22 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
                 >
                   <p className="text-sm font-medium text-foreground">{tier.label}</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">{tier.description}</p>
-                  {key !== "good" && (
-                    <p className="text-[10px] text-primary mt-1">+{Math.round((tier.multiplier - 1) * 100)}% from base</p>
-                  )}
+                  {key !== "good" && (() => {
+                    // Show the multiplier that will ACTUALLY be applied.
+                    // This printed the static template value even when a
+                    // trade-specific ratio was in force, so the card and
+                    // the totals row disagreed.
+                    const m = tradeTiers
+                      ? (key === "better"
+                          ? tradeTiers.better / tradeTiers.good
+                          : tradeTiers.best / tradeTiers.good)
+                      : tier.multiplier;
+                    return (
+                      <p className="text-[10px] text-primary mt-1">
+                        +{Math.round((m - 1) * 100)}% from base
+                      </p>
+                    );
+                  })()}
                 </button>
               ))}
             </div>
@@ -387,15 +427,15 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
               </div>
               {lineItems.map((item, i) => (
                 <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                  <input className="col-span-5 px-2 py-1.5 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring"
+                  <input aria-label={`Line ${i + 1} description`} className="col-span-5 px-2 py-1.5 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring"
                     placeholder="Material or service" value={item.material} onChange={(e) => updateLine(i, "material", e.target.value)} />
-                  <input type="number" min="0" className="col-span-2 px-2 py-1.5 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-right"
+                  <input aria-label={`Line ${i + 1} quantity`} type="number" min="0" className="col-span-2 px-2 py-1.5 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-right"
                     value={item.quantity} onChange={(e) => updateLine(i, "quantity", parseFloat(e.target.value) || 0)} />
-                  <input className="col-span-2 px-2 py-1.5 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring"
+                  <input aria-label={`Line ${i + 1} unit`} className="col-span-2 px-2 py-1.5 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring"
                     placeholder="unit" value={item.unit} onChange={(e) => updateLine(i, "unit", e.target.value)} />
-                  <input type="number" min="0" step="0.01" className="col-span-2 px-2 py-1.5 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-right"
+                  <input aria-label={`Line ${i + 1} unit price`} type="number" min="0" step="0.01" className="col-span-2 px-2 py-1.5 text-sm bg-bg-subtle border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-right"
                     value={item.unitPrice} onChange={(e) => updateLine(i, "unitPrice", parseFloat(e.target.value) || 0)} />
-                  <button onClick={() => removeLine(i)} className="col-span-1 flex justify-center text-muted-foreground hover:text-red-500 transition-colors" aria-label="Remove line">
+                  <button type="button" onClick={() => removeLine(i)} className="col-span-1 flex justify-center text-muted-foreground hover:text-red-500 transition-colors" aria-label={`Remove line ${i + 1}`}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -433,7 +473,7 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
                 <span>${baseSubtotal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between w-52">
-                <span className="text-muted-foreground">{tierTemplates[activeTier].label} tier ({tierMultiplier}x)</span>
+                <span className="text-muted-foreground">{tierTemplates[activeTier].label} tier ({tierMultiplier.toFixed(2)}x)</span>
                 <span>${subtotal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between w-52">
@@ -447,14 +487,14 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
             </div>
           </div>
 
-          {error && <p className="text-xs text-red-500">{error}</p>}
+          {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         </div>
 
         <div className="flex gap-3 px-6 py-4 border-t border-border shrink-0">
           <button onClick={onClose} className="flex-1 px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-accent transition-colors">
             Cancel
           </button>
-          <button onClick={handleSave} disabled={saving} className="flex-1 px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50">
+          <button onClick={handleSave} disabled={saving} className="flex-1 px-4 py-2 text-sm font-medium bg-cta text-cta-foreground rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50">
             {saving ? "Saving..." : "Save estimate"}
           </button>
         </div>
@@ -467,7 +507,7 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
 export default function EstimatePage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [sendTarget, setSendTarget] = useState<{ id: string; total: number; address: string } | null>(null);
-  const { estimates: rawEstimates, isLoading, createEstimate, refresh } = useEstimates();
+  const { estimates: rawEstimates, isLoading, error: estimatesError, createEstimate, refresh } = useEstimates();
 
   const estimates: EstimateRecord[] = rawEstimates.map((e) => {
     // `quotes` doesn't store a flat `total` — each tier carries its own
@@ -510,7 +550,7 @@ export default function EstimatePage() {
           <p className="text-sm text-muted-foreground mt-1">Create, send, and track professional estimates with Good/Better/Best pricing</p>
         </div>
         <button onClick={() => setModalOpen(true)}
-          className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
+          className="flex items-center gap-1.5 px-4 py-2 bg-cta text-cta-foreground text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
           <Plus className="h-4 w-4" />
           Create Estimate
         </button>
@@ -580,12 +620,41 @@ export default function EstimatePage() {
         </div>
       )}
 
-      {loaded && estimates.length === 0 && (
+      {/* Loading skeleton — the page used to render only the header while
+          the fetch was in flight, so it looked like an empty account. */}
+      {isLoading && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i} className="p-4 space-y-2">
+              <div className="h-3 w-24 rounded bg-bg-subtle animate-pulse" />
+              <div className="h-7 w-16 rounded bg-bg-subtle animate-pulse" />
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* A fetch failure must not read as "you have no estimates". */}
+      {loaded && estimatesError && (
+        <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+          <p className="text-sm text-muted-foreground">
+            Couldn&apos;t load your estimates &mdash; check your connection and retry.
+          </p>
+          <button
+            type="button"
+            onClick={() => refresh()}
+            className="text-sm font-medium text-primary underline underline-offset-2 hover:opacity-80"
+          >
+            Retry
+          </button>
+        </Card>
+      )}
+
+      {loaded && !estimatesError && estimates.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed border-border rounded-xl">
           <p className="text-sm font-semibold text-foreground">No estimates yet</p>
           <p className="text-xs text-muted-foreground mt-1">Create your first estimate with Good/Better/Best pricing tiers.</p>
           <button onClick={() => setModalOpen(true)}
-            className="mt-4 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
+            className="mt-4 px-4 py-2 bg-cta text-cta-foreground text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
             Create first estimate
           </button>
         </div>

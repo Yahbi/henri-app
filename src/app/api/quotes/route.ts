@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { QuoteRequestBodySchema, parseBody } from "@/lib/schemas/api";
 import { logger } from "@/lib/logger";
+import { clampLimit } from "@/lib/validation/params";
 
 /* ─── GET /api/quotes — list quotes for authenticated user ─── */
 export async function GET(request: NextRequest) {
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
       .single();
 
     const role = profile?.role ?? "homeowner";
-    const limit = Number(request.nextUrl.searchParams.get("limit")) || 20;
+    const limit = clampLimit(request.nextUrl.searchParams.get("limit"), 20, 100);
     const status = request.nextUrl.searchParams.get("status");
 
     /* Contractors see quotes sent to them; homeowners see quotes they requested */

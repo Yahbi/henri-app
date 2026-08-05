@@ -562,7 +562,18 @@ export default function MapPage() {
         const leadId = String(p.id ?? "");
         if (leadId && !leadId.startsWith("permit-")) {
           const leadData = featureToLeadData(p, feat.geometry as GeoJSON.Point);
-          if (leadData) setSelectedLead(leadData);
+          if (leadData) {
+            setSelectedLead(leadData);
+            // The drawer is `aria-modal` + focus-trapped, so a popup left
+            // open behind it is unreachable by keyboard and dropped from
+            // the a11y tree — and it never auto-closed (closeOnClick and
+            // closeOnMove are both false), so it sat over the map
+            // obscuring other pins. The drawer already shows this exact
+            // lead, so retire the popup for the lead path entirely.
+            popupRef.current?.remove();
+            popupRef.current = null;
+            return;
+          }
         }
 
         const maplibreModule = await import("maplibre-gl");
@@ -676,7 +687,7 @@ export default function MapPage() {
               ` : ""}
 
               <!-- Collapsible details block -->
-              <div data-popup-details style="display:none">
+              <div data-popup-details id="${popupId}-details" style="display:none">
                 ${hasOwnerBlock ? `
                 <div data-popup-owner style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08)">
                   <div style="font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;opacity:0.5;margin-bottom:4px">Owner / applicant</div>
@@ -728,6 +739,7 @@ export default function MapPage() {
               </div>
 
               <button type="button" data-popup-toggle
+                aria-expanded="false" aria-controls="${popupId}-details"
                 style="margin-top:8px;display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:500;color:#D4886A;background:transparent;border:1px solid rgba(212,136,106,0.4);padding:3px 8px;border-radius:4px;cursor:pointer">
                 <span data-toggle-label>Show details</span>
                 <span data-toggle-caret>▾</span>
@@ -761,6 +773,9 @@ export default function MapPage() {
               if (details) details.style.display = open ? "block" : "none";
               if (caret) caret.textContent = open ? "▴" : "▾";
               if (label) label.textContent = open ? "Hide details" : "Show details";
+              // Keep the ARIA state in sync — the caret + label were the
+              // only signals, so AT never heard collapsed/expanded.
+              btn.setAttribute("aria-expanded", open ? "true" : "false");
             });
           }
           // Description full-text toggle (only present if the description is long)

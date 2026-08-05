@@ -44,6 +44,8 @@ export default async function MarketingPage() {
         permitsLabel={stats.permitsLabel}
         activeStatesLabel={stats.activeStatesLabel}
         activeStates={stats.activeStates}
+        statePermits={stats.statePermits}
+        zipsCoveredLabel={stats.zipsCoveredLabel}
       />
       <HowItWorks
         permitsLabel={stats.permitsLabel}
@@ -52,6 +54,8 @@ export default async function MarketingPage() {
       <TerritoryMapPreview
         permitsLabel={stats.permitsLabel}
         activeStatesLabel={stats.activeStatesLabel}
+        statePermits={stats.statePermits}
+        zipsCoveredLabel={stats.zipsCoveredLabel}
       />
       <TrustSignals />
       <PricingSection />

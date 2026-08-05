@@ -138,6 +138,53 @@ async function fetchConversionRates(
   return { zipRates, tradeRates };
 }
 
+/* ── CourtListener court name → USPS state code ──────────────────────────
+ *
+ * `liens_courtlistener.court` holds CL's court DISPLAY NAME, not a slug:
+ *   "District Court, S.D. New York"                  -> NY
+ *   "United States Bankruptcy Court, S.D. Texas"     -> TX
+ *   "District Court, E.D. Tennessee"                 -> TN
+ *   "Court of Appeals for the Ninth Circuit"         -> null (no state)
+ *
+ * Matching is longest-name-first so "West Virginia" wins over "Virginia"
+ * and "North Carolina" over "Carolina". Circuit / SCOTUS rows name no
+ * state and return null — they are dropped rather than mis-attributed.
+ *
+ * Read-side fix: needs no migration. The durable fix is to persist CL's
+ * `court_id` slug (or a derived state_code) at ingest time and key off
+ * that column instead of re-parsing a display string on every run. */
+const COURT_NAME_TO_STATE: ReadonlyArray<readonly [string, string]> = (
+  [
+    ["alabama", "al"], ["alaska", "ak"], ["arizona", "az"], ["arkansas", "ar"],
+    ["california", "ca"], ["colorado", "co"], ["connecticut", "ct"],
+    ["delaware", "de"], ["district of columbia", "dc"], ["florida", "fl"],
+    ["georgia", "ga"], ["hawaii", "hi"], ["idaho", "id"], ["illinois", "il"],
+    ["indiana", "in"], ["iowa", "ia"], ["kansas", "ks"], ["kentucky", "ky"],
+    ["louisiana", "la"], ["maine", "me"], ["maryland", "md"],
+    ["massachusetts", "ma"], ["michigan", "mi"], ["minnesota", "mn"],
+    ["mississippi", "ms"], ["missouri", "mo"], ["montana", "mt"],
+    ["nebraska", "ne"], ["nevada", "nv"], ["new hampshire", "nh"],
+    ["new jersey", "nj"], ["new mexico", "nm"], ["new york", "ny"],
+    ["north carolina", "nc"], ["north dakota", "nd"], ["ohio", "oh"],
+    ["oklahoma", "ok"], ["oregon", "or"], ["pennsylvania", "pa"],
+    ["rhode island", "ri"], ["south carolina", "sc"], ["south dakota", "sd"],
+    ["tennessee", "tn"], ["texas", "tx"], ["utah", "ut"], ["vermont", "vt"],
+    ["virgin islands", "vi"], ["virginia", "va"], ["washington", "wa"],
+    ["west virginia", "wv"], ["wisconsin", "wi"], ["wyoming", "wy"],
+    ["puerto rico", "pr"], ["guam", "gu"],
+  ] as ReadonlyArray<readonly [string, string]>
+)
+  .slice()
+  .sort((a, b) => b[0].length - a[0].length);
+
+function stateFromCourtName(court: string): string | null {
+  const haystack = court.toLowerCase();
+  for (const [name, code] of COURT_NAME_TO_STATE) {
+    if (haystack.includes(name)) return code;
+  }
+  return null;
+}
+
 /* ── Main cron handler ───────────────────────────────────────────────────── */
 
 export async function GET(request: NextRequest) {
@@ -322,8 +369,17 @@ export async function GET(request: NextRequest) {
      *
      * Graceful-degrade: if the query errors or returns no training rows,
      * `valueModel` stays null and `predicted_value` is never populated —
-     * scoring falls back to "no value" (signal=0). Honest: no fabricated
-     * values ever flow into the scorer.
+     * scoring falls back to the no-value baseline (model.ts scoreValue
+     * starts at 2, not 0).
+     *
+     * CORRECTION (2026-08-04 audit): an earlier version of this comment
+     * claimed "no fabricated values ever flow into the scorer". They do —
+     * a forecast that clears the gate below is used as the permit value.
+     * The gate now requires `confidence !== "low"` so only bucket-specific
+     * estimates qualify, but the score breakdown still renders the figure
+     * without marking it as modeled. Threading an `isEstimated` flag
+     * through ScoringSignals so signals.ts / model.ts can label it is the
+     * outstanding half of this fix (both live in the scoring lib).
      *
      * Cap at 100k training rows to keep the cron query fast (~2s). */
     let valueModel: ValueModel | null = null;
@@ -598,8 +654,21 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Lien lookup — bucket by lowercased state prefix of the
-    // CourtListener `court` slug (e.g. "calsup" → "ca", "txctapp" → "tx").
+    /* Lien lookup — bucket by the state named in the CourtListener court.
+     *
+     * 2026-08-04 audit: this used to be `court.slice(0, 2)`, on the
+     * assumption that `court` held a CL slug ("calsup" -> "ca"). It does
+     * not — /api/cron/courtlistener-liens writes CL's court DISPLAY NAME
+     * ("District Court, S.D. New York"), so every key came out as "di" and
+     * the booster could never match a lead's state. Result: recent_lien_90d
+     * scored 0 on all 200k+ scored leads and its breakdown row has never
+     * rendered. Because the row is hidden when zero, it read as "no lien
+     * activity" rather than a broken join.
+     *
+     * Parsing the state out of the display name is the read-side fix and
+     * needs no migration. The durable fix is to persist CL's `court_id`
+     * slug (or a derived state_code) in liens_courtlistener and key off
+     * that column — see the ingest cron. */
     const lienCountByState = new Map<string, number>();
     try {
       const since90dDate = new Date(Date.now() - 90 * 86_400_000)
@@ -610,8 +679,10 @@ export async function GET(request: NextRequest) {
         .gte("date_filed", since90dDate)
         .limit(50_000);
       for (const r of lienRows ?? []) {
-        if (typeof r.court !== "string" || r.court.length < 2) continue;
-        const st = r.court.slice(0, 2).toLowerCase();
+        if (typeof r.court !== "string") continue;
+        const st = stateFromCourtName(r.court);
+        // Circuit / SCOTUS rows name no state — drop rather than guess.
+        if (!st) continue;
         lienCountByState.set(st, (lienCountByState.get(st) ?? 0) + 1);
       }
       logger.info("score.liens_loaded", {
@@ -712,7 +783,26 @@ export async function GET(request: NextRequest) {
     /* ── 3. Score every permit with the new engine ─────────────────────── */
 
     const scoredLeads: ScoredLead[] = permits.map((permit) => {
-      const trade = (permit.permit_type ?? "").toLowerCase().trim();
+      /* Resolve the trade key from the SAME source the scorer already writes
+       * to leads.trade — `raw_json.normalized_trade ?? permit_type` — so both
+       * sides of the calibration join speak one vocabulary.
+       *
+       * permits.permit_type is the 8-value enum (residential / commercial /
+       * demolition / renovation / new_construction / addition / repair /
+       * other). score_trade_weights is seeded with trade NAMES (roofing /
+       * hvac / solar / plumbing / electrical / adu / general). Keying off
+       * permit_type alone made every lookup miss. `general` is the fallback
+       * so enum-only rows land on a real calibration row rather than null. */
+      const normalizedTrade = (
+        permit.raw_json as Record<string, string> | null
+      )?.normalized_trade;
+      const trade = (
+        normalizedTrade ??
+        permit.permit_type ??
+        "general"
+      )
+        .toLowerCase()
+        .trim();
       const owner = extractOwnerFields(permit.raw_json);
       // Per-address history for cascade scoring (feeds engagement floor in
       // model.ts). Falls back to 1 permit when we have no rollup row.
@@ -739,7 +829,19 @@ export async function GET(request: NextRequest) {
           },
           valueModel,
         );
-        if (forecast && forecast.sample_size >= 20) {
+        /* Confidence gate, not just sample size. The forecaster's
+         * last-resort branch buckets on permit type alone and self-labels
+         * `confidence: "low"`; with a 100k-row training set those coarse
+         * buckets always clear `sample_size >= 20`, so the old gate admitted
+         * a nationwide median for a bucket as broad as "residential" and the
+         * score breakdown then rendered it as this permit's stated value.
+         * Requiring a non-low confidence keeps modeled values to buckets
+         * that are actually specific to the permit. */
+        if (
+          forecast &&
+          forecast.sample_size >= 20 &&
+          forecast.confidence !== "low"
+        ) {
           predictedValue = forecast.predicted_value;
         }
       }
@@ -761,7 +863,7 @@ export async function GET(request: NextRequest) {
           owner_last: owner.last,
           phone: owner.phone,
           email: owner.email,
-          trade: (permit.raw_json as Record<string, string> | null)?.normalized_trade ?? permit.permit_type,
+          trade: normalizedTrade ?? permit.permit_type,
           cascadeCount,
         },
         zipDemandScore: permit.zip ? zipDemandMap.get(permit.zip) ?? null : null,
@@ -1039,7 +1141,14 @@ export async function GET(request: NextRequest) {
           score_reasoning: sl.reasoning,
           score_model: "henri-scoring-v3",
           urgency: sl.urgency,
-          status: "new",
+          // `status` is DELIBERATELY ABSENT. This payload goes through an
+          // upsert with ignoreDuplicates:false, which overwrites every
+          // column it is given — so sending status:"new" reset a
+          // contractor's won/quoted/contacted lead back to "new" on every
+          // re-score, while leaving contacted_at/won_at populated (an
+          // internally contradictory row). `leads.status` has a DB default
+          // of 'new'::lead_status, so omitting it gives new rows the right
+          // value and leaves existing pipeline state untouched.
           zip: sl.permit.zip,
           address: sl.permit.address,
           city: sl.permit.city,
@@ -1090,9 +1199,15 @@ export async function GET(request: NextRequest) {
           // below strips them and re-tries the insert.
           opportunity_stage: sl.opportunity_stage,
           reason_codes: sl.reason_codes,
-          notes: sl.factors.length > 0
-            ? `Scoring factors: ${sl.factors.join(" | ")}`
-            : null,
+          // `notes` is DELIBERATELY ABSENT for the same reason as `status`.
+          // It is the CONTRACTOR'S free-text field — written by
+          // /api/leads/[id]/notes and edited in the drawer — and the
+          // overwriting upsert meant every re-score replaced whatever they
+          // had typed with "Scoring factors: ...". The factors were never
+          // unique to that field anyway: they are already carried by
+          // `score_reasoning` and, in full structured form, by
+          // `score_signals`, which is what the drawer's transparency
+          // breakdown actually renders.
         });
 
         assignmentMap.set(`${sl.permit.id}:${contractor.id}`, { scored: sl, contractor });

@@ -169,7 +169,7 @@ export default function ReferralsPage() {
             />
             <button
               onClick={handleCopy}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity shrink-0"
+              className="flex items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity shrink-0"
             >
               {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               {copied ? "Copied" : "Copy"}
@@ -198,7 +198,7 @@ export default function ReferralsPage() {
             <button
               onClick={handleInvite}
               disabled={!inviteEmail.trim() || inviteSending}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
+              className="flex items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
             >
               {inviteSending ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />

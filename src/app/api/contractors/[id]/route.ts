@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/params";
 
 /* ─── GET /api/contractors/[id] — single contractor public profile ─── */
 export async function GET(
@@ -9,6 +10,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    if (!isUuid(id)) {
+      return NextResponse.json(
+        { error: "Contractor not found" },
+        { status: 404 }
+      );
+    }
+
     const supabase = createAdminClient();
 
     /* Fetch contractor profile */

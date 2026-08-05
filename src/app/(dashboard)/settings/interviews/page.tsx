@@ -115,7 +115,7 @@ export default function InterviewsPage() {
         <button
           type="button"
           onClick={() => setFormOpen((v) => !v)}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:opacity-90 transition-opacity shrink-0"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-cta text-cta-foreground text-sm font-semibold hover:opacity-90 transition-opacity shrink-0"
         >
           <Plus className="h-4 w-4" />
           New interview
@@ -607,7 +607,7 @@ function NewInterviewForm({
           type="button"
           onClick={submit}
           disabled={saving || !contractorName.trim()}
-          className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold bg-primary text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold bg-cta text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
         >
           {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           Save interview

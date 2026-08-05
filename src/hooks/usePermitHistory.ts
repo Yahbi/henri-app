@@ -37,6 +37,10 @@ export function usePermitHistory(query: {
   const [isLoading, setIsLoading] = useState(false);
   const lastKey = useRef<string | null>(null);
 
+  // A failed fetch used to set `permits: []`, which every consumer renders
+  // as "this property has no prior permits" — the opposite of the truth.
+  const [error, setError] = useState(false);
+
   useEffect(() => {
     const addr = query?.address?.trim();
     if (!addr) {
@@ -51,13 +55,14 @@ export function usePermitHistory(query: {
     let cancelled = false;
     (async () => {
       setIsLoading(true);
+      setError(false);
       try {
         const params = new URLSearchParams({ address: addr });
         if (query?.zip) params.set("zip", query.zip);
         if (query?.excludeId) params.set("excludeId", query.excludeId);
         const res = await fetch(`/api/permits/history?${params}`);
         if (!res.ok) {
-          if (!cancelled) setPermits([]);
+          if (!cancelled) { setPermits([]); setError(true); }
           return;
         }
         const body = (await res.json()) as { permits: PermitHistoryRow[] };
@@ -66,7 +71,7 @@ export function usePermitHistory(query: {
           setPermits(body.permits ?? []);
         }
       } catch {
-        if (!cancelled) setPermits([]);
+        if (!cancelled) { setPermits([]); setError(true); }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -74,5 +79,5 @@ export function usePermitHistory(query: {
     return () => { cancelled = true; };
   }, [query?.address, query?.zip, query?.excludeId]);
 
-  return { permits, isLoading };
+  return { permits, isLoading, error };
 }

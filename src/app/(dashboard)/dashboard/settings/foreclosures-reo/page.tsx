@@ -138,7 +138,7 @@ export default function ForeclosuresReoPage() {
       </header>
 
       {error && (
-        <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-4 mb-4 text-[13px] text-rose-700">
+        <div role="alert" className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-4 mb-4 text-[13px] text-rose-700">
           {error}
         </div>
       )}
@@ -175,6 +175,7 @@ export default function ForeclosuresReoPage() {
           <div className="flex items-center gap-2 mb-3">
             <select
               value={stateFilter}
+              aria-label="Filter by state"
               onChange={(e) => setStateFilter(e.target.value)}
               className="px-3 py-1.5 text-[12px] rounded-md border border-border bg-card"
             >
@@ -191,6 +192,7 @@ export default function ForeclosuresReoPage() {
             />
             <select
               value={days}
+              aria-label="Time window"
               onChange={(e) => setDays(Number(e.target.value))}
               className="px-3 py-1.5 text-[12px] rounded-md border border-border bg-card"
             >

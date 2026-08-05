@@ -71,26 +71,25 @@ const COLUMNS: KanbanColumnDef[] = [
   { id: "archived",  label: "Archived",  color: "bg-muted/30",                                                    dotColor: "#6B7280" },
 ];
 
-/** Industry-default win probabilities per pipeline stage. These are the
- * priors used when the contractor has no historical data yet. Once they
- * have a meaningful sample of closed-won + closed-lost leads, we derive
- * per-stage conversion from their own funnel via computeWinProbs() below. */
-const DEFAULT_WIN_PROBS: Record<string, string> = {
-  new: "5%", contacted: "15%", quoted: "30%", proposal: "40%", won: "100%", lost: "0%", archived: "0%",
-};
-
 /** Derive win probability per stage from the contractor's actual pipeline.
  *  Each stage's probability = (won leads that passed through this stage) /
- *  (total leads currently at or past this stage). Returns the defaults
- *  when sample size is too low (< 10 total leads or 0 wins). */
-function computeWinProbs(leads: Array<{ status: string }>): Record<string, string> {
-  if (!leads || leads.length < 10) return DEFAULT_WIN_PROBS;
+ *  (total leads currently at or past this stage).
+ *
+ *  Returns NULL when the sample is too small to compute (< 10 leads, or no
+ *  wins yet) so the caller renders nothing. This used to fall back to a
+ *  hardcoded DEFAULT_WIN_PROBS map ("30% win prob" on Quoted, etc.) that
+ *  was rendered identically to a derived value — an unsourced statistic
+ *  presented as the contractor's own funnel data, which is exactly what
+ *  BenchmarkWidget already retired for peer averages. Every contractor at
+ *  launch sat on that fallback path indefinitely. */
+function computeWinProbs(leads: Array<{ status: string }>): Record<string, string> | null {
+  if (!leads || leads.length < 10) return null;
   const counts: Record<string, number> = {
     new: 0, contacted: 0, quoted: 0, proposal: 0, won: 0, lost: 0, archived: 0,
   };
   for (const l of leads) counts[l.status] = (counts[l.status] ?? 0) + 1;
   const won = counts.won;
-  if (won === 0) return DEFAULT_WIN_PROBS;
+  if (won === 0) return null;
   // Each stage total = leads currently at that stage OR downstream (won).
   // A lead that's currently "quoted" has already passed "contacted".
   const newAndBeyond = counts.new + counts.contacted + counts.quoted + counts.proposal + counts.won;
@@ -105,6 +104,9 @@ function computeWinProbs(leads: Array<{ status: string }>): Record<string, strin
     proposal: pct(won, proposalAndBeyond),
     won: "100%",
     lost: "0%",
+    // `archived` is a rendered column — omitting it emitted a bare
+    // " win prob" with no number on the derived path.
+    archived: "0%",
   };
 }
 
@@ -184,6 +186,7 @@ function KanbanCard({
   isUpdating,
   exclusivity,
   isDragging,
+  onMoveStage,
 }: {
   lead: KanbanLead;
   onDragStart: (e: React.DragEvent, lead: KanbanLead) => void;
@@ -196,6 +199,10 @@ function KanbanCard({
    *  source while the drag preview floats with the cursor — fixes the
    *  "ghost duplicate" perception flagged in the 2026-04-26 audit. */
   isDragging?: boolean;
+  /** Keyboard/touch alternative to drag-and-drop. When supplied the card
+   *  renders a stage picker; the board wires it to the same status
+   *  mutation `handleDrop` uses. */
+  onMoveStage?: (lead: KanbanLead, toStatus: string) => void;
 }) {
   const badge = lead.trade ? tradeBadgeColors(lead.trade) : null;
   const urgencyColor = urgencyDotColor(lead.permitAgeDays);
@@ -334,6 +341,35 @@ function KanbanCard({
       {/* Notes (if any) */}
       {lead.notes && (
         <p className="text-[11px] text-fg-subtle mt-1.5 line-clamp-2">{lead.notes}</p>
+      )}
+
+      {/* Keyboard path for moving a lead between stages. Drag-and-drop was
+          the ONLY way to change status anywhere in the app, so the whole
+          Pipeline tab was read-only for keyboard and screen-reader users
+          (WCAG 2.1.1). A native select needs no roving-focus machinery and
+          works on touch too. */}
+      {onMoveStage && (
+        <div className="mt-2 pt-2 border-t border-border">
+          <label className="sr-only" htmlFor={`kanban-stage-${lead.id}`}>
+            Move {lead.addr} to another stage
+          </label>
+          <select
+            id={`kanban-stage-${lead.id}`}
+            value={lead.status}
+            disabled={isUpdating}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next !== lead.status) onMoveStage(lead, next);
+            }}
+            className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-[11px] text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          >
+            {COLUMNS.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.id === lead.status ? `In ${c.label}` : `Move to ${c.label}`}
+              </option>
+            ))}
+          </select>
+        </div>
       )}
     </div>
   );
@@ -524,6 +560,28 @@ export function KanbanBoard() {
     }
   }, [draggedLead, updateStatus]);
 
+  /** Same mutation as handleDrop, reachable without a pointer. Wired to the
+   *  per-card stage select so the Pipeline tab is operable by keyboard. */
+  const handleMoveStage = useCallback(
+    async (lead: KanbanLead, toStatus: string) => {
+      if (toStatus === lead.status) return;
+      setUpdatingIds((prev) => new Set(prev).add(lead.id));
+      try {
+        await updateStatus.mutateAsync({
+          leadId: lead.id,
+          update: { status: toStatus as LeadStatus },
+        });
+      } finally {
+        setUpdatingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(lead.id);
+          return next;
+        });
+      }
+    },
+    [updateStatus],
+  );
+
   // Weighted pipeline value
   const weights: Record<string, number> = { new: 0.05, contacted: 0.15, quoted: 0.3, proposal: 0.4, won: 1, lost: 0, archived: 0 };
   const weightedTotal = Object.entries(pipeline).reduce((sum, [col, colLeads]) => {
@@ -558,7 +616,7 @@ export function KanbanBoard() {
           </select>
           <button
             onClick={() => setAddDialogOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:opacity-90 transition-opacity"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cta text-cta-foreground text-sm font-medium hover:opacity-90 transition-opacity"
           >
             <Plus className="h-3.5 w-3.5" />
             Add lead
@@ -615,6 +673,8 @@ export function KanbanBoard() {
                 return (
                   <div
                     key={col.id}
+                    role="group"
+                    aria-label={`${col.label} — ${colLeads.length} lead${colLeads.length === 1 ? "" : "s"}`}
                     className="w-[270px] shrink-0 flex flex-col bg-bg-subtle rounded-xl"
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
                     onDrop={(e) => handleDrop(e, col.id)}
@@ -628,8 +688,14 @@ export function KanbanBoard() {
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-[11px] text-fg-subtle">
                         <span>{formatCurrency(colTotal)}</span>
-                        <span>&middot;</span>
-                        <span>{winProbs[col.id]} win prob</span>
+                        {/* Only shown once it's derived from this
+                            contractor's own closed leads. */}
+                        {winProbs?.[col.id] && (
+                          <>
+                            <span>&middot;</span>
+                            <span>{winProbs[col.id]} win prob</span>
+                          </>
+                        )}
                       </div>
                       {/* Module 25 — stage-mix dots row. Renders only when
                           ≥1 lead in the column has been classified. */}
@@ -672,6 +738,7 @@ export function KanbanBoard() {
                             isUpdating={updatingIds.has(lead.id)}
                             exclusivity={locks[lead.id]}
                             isDragging={draggedLead?.lead.id === lead.id}
+                            onMoveStage={handleMoveStage}
                           />
                         ))
                       )}

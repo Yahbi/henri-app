@@ -141,7 +141,7 @@ export function FeedbackDialog({
                   className={cn(
                     "px-2.5 py-1 rounded-full text-xs border transition-colors",
                     category === c.key
-                      ? "bg-primary text-white border-primary"
+                      ? "bg-cta text-cta-foreground border-cta"
                       : "bg-background text-foreground border-border hover:bg-accent",
                   )}
                 >
@@ -242,7 +242,7 @@ export function FeedbackDialog({
               type="button"
               onClick={submit}
               disabled={submitting || !message.trim()}
-              className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-primary text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+              className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-cta text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
             >
               {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Send feedback

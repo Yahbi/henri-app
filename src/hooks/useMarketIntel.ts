@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface MarketIntelTrade {
   trade: string;
@@ -36,6 +36,11 @@ export function useMarketIntel(zip: string | null | undefined) {
   // otherwise the panel mislabels an outage as "no permit activity".
   const [error, setError] = useState<string | null>(null);
   const lastKey = useRef<string | null>(null);
+  /** Bumped by `refresh()` so the effect re-runs for the SAME zip. Without
+   *  it the panel's "try again" path was inert: re-submitting an
+   *  identical ZIP set identical state, React bailed out, and the
+   *  lastKey short-circuit blocked a refetch anyway. */
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     if (!zip) {
@@ -46,7 +51,7 @@ export function useMarketIntel(zip: string | null | undefined) {
     }
     const clean = String(zip).slice(0, 5);
     if (!/^\d{5}$/.test(clean)) return;
-    if (lastKey.current === clean) return;
+    if (lastKey.current === clean && reloadNonce === 0) return;
 
     let cancelled = false;
     (async () => {
@@ -55,7 +60,13 @@ export function useMarketIntel(zip: string | null | undefined) {
       try {
         const res = await fetch(`/api/market-intel/${clean}`, { credentials: "include" });
         if (!res.ok) {
-          if (!cancelled) setError("Couldn't load market intelligence.");
+          if (!cancelled) {
+            // Drop the previous ZIP's data — otherwise the panel showed
+            // the error banner for the new ZIP AND the old ZIP's metrics
+            // side by side.
+            setIntel(null);
+            setError("Couldn't load market intelligence.");
+          }
           return;
         }
         const body = (await res.json()) as {
@@ -77,7 +88,13 @@ export function useMarketIntel(zip: string | null | undefined) {
       }
     })();
     return () => { cancelled = true; };
-  }, [zip]);
+  }, [zip, reloadNonce]);
 
-  return { intel, isLoading, migrationPending, error };
+  /** Re-run the fetch for the current ZIP (retry after an error). */
+  const refresh = useCallback(() => {
+    lastKey.current = null;
+    setReloadNonce((n) => n + 1);
+  }, []);
+
+  return { intel, isLoading, migrationPending, error, refresh };
 }

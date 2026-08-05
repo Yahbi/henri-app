@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       logger.error("Supabase webhook: profile upsert failed", { error: String(error) });
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Profile upsert failed" }, { status: 500 });
     }
 
     return NextResponse.json({ received: true, userId, role });

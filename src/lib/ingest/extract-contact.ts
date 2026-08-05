@@ -67,6 +67,12 @@ const KEY_LISTS = {
     "ownername", "owner_name", "owner", "owners", "owner_full_name",
     "owner_s_name", "own_name", "pr_name_full", "propowner",
     "property_owner", "record_owner",
+    // Added 2026-08-04 after a live audit of the Orlando ingest: 26,873 of
+    // its 28,612 permits carry `parcel_owner_name` and 22,049 carry
+    // `property_owner_name`, while ZERO carry `owner_name`/`ownername`.
+    // Every one of those real homeowner names was unreadable, so the leads
+    // rendered blank and scored with contact_completeness suppressed.
+    "parcel_owner_name", "property_owner_name", "parcel_owner", "owner_1",
   ],
   owner_first: [
     "owner_first", "owner_first_name", "owner_s_first_name",
@@ -92,10 +98,17 @@ const KEY_LISTS = {
     "ownerphone", "phone", "contact_phone",
     "permittee_s_phone__", "permittee_s_phone", "permittee_phone",
     "applicant_phone", "contractor_phone", "gc_phone", "homeowner_phone",
+    // `..._number` / `..._1` variants. Orlando ships 18,804 populated
+    // `contractor_phone_number` values (e.g. "(407)592-6291") that the old
+    // list could not see; Bozeman MT ships `contractor_phone_1`. Phone fill
+    // is the wedge's hardest ceiling — these were already in raw_json.
+    "contractor_phone_number", "owner_phone_number", "applicant_phone_number",
+    "permittee_phone_number", "contractor_phone_1", "phone_number",
   ],
   email: [
     "owner_email", "email", "contact_email", "applicant_email",
     "permittee_email", "contractor_email", "gc_email", "homeowner_email",
+    "owner_email_address", "contractor_email_address", "email_address",
   ],
 };
 

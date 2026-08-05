@@ -60,7 +60,12 @@ const PLANS: PlanTier[] = [
     features: [
       "12 ZIP territories",
       "Everything in Starter",
-      "Daily license verification (compliance)",
+      // "Daily license verification (compliance)" removed 2026-08-04.
+      // src/lib/license/verify.ts never calls a licensing board — every
+      // path returns "pending" — and nothing gates lead delivery on
+      // license status, so the claim was unbacked. The real, provable
+      // check (signup cross-check against the public state roster)
+      // applies to every plan and isn't a Pro differentiator.
       "Storm Center dashboard",
       "Priority email support",
     ],
@@ -95,10 +100,23 @@ export default function BillingPage() {
   // green; "error" is red; "info" is primary-tinted.
   const [banner, setBanner] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
 
-  // Beta-locked fallback: Founder ($149, 3 ZIPs) per CLAUDE.md. Previously
-  // fell back to Starter which hid the Founder tier from pre-checkout users.
-  const currentPlanSlug = profile?.plan ?? "founder";
-  const currentPlan = PLANS.find((p) => p.slug === currentPlanSlug) ?? PLANS[0];
+  // A cancelled / unpaid / never-subscribed contractor carries
+  // plan = "free" (written by the Stripe webhook on cancel + unpaid, by
+  // handleSubscriptionDeleted, by the billing-sync cron, and as the
+  // profiles column DEFAULT). "free" is not in PLANS, so the old
+  // `?? PLANS[0]` fallback silently rendered "Founder $149/mo · 3 ZIP
+  // territories" as their CURRENT plan — a false billing statement to a
+  // user whose real entitlement is zip_cap 0 (lib/territory/plan-caps.ts).
+  // Track subscribed-ness explicitly instead of defaulting to a paid tier.
+  const rawPlanSlug = profile?.plan ?? null;
+  const isSubscribed =
+    !!rawPlanSlug && rawPlanSlug !== "free" && PLANS.some((p) => p.slug === rawPlanSlug);
+  const currentPlanSlug = isSubscribed ? (rawPlanSlug as string) : "";
+  // Used only for price comparisons on the cards. When unsubscribed the
+  // baseline is $0 so every card reads "Subscribe", never "Downgrade".
+  const currentPlan =
+    PLANS.find((p) => p.slug === currentPlanSlug) ??
+    ({ slug: "", name: "No plan", price: "$0", priceNum: 0, interval: "/mo", description: "", features: [], territories: 0 } as PlanTier);
 
   async function openBillingPortal() {
     setManagingBilling(true);
@@ -152,7 +170,18 @@ export default function BillingPage() {
 
     // Upgrades: use change-plan when already subscribed (prevents duplicate
     // Stripe subscriptions). Fall back to checkout for first-time subscribers.
-    const hasSubscription = !!profile?.stripe_customer_id;
+    //
+    // 2026-08-04 double-charge fix. This read `profile?.stripe_customer_id`,
+    // a field useUser never SELECTed — so it was permanently undefined, the
+    // guard never fired, and every upgrade fell through to /api/checkout,
+    // which opens a SECOND concurrent Stripe subscription on the same
+    // customer while the old one keeps billing. Switched to
+    // `stripe_subscription_id` (now selected): the customer id is stamped at
+    // checkout-session creation, i.e. before payment, so an abandoned
+    // checkout would have routed a genuinely-unsubscribed user into
+    // change-plan, which 400s "No active subscription". Same rule as
+    // onboarding/territory/page.tsx and api/territories/route.ts.
+    const hasSubscription = !!profile?.stripe_subscription_id;
     if (hasSubscription && !isSamePlan) {
       try {
         const res = await fetch("/api/billing/change-plan", {
@@ -208,7 +237,11 @@ export default function BillingPage() {
           role={banner.tone === "error" ? "alert" : "status"}
           className={
             banner.tone === "success"
-              ? "flex items-start justify-between gap-3 rounded-lg border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-300"
+              // text-green-300 (#86EFAC) on the light-theme background
+              // measured ~1.24:1 — effectively invisible, on the banner
+              // that confirms a billing change actually went through.
+              // Semantic token instead, matching the error arm below.
+              ? "flex items-start justify-between gap-3 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success"
               : banner.tone === "error"
                 ? "flex items-start justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
                 : "flex items-start justify-between gap-3 rounded-lg border border-primary/20 bg-primary-04 px-4 py-3 text-sm text-primary"
@@ -226,21 +259,50 @@ export default function BillingPage() {
         </div>
       )}
 
-      {/* Current plan banner */}
-      <div className="bg-primary-04 border border-primary/20 rounded-xl p-6">
+      {/* Current plan banner — or an explicit "no active subscription"
+          state. Never name a paid tier the contractor isn't on. */}
+      <div
+        className={cn(
+          "border rounded-xl p-6",
+          isSubscribed
+            ? "bg-primary-04 border-primary/20"
+            : "bg-warning/10 border-warning/30",
+        )}
+      >
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <CreditCard className="h-4 w-4 text-primary" />
-              <p className="text-xs font-semibold text-primary uppercase tracking-wider">Current Plan</p>
+              <CreditCard
+                className={cn("h-4 w-4", isSubscribed ? "text-primary" : "text-warning")}
+              />
+              <p
+                className={cn(
+                  "text-xs font-semibold uppercase tracking-wider",
+                  isSubscribed ? "text-primary" : "text-warning",
+                )}
+              >
+                {isSubscribed ? "Current Plan" : "No active subscription"}
+              </p>
             </div>
-            <p className="text-2xl font-bold text-foreground">
-              {currentPlan.name}{" "}
-              <span className="text-sm font-normal text-muted-foreground">{currentPlan.price}/mo</span>
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {currentPlan.territories} ZIP territories · AI-scored leads · Best-effort owner contact enrichment
-            </p>
+            {isSubscribed ? (
+              <>
+                <p className="text-2xl font-bold text-foreground">
+                  {currentPlan.name}{" "}
+                  <span className="text-sm font-normal text-muted-foreground">{currentPlan.price}/mo</span>
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {currentPlan.territories} ZIP territories · AI-scored leads · Best-effort owner contact enrichment
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-foreground">Not subscribed</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  You can&apos;t claim territories or receive new leads without an
+                  active plan. Pick one below to start.
+                </p>
+              </>
+            )}
           </div>
           <button
             onClick={openBillingPortal}
@@ -286,7 +348,7 @@ export default function BillingPage() {
                  * (avoids a ribbon pile-up if the user is on Pro). */}
                 {plan.highlighted && !isCurrent && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <span className="inline-flex items-center gap-1 bg-primary text-white px-2.5 py-0.5 rounded-full text-[11px] font-semibold shadow">
+                    <span className="inline-flex items-center gap-1 bg-cta text-cta-foreground px-2.5 py-0.5 rounded-full text-[11px] font-semibold shadow">
                       <Zap className="h-2.5 w-2.5" />
                       Popular
                     </span>
@@ -345,11 +407,20 @@ export default function BillingPage() {
                     className={cn(
                       "w-full py-2 text-sm font-medium rounded-lg transition-opacity disabled:opacity-50",
                       plan.highlighted
-                        ? "bg-primary text-white hover:opacity-90"
+                        ? "bg-cta text-cta-foreground hover:opacity-90"
                         : "border border-border hover:bg-accent"
                     )}
                   >
-                    {isUpgrading ? "Redirecting..." : plan.priceNum > currentPlan.priceNum ? "Upgrade" : "Downgrade"}
+                    {isUpgrading
+                      ? "Redirecting..."
+                      : !isSubscribed
+                        // Never offer to "Downgrade" off a plan the user
+                        // doesn't hold — with no subscription every card
+                        // is a purchase.
+                        ? "Subscribe"
+                        : plan.priceNum > currentPlan.priceNum
+                          ? "Upgrade"
+                          : "Downgrade"}
                   </button>
                 )}
               </div>
@@ -372,12 +443,16 @@ export default function BillingPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4">
             <h3 className="text-base font-semibold text-foreground">
-              {confirmPlan.priceNum > currentPlan.priceNum ? "Upgrade" : "Downgrade"} to {confirmPlan.name}?
+              {!isSubscribed
+                ? `Subscribe to ${confirmPlan.name}?`
+                : `${confirmPlan.priceNum > currentPlan.priceNum ? "Upgrade" : "Downgrade"} to ${confirmPlan.name}?`}
             </h3>
             <p className="text-sm text-muted-foreground">
-              {confirmPlan.priceNum > currentPlan.priceNum
-                ? "You will be redirected to Stripe to complete your upgrade. The new plan takes effect immediately. Your 24-hour free trial applies if this is your first subscription."
-                : "Your downgrade will take effect at the end of your current billing cycle. No refunds are issued; you keep full access until then."}
+              {!isSubscribed
+                ? "You'll be redirected to Stripe to start your subscription. A card is required; the 24-hour free trial applies to your first subscription. No refunds on digital products."
+                : confirmPlan.priceNum > currentPlan.priceNum
+                  ? "Your plan changes immediately and your new territory allowance is available right away. Stripe prorates the difference on your existing subscription."
+                  : "Your downgrade will take effect at the end of your current billing cycle. No refunds are issued; you keep full access until then."}
             </p>
             <div className="flex gap-3">
               <button
@@ -388,7 +463,7 @@ export default function BillingPage() {
               </button>
               <button
                 onClick={() => handleUpgrade(confirmPlan)}
-                className="flex-1 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:opacity-90 transition-opacity"
+                className="flex-1 py-2 text-sm font-medium bg-cta text-cta-foreground rounded-lg hover:opacity-90 transition-opacity"
               >
                 Continue
               </button>

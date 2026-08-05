@@ -2,33 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
 import { ReviewRequestBodySchema, parseBody } from "@/lib/schemas/api";
+import { requireContractor } from "@/lib/auth/requireContractor";
 
 /* ─── POST /api/reviews/request — contractor sends a review request ─── */
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
+    /* Canonical role gate (CLAUDE.md: contractor-only routes use
+     * requireContractor, no exceptions). Replaces the hand-rolled
+     * getUser() + profile.role check that used to live here. */
+    const gate = await requireContractor(supabase);
+    if (gate.response) return gate.response;
+    const { user } = gate;
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    /* Verify the user is a contractor */
+    /* Display name for the outbound email/SMS — the role itself is
+     * already settled by the gate above. */
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role, company_name, full_name")
+      .select("company_name, full_name")
       .eq("id", user.id)
       .single();
-
-    if (!profile || profile.role !== "contractor") {
-      return NextResponse.json(
-        { error: "Only contractors can send review requests" },
-        { status: 403 }
-      );
-    }
 
     const raw = await req.json().catch(() => ({}));
     const parsed = parseBody(ReviewRequestBodySchema, raw);
@@ -87,7 +80,7 @@ export async function POST(req: NextRequest) {
     }
 
     const senderName =
-      profile.company_name ?? profile.full_name ?? "Your contractor";
+      profile?.company_name ?? profile?.full_name ?? "Your contractor";
     const reviewLink = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://meethenri.com"}/review/${token}`;
 
     /* Send via the appropriate channel */

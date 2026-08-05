@@ -12,6 +12,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { logger } from "@/lib/logger";
 
 /**
  * Phase 0b wedge #5 — project-stage timeline.
@@ -126,6 +127,12 @@ export function PermitTimeline({
   const [events, setEvents] = useState<PermitEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [usingSynthesized, setUsingSynthesized] = useState(false);
+  // A failed fetch fell into the same synthesized-from-dates path as "no
+  // events recorded", so an outage was labelled with the neutral
+  // "(derived from permit dates)" footnote and looked identical to
+  // healthy behaviour.
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     if (!permitId) {
@@ -137,12 +144,14 @@ export function PermitTimeline({
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setFetchFailed(false);
       try {
         const res = await fetch(`/api/permit-events?permit_id=${permitId}`);
         if (!res.ok) {
           if (!cancelled) {
             setEvents(synthesizeFromPermitStatus(permit));
             setUsingSynthesized(true);
+            setFetchFailed(true);
           }
           return;
         }
@@ -156,10 +165,15 @@ export function PermitTimeline({
             setUsingSynthesized(true);
           }
         }
-      } catch {
+      } catch (e) {
         if (!cancelled) {
+          logger.warn("PermitTimeline: permit-events fetch failed", {
+            permitId,
+            error: e instanceof Error ? e.message : String(e),
+          });
           setEvents(synthesizeFromPermitStatus(permit));
           setUsingSynthesized(true);
+          setFetchFailed(true);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -170,7 +184,7 @@ export function PermitTimeline({
     // callers that inline the object literal (see LeadDetailDrawer).
     // The fields we actually read from it are listed explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [permitId, permit.applied_date, permit.issued_date, permit.completed_date, permit.status]);
+  }, [permitId, retryNonce, permit.applied_date, permit.issued_date, permit.completed_date, permit.status]);
 
   // Always render the timeline scaffold when we have a permit backing
   // the lead, even without any dated events yet. The dashed-outline
@@ -199,9 +213,21 @@ export function PermitTimeline({
           Project stage
         </span>
         {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-        {usingSynthesized && (
+        {usingSynthesized && !fetchFailed && (
           <span className="text-[9.5px] text-muted-foreground italic">
             (derived from permit dates)
+          </span>
+        )}
+        {fetchFailed && (
+          <span role="alert" className="flex items-center gap-1 text-[9.5px] text-destructive">
+            Timeline couldn&apos;t load — showing permit dates only.
+            <button
+              type="button"
+              onClick={() => setRetryNonce((n) => n + 1)}
+              className="font-medium underline underline-offset-2 hover:opacity-80"
+            >
+              Retry
+            </button>
           </span>
         )}
       </div>

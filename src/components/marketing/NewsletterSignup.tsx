@@ -79,7 +79,7 @@ export function NewsletterSignup({
       <button
         type="submit"
         disabled={state === "submitting" || !email.trim()}
-        className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-40"
+        className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-cta px-4 text-sm font-medium text-cta-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
       >
         {state === "submitting" ? "Sending…" : "Notify me"}
         {state !== "submitting" && <ArrowRight className="h-3.5 w-3.5" aria-hidden />}

@@ -28,8 +28,12 @@ export default function PricingPage() {
         <h1 className="font-heading text-4xl font-normal tracking-tight text-foreground sm:text-5xl">
           Pricing
         </h1>
+        {/* 2026-08-04: "Start free, upgrade anytime" implied a free tier.
+          * There isn't one — every plan opens with a 24-hour trial that
+          * requires a credit card (CLAUDE.md pricing source of truth). */}
         <p className="mt-4 text-lg text-muted-foreground">
-          Find the plan that fits your business. Start free, upgrade anytime.
+          Find the plan that fits your business. Every plan starts with a
+          24-hour free trial — credit card required, cancel anytime.
         </p>
       </div>
       <PricingSection />

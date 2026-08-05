@@ -4,6 +4,7 @@ import { requireContractor } from "@/lib/auth/requireContractor";
 import { getZipAvailability } from "@/lib/territory/ziplock";
 import { releaseTerritory } from "@/lib/territory/ziplock";
 import { logger } from "@/lib/logger";
+import { isZip5 } from "@/lib/validation/params";
 
 export async function GET(
   _request: NextRequest,
@@ -12,9 +13,9 @@ export async function GET(
   try {
     const { zip } = await params;
 
-    if (!zip) {
+    if (!isZip5(zip)) {
       return NextResponse.json(
-        { error: "ZIP code is required" },
+        { error: "ZIP must be a 5-digit US ZIP code" },
         { status: 400 }
       );
     }
@@ -44,9 +45,9 @@ export async function DELETE(
 
     const { zip } = await params;
 
-    if (!zip) {
+    if (!isZip5(zip)) {
       return NextResponse.json(
-        { error: "ZIP code is required" },
+        { error: "ZIP must be a 5-digit US ZIP code" },
         { status: 400 }
       );
     }

@@ -20,6 +20,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { isGodModeEmail } from "@/lib/auth/god-mode";
 import { logger } from "@/lib/logger";
@@ -82,12 +83,21 @@ const ALLOWED: ReadonlySet<string> = new Set([
   "scrape",
 ]);
 
-interface TriggerBody {
-  cron_path?: string;
-  /** Pass-through query string appended to the upstream cron URL.
-   *  E.g. `state=CA` for the HMDA rotator, `year=2024` for NFIP. */
-  query?: string;
-}
+/* Body schema. `query` is appended verbatim to the upstream URL, so it is
+ * restricted to the `key=value&key=value` charset — no path characters, no
+ * fragment, nothing that could re-point the request away from the
+ * allow-listed /api/cron/<slug> it is about to hit. */
+const TriggerBodySchema = z.object({
+  cron_path: z.string().min(1).max(64),
+  query: z
+    .string()
+    .max(200)
+    .regex(
+      /^[?&]?[A-Za-z0-9_\-=&.%]*$/u,
+      "query may only contain key=value pairs",
+    )
+    .optional(),
+});
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -98,18 +108,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: TriggerBody;
-  try {
-    body = (await request.json()) as TriggerBody;
-  } catch {
+  const parsedBody = TriggerBodySchema.safeParse(
+    await request.json().catch(() => null),
+  );
+  if (!parsedBody.success) {
     return NextResponse.json(
-      { error: "invalid JSON body" },
+      { error: parsedBody.error.issues[0]?.message ?? "invalid JSON body" },
       { status: 400 },
     );
   }
+  const body = parsedBody.data;
 
-  const cronPath = (body.cron_path ?? "").trim();
-  if (!cronPath || !ALLOWED.has(cronPath)) {
+  const cronPath = body.cron_path.trim();
+  if (!ALLOWED.has(cronPath)) {
     return NextResponse.json(
       { error: "cron_path missing or not in allow-list", allowed: [...ALLOWED] },
       { status: 400 },
@@ -186,7 +197,7 @@ export async function POST(request: NextRequest) {
       {
         ok: false,
         cron_path: cronPath,
-        error: String(err),
+        error: "Trigger failed — see server logs",
         duration_ms: Date.now() - startedAt,
       },
       { status: 500 },

@@ -100,7 +100,16 @@ export function IntentChip({
           ? `${label}${durationLabel ? ` (${durationLabel})` : ""}\n${codes.map((c) => `• ${reasonCodeLabel(c)}`).join("\n")}`
           : `${label}${durationLabel ? ` (${durationLabel})` : ""}`
       }
-      aria-label={`Opportunity stage: ${label}${durationLabel ? `, ${durationLabel}` : ""}`}
+      /* tabIndex so the reason-code tooltip is reachable without a mouse —
+         the docstring promised focus support that a bare <div title> never
+         delivered. The reason count is folded into the accessible name so
+         it isn't announced as a bare digit. */
+      tabIndex={0}
+      aria-label={
+        `Opportunity stage: ${label}` +
+        (durationLabel ? `, ${durationLabel}` : "") +
+        (codes.length ? `, ${codes.length} reason${codes.length === 1 ? "" : "s"}` : "")
+      }
     >
       <Icon className="h-3 w-3 shrink-0" aria-hidden />
       <span className="truncate max-w-[14rem]">{label}</span>

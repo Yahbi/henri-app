@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { QuotePatchBodySchema, parseBody } from "@/lib/schemas/api";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/params";
 
 /* ─── GET /api/quotes/[id] — single quote detail ─── */
 export async function GET(
@@ -10,6 +11,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    if (!isUuid(id)) {
+      return NextResponse.json({ error: "Malformed quote id" }, { status: 400 });
+    }
     const supabase = await createClient();
 
     const {
@@ -72,6 +76,9 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    if (!isUuid(id)) {
+      return NextResponse.json({ error: "Malformed quote id" }, { status: 400 });
+    }
     const supabase = await createClient();
 
     const {

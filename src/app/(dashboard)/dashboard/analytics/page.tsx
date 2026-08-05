@@ -310,9 +310,9 @@ export default function AnalyticsPage() {
   });
   const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
   const { profile } = useUser();
-  const { funnel, isLoading: funnelLoading } = useFunnel();
+  const { funnel, isLoading: funnelLoading, error: funnelError } = useFunnel();
   const planPrice = profile?.plan ? (PLAN_PRICES[profile.plan] ?? 749) : 749;
-  const { forecast, isLoading: forecastLoading } = useForecast(planPrice);
+  const { forecast, isLoading: forecastLoading, error: forecastError } = useForecast(planPrice);
 
   // Mount-time "now" so the 30-day window is stable across renders (not a moving target)
   const [mountNow] = useState(() => Date.now());
@@ -421,6 +421,17 @@ export default function AnalyticsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {funnelLoading ? (
           <Skeleton className="h-[300px] rounded-xl" />
+        ) : funnelError ? (
+          /* A load failure must not read as "you have no funnel yet" — the
+           * two states mean opposite things to the contractor. */
+          <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+            <p className="text-sm text-muted-foreground">
+              Couldn&apos;t load your funnel &mdash; check your connection and retry.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => refetchLeads()}>
+              Retry
+            </Button>
+          </Card>
         ) : funnel ? (
           <ConversionFunnel stages={funnel.stages} overall={funnel.overall} />
         ) : (
@@ -431,6 +442,15 @@ export default function AnalyticsPage() {
 
         {forecastLoading ? (
           <Skeleton className="h-[300px] rounded-xl" />
+        ) : forecastError ? (
+          <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+            <p className="text-sm text-muted-foreground">
+              Couldn&apos;t load your revenue forecast &mdash; check your connection and retry.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => refetchLeads()}>
+              Retry
+            </Button>
+          </Card>
         ) : forecast ? (
           <ForecastWidget forecast={forecast} />
         ) : (

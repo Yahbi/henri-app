@@ -135,6 +135,9 @@ function TemplateModal({ template, onClose, onSave }: TemplateModalProps) {
   const [preview, setPreview] = useState(template.preview);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // The upsert's error field used to go unread, so a failed save still
+  // rendered the green "Saved" chip and auto-closed the modal.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // ESC closes the modal. FocusTrap below handles Tab-cycle; without
@@ -173,21 +176,29 @@ function TemplateModal({ template, onClose, onSave }: TemplateModalProps) {
   async function handleSave() {
     if (!name.trim() || !preview.trim()) return;
     setSaving(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      await supabase.from("outreach_templates").upsert({
+    setSaveError(null);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Session expired — sign in again.");
+      const { error } = await supabase.from("outreach_templates").upsert({
         contractor_id: user.id,
         name: name.trim(),
         subject: name.trim(),
         body: preview.trim(),
         channel: channel.toLowerCase(),
       });
+      if (error) throw new Error(error.message);
+      setSaved(true);
+      onSave({ name, channel, preview });
+      setTimeout(onClose, 800);
+    } catch (err) {
+      setSaveError(
+        err instanceof Error ? err.message : "Couldn't save the template.",
+      );
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setSaved(true);
-    onSave({ name, channel, preview });
-    setTimeout(onClose, 800);
   }
 
   return (
@@ -318,6 +329,15 @@ function TemplateModal({ template, onClose, onSave }: TemplateModalProps) {
         {saved ? (
           <div className="rounded-lg bg-success/10 p-2 text-sm text-success text-center">Saved</div>
         ) : (
+          <div className="space-y-2">
+          {saveError && (
+            <div
+              role="alert"
+              className="rounded-lg bg-destructive/10 p-2 text-xs text-destructive"
+            >
+              {saveError}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <button
               onClick={onClose}
@@ -328,10 +348,11 @@ function TemplateModal({ template, onClose, onSave }: TemplateModalProps) {
             <button
               onClick={handleSave}
               disabled={saving || !name.trim() || !preview.trim()}
-              className="rounded-lg bg-primary px-4 py-1.5 text-sm text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              className="rounded-lg bg-cta px-4 py-1.5 text-sm text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {saving ? "Saving..." : "Save Template"}
             </button>
+          </div>
           </div>
         )}
       </div>
@@ -457,6 +478,14 @@ function SendModal({ templateName, channel, message, onClose, onSend }: SendModa
                   </>
                 )}
               </select>
+              {/* An empty picker with a permanently-disabled Send button is
+                  an unexplained dead end — say why there's nothing to pick. */}
+              {!leadsLoading && leads.length === 0 && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  No new or contacted leads to send to yet. Leads appear here
+                  as permits land in your territories.
+                </p>
+              )}
             </div>
             <div className="flex justify-end gap-2">
               <button
@@ -468,7 +497,7 @@ function SendModal({ templateName, channel, message, onClose, onSend }: SendModa
               <button
                 onClick={handleSend}
                 disabled={!selectedLead || sending}
-                className="rounded-lg bg-primary px-4 py-1.5 text-sm text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                className="rounded-lg bg-cta px-4 py-1.5 text-sm text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {sending ? "Sending..." : "Send"}
               </button>
@@ -489,6 +518,10 @@ export default function OutreachPage() {
   // everything (incl. legacy generic templates with stage=null);
   // picking a stage shows only the templates targeting that stage.
   const [stageFilter, setStageFilter] = useState<string>("all");
+  // A failed template fetch used to fall through silently to the seeded
+  // defaults, so a contractor's saved templates looked like they'd been
+  // deleted. Surface the failure instead.
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const { stats: outreachStats, recent: outreachRecent, isLoading, error: outreachError, refresh: refreshOutreach, sendOutreach } = useOutreach();
 
   /* Hydrate templates from the contractor's saved rows. Previously
@@ -505,11 +538,18 @@ export default function OutreachPage() {
     // migration 00091 surface alongside the contractor's own rows. The RLS
     // policy on outreach_templates already permits SELECT of library rows
     // for any authenticated user (migration 00032).
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("outreach_templates")
       .select("name, channel, body, subject, stage, contractor_id, is_library")
       .or(`contractor_id.eq.${user.id},and(contractor_id.is.null,is_library.eq.true)`)
       .order("updated_at", { ascending: false });
+    if (error) {
+      setTemplatesError(
+        "Couldn't load your saved templates — showing the starter set instead.",
+      );
+      return;
+    }
+    setTemplatesError(null);
     if (data && data.length > 0) {
       type Row = {
         name?: string | null;
@@ -553,6 +593,15 @@ export default function OutreachPage() {
     status: item.status === "sent" ? "Sent" : item.status === "queued" ? "Queued" : item.status,
     time: timeAgo(item.created_at),
   }));
+
+  // Stage filter is a row-hiding filter, so it owes the user a count of
+  // what it's holding back (CLAUDE.md wedge #3 — never silently drop rows).
+  const visibleTemplates = templates.filter((tpl) => {
+    if (stageFilter === "all") return true;
+    if (stageFilter === "generic") return !tpl.stage;
+    return tpl.stage === stageFilter;
+  });
+  const hiddenByStage = templates.length - visibleTemplates.length;
 
   function handleTemplateSave(updated: Template) {
     // Optimistic: update the in-memory list so the modal-close feels
@@ -631,6 +680,21 @@ export default function OutreachPage() {
 
       {/* Templates */}
       <div>
+        {templatesError && (
+          <div
+            role="alert"
+            className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2"
+          >
+            <p className="text-[12px] text-destructive">{templatesError}</p>
+            <button
+              type="button"
+              onClick={() => fetchTemplates()}
+              className="text-[12px] font-medium text-destructive underline underline-offset-2 hover:opacity-80"
+            >
+              Retry
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <h2 className="text-lg font-heading font-normal text-foreground">Outreach Templates</h2>
           {/* Phase AA — stage filter (URL-stable could come later; for now
@@ -656,24 +720,44 @@ export default function OutreachPage() {
                   </option>
                 ))}
               </select>
+              {hiddenByStage > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {hiddenByStage} filtered out
+                </span>
+              )}
             </div>
           )}
         </div>
+        {visibleTemplates.length === 0 ? (
+          <Card className="p-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              No templates target this stage yet.
+            </p>
+            <button
+              type="button"
+              onClick={() => setStageFilter("all")}
+              className="mt-2 text-xs text-primary hover:underline"
+            >
+              Show all templates
+            </button>
+          </Card>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {templates
-            .filter((tpl) => {
-              if (stageFilter === "all") return true;
-              if (stageFilter === "generic") return !tpl.stage;
-              return tpl.stage === stageFilter;
-            })
-            .map((tpl) => (
+          {visibleTemplates.map((tpl) => (
             <Card
               key={tpl.name}
               className="p-4 space-y-2 hover:border-primary/40 transition-colors cursor-pointer"
               onClick={() => setEditTarget(tpl)}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => e.key === "Enter" && setEditTarget(tpl)}
+              onKeyDown={(e) => {
+                // Space activates role="button" elements too — Enter alone
+                // left the card half-operable from the keyboard.
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setEditTarget(tpl);
+                }
+              }}
               aria-label={`Edit ${tpl.name} template`}
             >
               <div className="flex items-center justify-between">
@@ -704,6 +788,7 @@ export default function OutreachPage() {
             </Card>
           ))}
         </div>
+        )}
       </div>
 
       {/* Recent Outreach Log */}
@@ -736,7 +821,14 @@ export default function OutreachPage() {
                 </tr>
               </thead>
               <tbody>
-                {recentOutreach.map((row, i) => (
+                {recentOutreach.map((row, i) => {
+                  // The row's "template" column is the stored subject, which
+                  // doesn't always correspond to a saved template (direct
+                  // messages, deleted templates). Resolve it up-front so the
+                  // Send button can disable itself with a reason instead of
+                  // being a click that does nothing.
+                  const rowTemplate = templates.find((t) => t.name === row.template);
+                  return (
                   <tr key={i} className="border-b border-border last:border-b-0">
                     <td className="px-4 py-3 text-foreground">{row.name}</td>
                     <td className="px-4 py-3">{channelBadge(row.channel)}</td>
@@ -745,18 +837,22 @@ export default function OutreachPage() {
                     <td className="px-4 py-3 text-muted-foreground">{row.time}</td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => {
-                          const tpl = templates.find((t) => t.name === row.template);
-                          if (tpl) setSendTarget(tpl);
-                        }}
-                        className="text-xs text-primary hover:underline"
+                        onClick={() => rowTemplate && setSendTarget(rowTemplate)}
+                        disabled={!rowTemplate}
+                        title={
+                          rowTemplate
+                            ? `Send ${row.template} again`
+                            : "That template no longer exists in your library"
+                        }
+                        className="text-xs text-primary hover:underline disabled:text-muted-foreground disabled:no-underline disabled:cursor-not-allowed"
                         aria-label={`Send ${row.template} to ${row.name}`}
                       >
                         Send
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </Card>

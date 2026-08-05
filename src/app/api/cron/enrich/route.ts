@@ -167,8 +167,10 @@ export async function GET(request: NextRequest) {
   // run for every lead regardless.
   const sets = await getPriorityZipSets(supabase);
   const quotaRemaining: QuotaRemaining = await loadQuotaRemaining(supabase);
+  // `permit_id` is needed to queue the lead for re-scoring after a
+  // successful enrichment patch (see the scored_at reset below).
   const SELECT_COLS =
-    "id, address, city, state, zip, year_built, home_sqft, assessed_value, owner_name, owner_first, owner_last, phone, email, score, permits(contractor_name, applicant_name, description)";
+    "id, permit_id, address, city, state, zip, year_built, home_sqft, assessed_value, owner_name, owner_first, owner_last, phone, email, score, permits(contractor_name, applicant_name, description)";
 
   const priorityZips = allPriorityZips(sets);
   const collected: Array<Record<string, unknown>> = [];
@@ -337,8 +339,47 @@ export async function GET(request: NextRequest) {
         .from("leads")
         .update(patch)
         .eq("id", lead.id);
-      if (!upErr) enriched++;
-      else missed++;
+      if (!upErr) {
+        enriched++;
+
+        /* Re-score trigger (2026-08-04 audit).
+         *
+         * Enrichment writes owner_name / phone / email / owner_occupied but
+         * never touched score, urgency, score_contact or score_signals — and
+         * no re-score path existed, since the score cron only selects
+         * permits WHERE scored_at IS NULL. The frozen score_signals jsonb
+         * kept rendering "No homeowner contact on file" in the drawer's
+         * transparency panel while the adjacent homeowner column displayed
+         * the phone we had just found: a self-contradiction on one screen,
+         * and a wedge-contract #2 violation.
+         *
+         * It also understated the total by up to 15 of 100 points
+         * (phone +5 / email +3 / owner name +5 / owner-occupied +4), which
+         * is decisive against the 75 Hot threshold — enriched leads could
+         * never surface as Hot, so an enrichment run changed nothing a
+         * contractor actually saw prioritized.
+         *
+         * Clearing scored_at puts the permit back in the score cron's
+         * queue. Safe against duplicate leads: that cron upserts on
+         * (permit_id, contractor_id), so the re-score updates the existing
+         * row. Best-effort — a failure here costs a stale score, never the
+         * enrichment itself. */
+        if (lead.permit_id) {
+          const { error: rescoreErr } = await supabase
+            .from("permits")
+            .update({ scored_at: null })
+            .eq("id", lead.permit_id);
+          if (rescoreErr) {
+            logger.warn("enrich: could not queue lead for re-score", {
+              leadId: lead.id,
+              permitId: lead.permit_id,
+              error: rescoreErr.message,
+            });
+          }
+        }
+      } else {
+        missed++;
+      }
     } else {
       missed++;
     }

@@ -18,59 +18,53 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  ALL_US_STATES,
+  ACTIVE_STATE_MIN_PERMITS,
+  formatPermitsLabel,
+  formatStatesLabel,
+  formatZipsLabel,
+  type UsState,
+} from "@/lib/stats/us-states";
 
-const ALL_US_STATES = [
-  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-  "DC",
-] as const;
-
-export type UsState = (typeof ALL_US_STATES)[number];
+// Re-exported so existing server-side imports of these names from
+// `@/lib/stats/landing` keep working. Client components must import
+// from `@/lib/stats/us-states` directly — this module pulls in the
+// service-role Supabase client.
+export {
+  ALL_US_STATES,
+  ACTIVE_STATE_MIN_PERMITS,
+  formatPermitsLabel,
+  formatStatesLabel,
+  formatZipsLabel,
+};
+export type { UsState };
 
 export interface LandingStats {
   /** Raw permit count — live from `permits` table. */
   permitsCount: number;
   /** "1.4M+" / "1.5M+" — rounded DOWN to nearest 0.1M. */
   permitsLabel: string;
-  /** Distinct US states with at least one new permit in the last 30 days. */
+  /** US states carrying enough permit volume to call "covered" — see
+   *  ACTIVE_STATE_MIN_PERMITS. */
   activeStates: ReadonlyArray<UsState>;
   /** "30+" / "35+" — rounded DOWN to nearest 5. */
   activeStatesLabel: string;
   /** Lead count (live). */
   leadsCount: number;
+  /** Per-state permit counts, keyed by 2-letter code. Drives the coverage
+   *  map's volume shading and per-state tooltips. Empty object when the
+   *  `landing_stats` cache row is unavailable — renderers must treat a
+   *  missing key as "no data", not as zero coverage. */
+  statePermits: Readonly<Partial<Record<UsState, number>>>;
+  /** Distinct 5-digit ZIP codes with at least one permit. 0 when unknown. */
+  zipsCovered: number;
+  /** "18,000+" — rounded DOWN to nearest 1,000. Empty string when unknown. */
+  zipsCoveredLabel: string;
   /** Computed at fetch time — useful for "Last refreshed" UI. */
   fetchedAt: string;
 }
 
-/**
- * Round a number DOWN to the nearest 100,000 and format as "1.4M+".
- * - 1,414,624 → "1.4M+"
- * - 1,499,999 → "1.4M+"
- * - 1,500,000 → "1.5M+"
- * - 999,999   → "0.9M+"
- * - 0         → "0M+"  (callers should fall back to a static label
- *                       for empty databases.)
- */
-export function formatPermitsLabel(n: number): string {
-  const tenths = Math.floor(n / 100_000); // e.g. 14 for 1.4M
-  const millions = (tenths / 10).toFixed(1); // "1.4"
-  return `${millions}M+`;
-}
-
-/**
- * Round a number DOWN to the nearest 5 and format as "30+".
- * - 35 → "35+"
- * - 38 → "35+"
- * - 40 → "40+"
- * - 4  → "0+"   (rare; same fallback caveat as above)
- */
-export function formatStatesLabel(n: number): string {
-  const rounded = Math.floor(n / 5) * 5;
-  return `${rounded}+`;
-}
 
 /**
  * Fallback returned when Supabase env vars aren't set (CI/build-time
@@ -127,7 +121,84 @@ function buildFallback(): LandingStats {
     activeStates: FALLBACK_COVERED_STATES,
     activeStatesLabel: formatStatesLabel(FALLBACK_COVERED_STATES.length),
     leadsCount: FALLBACK_LEADS,
+    // No per-state histogram offline: the map degrades to a lit/unlit
+    // rendering of FALLBACK_COVERED_STATES rather than showing zeros.
+    statePermits: {},
+    zipsCovered: 0,
+    zipsCoveredLabel: "",
     fetchedAt: new Date().toISOString(),
+  };
+}
+
+const VALID_STATES = new Set<string>(ALL_US_STATES);
+
+interface CoveragePayload {
+  permits_total?: unknown;
+  leads_total?: unknown;
+  zips_covered?: unknown;
+  state_permits?: unknown;
+  computed_at?: unknown;
+}
+
+function asPositiveInt(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0
+    ? Math.floor(v)
+    : 0;
+}
+
+/**
+ * Parse the `landing_stats` cache payload into a LandingStats.
+ *
+ * Returns null when the row is missing, malformed, or implausibly small —
+ * the caller then falls through to the live-count path. Written as a
+ * total function over `unknown` because the column is jsonb: a schema
+ * drift or a half-written refresh must degrade, never throw on a
+ * marketing page.
+ */
+function parseCoveragePayload(raw: unknown): LandingStats | null {
+  if (!raw || typeof raw !== "object") return null;
+  const p = raw as CoveragePayload;
+
+  const permitsCount = asPositiveInt(p.permits_total);
+  // Same guard as the live path: we KNOW the catalog is well past this
+  // floor, so a small number means a broken read, not a small database.
+  if (permitsCount < FALLBACK_PERMITS / 2) return null;
+
+  const statePermits: Partial<Record<UsState, number>> = {};
+  if (p.state_permits && typeof p.state_permits === "object") {
+    for (const [code, n] of Object.entries(
+      p.state_permits as Record<string, unknown>,
+    )) {
+      const upper = code.toUpperCase();
+      if (!VALID_STATES.has(upper)) continue; // drops 'US' / '' / junk
+      const count = asPositiveInt(n);
+      if (count > 0) statePermits[upper as UsState] = count;
+    }
+  }
+
+  const activeStates = (Object.keys(statePermits) as UsState[])
+    .filter((s) => (statePermits[s] ?? 0) >= ACTIVE_STATE_MIN_PERMITS)
+    .sort();
+
+  // A payload with permits but no usable histogram is a partial write;
+  // prefer the curated fallback list over rendering an empty map.
+  if (activeStates.length === 0) return null;
+
+  const zipsCovered = asPositiveInt(p.zips_covered);
+
+  return {
+    permitsCount,
+    permitsLabel: formatPermitsLabel(permitsCount),
+    activeStates,
+    activeStatesLabel: formatStatesLabel(activeStates.length),
+    leadsCount: asPositiveInt(p.leads_total),
+    statePermits,
+    zipsCovered,
+    zipsCoveredLabel: formatZipsLabel(zipsCovered),
+    fetchedAt:
+      typeof p.computed_at === "string"
+        ? p.computed_at
+        : new Date().toISOString(),
   };
 }
 
@@ -139,6 +210,42 @@ export async function getLandingStats(): Promise<LandingStats> {
     return buildFallback();
   }
   const supabase = createAdminClient();
+
+  // Preferred path: the `landing_stats` cache (migration 00115). One
+  // primary-key lookup, ~1 ms, and it carries the per-state histogram that
+  // no request-path query can afford — measured 2026-08-04, the equivalent
+  // `GROUP BY state` is a 37s parallel seq scan with an 11 MB external
+  // merge, versus PostgREST's 8s ceiling. That gap is exactly why the
+  // covered-states list below was frozen as a hand-curated array in May
+  // while the database had grown from 25 states to 46.
+  //
+  // Missing table (migration not yet applied) or missing row both fall
+  // through to the legacy count path, so this is safe to deploy in either
+  // order.
+  try {
+    // Promise.resolve() because PostgrestBuilder is a thenable, not a
+    // real Promise — Promise.race (inside withTimeout) needs the latter.
+    const cached = await withTimeout(
+      Promise.resolve(
+        supabase
+          .from("landing_stats")
+          .select("value")
+          .eq("key", "coverage")
+          .maybeSingle(),
+      ),
+      STATS_FETCH_TIMEOUT_MS,
+      "getLandingStats cache",
+    );
+    if (!cached.error && cached.data) {
+      const parsed = parseCoveragePayload(cached.data.value);
+      if (parsed) return parsed;
+    }
+  } catch (err) {
+    console.warn(
+      "[landing-stats] coverage cache unavailable, falling back to counts:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 
   // Use planned counts (no full-table scan) — fast even on the 1.4M
   // permits table. Supabase returns the planner's row estimate, which
@@ -263,9 +370,11 @@ export async function getLandingStats(): Promise<LandingStats> {
     activeStates,
     activeStatesLabel: formatStatesLabel(activeStates.length),
     leadsCount,
+    // Legacy path has no histogram — the map falls back to lit/unlit.
+    statePermits: {},
+    zipsCovered: 0,
+    zipsCoveredLabel: "",
     fetchedAt: new Date().toISOString(),
   };
 }
 
-/** All 50 US states + DC, in stable order. Useful for renderers. */
-export { ALL_US_STATES };

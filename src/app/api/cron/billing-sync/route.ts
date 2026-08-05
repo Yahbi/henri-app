@@ -40,12 +40,19 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     let updated = 0;
     const issues: string[] = [];
 
-    const STRIPE_TO_PLAN: Record<string, string> = {
-      [process.env.STRIPE_FOUNDER_PRICE_ID ?? "___"]: "founder",
-      [process.env.STRIPE_STARTER_PRICE_ID ?? "___"]: "starter",
-      [process.env.STRIPE_PRO_PRICE_ID ?? "___"]: "pro",
-      [process.env.STRIPE_ENTERPRISE_PRICE_ID ?? "___"]: "enterprise",
-    };
+    /* Build the price->plan map by FILTERING unset env vars, mirroring
+     * buildPriceMap() in /api/webhooks/stripe. The previous literal used a
+     * `"___"` placeholder key, so two unset tier vars collided on one key
+     * and whichever was computed last silently won. */
+    const STRIPE_TO_PLAN: Record<string, string> = {};
+    for (const [priceId, planName] of [
+      [process.env.STRIPE_FOUNDER_PRICE_ID, "founder"],
+      [process.env.STRIPE_STARTER_PRICE_ID, "starter"],
+      [process.env.STRIPE_PRO_PRICE_ID, "pro"],
+      [process.env.STRIPE_ENTERPRISE_PRICE_ID, "enterprise"],
+    ] as const) {
+      if (priceId) STRIPE_TO_PLAN[priceId] = planName;
+    }
 
     for (const profile of profiles ?? []) {
       // Deadline guard: return a clean partial instead of a hard 504.
@@ -57,7 +64,31 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         synced++;
 
         const priceId = sub.items.data[0]?.price?.id ?? "";
-        const stripePlan = STRIPE_TO_PLAN[priceId] ?? "starter";
+        const stripePlan = STRIPE_TO_PLAN[priceId];
+
+        /* FAIL CLOSED on an unrecognized price.
+         *
+         * The previous `?? "starter"` fallback granted the $749 tier — and
+         * its 5-ZIP territory entitlement — to any subscription whose price
+         * was not one of the four configured plans. The $19 extra-ZIP add-on
+         * hits exactly that path. In the reverse direction, a missing
+         * STRIPE_ENTERPRISE_PRICE_ID would silently demote a real $2,555
+         * customer to Starter overnight.
+         *
+         * Skipping leaves the profile untouched and records the price in the
+         * cron summary so a misconfigured env var surfaces instead of
+         * quietly rewriting entitlements. */
+        if (!stripePlan) {
+          issues.push(
+            `Profile ${profile.id}: unmapped Stripe price ${priceId} — skipped (plan left as ${profile.plan})`,
+          );
+          logger.warn("billing-sync: unmapped Stripe price", {
+            profileId: profile.id,
+            priceId,
+            currentPlan: profile.plan,
+          });
+          continue;
+        }
 
         /* Map Stripe status to an active/inactive determination */
         const isActive = ["active", "trialing"].includes(sub.status);

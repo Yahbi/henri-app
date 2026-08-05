@@ -55,7 +55,12 @@ const plans: Plan[] = [
     features: [
       "Everything in Starter",
       "12 ZIP territories",
-      "Daily license verification",
+      // "Daily license verification" was listed here until 2026-08-04.
+      // Removed for two reasons: it isn't a Pro differentiator (the
+      // signup license check applies to every plan), and it isn't true —
+      // src/lib/license/verify.ts makes no HTTP call to any licensing
+      // board; every code path returns "pending", and nothing in the
+      // score cron or the leads API gates on license status.
       "Priority email support",
     ],
   },
@@ -68,6 +73,12 @@ const plans: Plan[] = [
     features: [
       "Everything in Pro",
       "20 ZIP territories",
+      // The one differentiator that is actually enforced in code:
+      // src/lib/auth/trade-gating.ts gates every plan below Enterprise
+      // to the contractor's own registered trade. It was undocumented
+      // on this page, which is the single biggest surprise a buyer
+      // could hit after paying.
+      "All trades visible (general-contractor tier)",
       "Dedicated account manager",
       "Custom onboarding",
     ],
@@ -192,7 +203,11 @@ function PlanSelectionContent() {
         </div>
 
         {/* Plan Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+        <div
+          className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8"
+          role="radiogroup"
+          aria-label="Choose your plan"
+        >
           {plans.map((plan) => {
             const isSelected = selected === plan.id;
 
@@ -270,8 +285,14 @@ function PlanSelectionContent() {
                     ))}
                   </ul>
 
-                  {/* Select Button */}
+                  {/* Select Button — the keyboard-operable control for the
+                      card. `role="radio"` + `aria-checked` makes the
+                      selection state audible; the card's own onClick is
+                      a mouse-only convenience on top of it. */}
                   <Button
+                    role="radio"
+                    aria-checked={isSelected}
+                    aria-label={`${plan.name} plan, $${plan.price.toLocaleString()} per month, ${plan.zips} ZIP territories`}
                     variant={isSelected ? "primary" : "outline"}
                     size="sm"
                     className="w-full mt-4"
@@ -307,6 +328,27 @@ function PlanSelectionContent() {
         >
           {saving ? "Saving..." : "Continue to payment"}
         </Button>
+
+        {/* What the tiers actually change, stated plainly. Everything
+            here is enforced in code: ZIP caps by claim_territory
+            (migration 00088) and trade visibility by trade-gating.ts. */}
+        <p className="mt-4 text-center text-xs text-muted-foreground">
+          Plans differ by territory count and trade visibility. Every plan
+          includes the same lead scoring and outreach tools, and the same
+          signup license check &mdash; we cross-check your license number
+          against the public state roster for the states we carry rosters
+          for. Territory changes take effect at the next billing cycle.
+          Cancel anytime &mdash; no refunds on digital products.
+        </p>
+
+        <div className="mt-6 text-center">
+          <Link
+            href="/onboarding/license"
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+          >
+            Back to license verification
+          </Link>
+        </div>
       </div>
     </div>
   );

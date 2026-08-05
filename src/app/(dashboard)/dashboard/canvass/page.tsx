@@ -121,7 +121,7 @@ export default function CanvassPage() {
 }
 
 function CanvassPageInner() {
-  const { data: leads, isLoading } = useLeads({ filters: { status: ["new", "contacted"] } });
+  const { data: leads, isLoading, error: leadsError, refetch } = useLeads({ filters: { status: ["new", "contacted"] } });
 
   const targets = useMemo(() => {
     if (!leads) return [];
@@ -133,11 +133,18 @@ function CanvassPageInner() {
 
   function generateRoute() {
     if (targets.length === 0) return;
-    const waypoints = targets
-      .slice(0, 8)
-      .map((t) => encodeURIComponent(t.address))
+    // Google's Maps URL API requires `destination`; a waypoints-only URL
+    // renders an empty directions pane. Use the last stop as the
+    // destination and everything before it as waypoints.
+    const stops = targets.slice(0, 9).map((t) => t.address);
+    const destination = encodeURIComponent(stops[stops.length - 1]);
+    const waypoints = stops
+      .slice(0, -1)
+      .map((a) => encodeURIComponent(a))
       .join("|");
-    const url = `https://www.google.com/maps/dir/?api=1&waypoints=${waypoints}`;
+    const url =
+      `https://www.google.com/maps/dir/?api=1&destination=${destination}` +
+      (waypoints ? `&waypoints=${waypoints}` : "");
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
@@ -181,9 +188,11 @@ function CanvassPageInner() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-heading font-normal text-foreground">Target List</h2>
           <button
+            type="button"
             onClick={generateRoute}
             disabled={targets.length === 0}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+            title={targets.length === 0 ? "No targets to route yet" : "Opens a Google Maps route for the top stops"}
+            className="flex items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             <MapPin className="h-3.5 w-3.5" />
             Generate Route
@@ -202,6 +211,20 @@ function CanvassPageInner() {
                 <Skeleton className="h-4 w-24" />
               </div>
             ))}
+          </Card>
+        ) : leadsError ? (
+          /* A fetch failure must not read as "no targets in your area". */
+          <Card role="alert" className="flex items-center justify-between gap-3 p-4">
+            <p className="text-sm text-muted-foreground">
+              Couldn&apos;t load your canvass targets &mdash; check your connection and retry.
+            </p>
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="text-sm font-medium text-primary underline underline-offset-2 hover:opacity-80"
+            >
+              Retry
+            </button>
           </Card>
         ) : targets.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 border border-dashed border-border rounded-xl text-center">

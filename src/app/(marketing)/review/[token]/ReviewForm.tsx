@@ -277,7 +277,7 @@ export function ReviewForm({
         <button
           type="submit"
           disabled={submitting || rating === 0}
-          className="w-full rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-lg bg-cta px-6 py-3 text-sm font-semibold text-cta-foreground shadow-sm transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? "Submitting..." : "Submit Review"}
         </button>

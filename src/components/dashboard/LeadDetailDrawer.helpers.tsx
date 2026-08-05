@@ -91,6 +91,10 @@ export function formatDate(dateStr: string | undefined): string {
   if (!dateStr) return "---";
   try {
     const d = new Date(dateStr);
+    // `new Date("garbage")` doesn't throw — it yields an Invalid Date whose
+    // toLocaleDateString returns the literal string "Invalid Date". The
+    // try/catch below never fired for the case it was written for.
+    if (Number.isNaN(d.getTime())) return "---";
     return d.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",

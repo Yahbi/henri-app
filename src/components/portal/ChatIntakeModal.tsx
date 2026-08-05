@@ -41,6 +41,22 @@ function makeMessage(from: Message["from"], text: string): Message {
   return { id: nextMessageId++, from, text };
 }
 
+/**
+ * Pull a 5-digit US ZIP out of whatever the homeowner typed at Step 1.
+ *
+ * Step 1 explicitly offers "Or type the full street address — both work",
+ * and the hero field on /portal has no validation at all, so the value
+ * reaching submit can be a street address, a city name, or a partial ZIP.
+ * `POST /api/intake` requires `/^\d{5}$/` and 400s on anything else.
+ * Returns null when no ZIP is present so callers can ask for one instead
+ * of shipping an unsubmittable payload.
+ */
+export function extractZip(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const m = raw.trim().match(/\b\d{5}\b/);
+  return m ? m[0] : null;
+}
+
 /* Audit-04-29 priority D step 2 — refactor map:
  *   - Constants + presentational primitives → ./ChatIntakeModal.parts
  *     (TRADES, TIMELINES, BUDGETS, ProgressDots, HenriBubble,
@@ -71,6 +87,9 @@ export function ChatIntakeModal({
   // Answers
   const [selectedTrade, setSelectedTrade] = useState(initialTrade);
   const [address, setAddress] = useState(initialZip);
+  // Inline Step-1 validation message. Without it a non-ZIP entry sailed
+  // through to a terminal 400 seven steps later.
+  const [addressError, setAddressError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState("");
   const [budget, setBudget] = useState("");
   const [description, setDescription] = useState("");
@@ -89,6 +108,11 @@ export function ChatIntakeModal({
   // user can re-submit the already-collected payload without redoing the
   // whole flow (all answers are still in state).
   const [submitFailed, setSubmitFailed] = useState(false);
+  // Distinguishes "the server rejected a field" (a Retry can never fix
+  // it — the user must go back) from "the request didn't land" (Retry is
+  // the right control). Before this, both rendered the same dead-end
+  // Retry button plus a message blaming the homeowner's connection.
+  const [submitFieldError, setSubmitFieldError] = useState<"zip" | "other" | null>(null);
   const [matchedContractor, setMatchedContractor] = useState<MatchContractor | null>(null);
   // Captured from the /api/intake POST response so the "Done" button can
   // redirect the homeowner to their persistent project page rather than
@@ -150,6 +174,7 @@ export function ChatIntakeModal({
       setMessages(seedMessages);
       setSelectedTrade(initialTrade);
       setAddress(initialZip);
+      setAddressError(null);
       setTimeline("");
       setBudget("");
       setDescription("");
@@ -161,6 +186,7 @@ export function ChatIntakeModal({
       setScore(0);
       setIsComputing(false);
       setSubmitFailed(false);
+      setSubmitFieldError(null);
       setIsRefinement(false);
       setRefinementIndex(0);
       setRefinementAnswers([]);
@@ -246,8 +272,23 @@ export function ChatIntakeModal({
   );
 
   const handleAddressSubmit = useCallback(() => {
-    if (!address.trim()) return;
-    advance(address.trim(), 2);
+    const typed = address.trim();
+    if (!typed) return;
+    // Step 1 invites "ZIP code or address", but POST /api/intake requires
+    // /^\d{5}$/ and the raw string was sent through unvalidated. A
+    // homeowner who typed a street address completed all seven steps,
+    // handed over name/phone/email/consent, then hit a 400 rendered as
+    // "check your connection" with a Retry button that could never
+    // succeed and no Back link at the terminal step. Validate here, where
+    // the user can still fix it.
+    if (!extractZip(typed)) {
+      setAddressError(
+        "I need a 5-digit ZIP to find contractors near you — include it in the address, or just enter the ZIP.",
+      );
+      return;
+    }
+    setAddressError(null);
+    advance(typed, 2);
   }, [address, advance]);
 
   const handleTimelineSelect = useCallback(
@@ -364,13 +405,25 @@ export function ChatIntakeModal({
   const submitIntake = useCallback(async () => {
     setIsComputing(true);
     setSubmitFailed(false);
+    setSubmitFieldError(null);
+    // Live state wins over the frozen props. `initialZip`/`initialTrade`
+    // are set once by openChat() and never change while the modal is
+    // mounted, but Back navigation deliberately preserves answers, so a
+    // homeowner can correct their ZIP or trade at Step 0/1 — and the old
+    // `initialZip || address` precedence threw that correction away and
+    // submitted the stale value. Lines 280 and 319 already used
+    // `selectedTrade || initialTrade`; only the submit payload inverted
+    // it. Also derive the ZIP so a street address (which Step 1 invites)
+    // doesn't 400 against the server's /^\d{5}$/.
+    const resolvedZip = extractZip(address) ?? extractZip(initialZip) ?? "";
+    const resolvedTrade = (selectedTrade || initialTrade || "").trim();
     try {
       const res = await fetch("/api/intake", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          zip: initialZip || address || "",
-          trade: initialTrade || selectedTrade || "",
+          zip: resolvedZip,
+          trade: resolvedTrade,
           timeline: timeline || null,
           budget_range: budget || null,
           description: description || null,
@@ -386,8 +439,38 @@ export function ChatIntakeModal({
           consent_text_version: "v1.2026-05-09",
         }),
       });
+      if (res.status === 400) {
+        // Validation rejection, not a network problem. The generic catch
+        // below blamed the homeowner's connection and offered a Retry
+        // that re-POSTed the identical invalid payload forever. Read the
+        // Zod `issues` the API already returns, name the field, and let
+        // the user go back and fix it.
+        const body = (await res.json().catch(() => null)) as
+          | { error?: string; issues?: Array<{ path?: (string | number)[]; message?: string }> }
+          | null;
+        const issues = body?.issues ?? [];
+        const zipIssue = issues.find((i) => i.path?.[0] === "zip");
+        const firstIssue = issues[0];
+        setScore(null);
+        setSubmitFailed(true);
+        setSubmitFieldError(zipIssue ? "zip" : firstIssue ? "other" : "other");
+        setMessages((prev) => [
+          ...prev,
+          makeMessage(
+            "henri",
+            zipIssue
+              ? "I couldn't read a valid 5-digit ZIP code for this project. Go back to the location step and enter your ZIP, then submit again."
+              : firstIssue?.message
+                ? `I couldn't submit this: ${firstIssue.message}. Go back and fix that, then try again.`
+                : (body?.error ?? "Some of the details didn't look right. Go back and check them, then try again."),
+          ),
+        ]);
+        setIsComputing(false);
+        return;
+      }
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const result = await res.json();
+      setSubmitFieldError(null);
       // Server computes the real score via the deterministic scoring
       // engine. If it's missing for any reason, omit the score from
       // the UI rather than faking one with Math.random — the prior
@@ -431,6 +514,22 @@ export function ChatIntakeModal({
       setIsComputing(false);
     }
   }, [initialZip, initialTrade, address, selectedTrade, timeline, budget, description, refinementAnswers, contactName, contactPhone, contactEmail, consentGiven]);
+
+  /* Recover from a server-side validation rejection at the terminal
+   * step. Step 6 renders no Back link (going back after a successful
+   * submit would be confusing), so without this a 400 was terminal. All
+   * answers stay in state — only `step` rewinds. */
+  const handleFixStep = useCallback((target: number) => {
+    setSubmitFailed(false);
+    setSubmitFieldError(null);
+    setScore(0);
+    if (target === 1) setAddressError(null);
+    setStep(target);
+    setMessages((prev) => [
+      ...prev,
+      makeMessage("henri", HENRI_MESSAGES[target] ?? HENRI_MESSAGES[0]),
+    ]);
+  }, []);
 
   const handleContactSubmit = useCallback(() => {
     if (!validateContact()) return;
@@ -487,7 +586,7 @@ export function ChatIntakeModal({
         {/* ---- Header ---- */}
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-cta text-sm font-bold text-cta-foreground">
               H
             </div>
             <div>
@@ -542,8 +641,9 @@ export function ChatIntakeModal({
               selectedTrade={selectedTrade}
               onTradeSelect={handleTradeSelect}
               address={address}
-              onAddressChange={setAddress}
+              onAddressChange={(v) => { setAddress(v); setAddressError(null); }}
               onAddressSubmit={handleAddressSubmit}
+              addressError={addressError}
               timeline={timeline}
               onTimelineSelect={handleTimelineSelect}
               budget={budget}
@@ -571,7 +671,9 @@ export function ChatIntakeModal({
               matchedContractor={matchedContractor}
               intakeId={intakeId}
               submitFailed={submitFailed}
+              submitFieldError={submitFieldError}
               onRetrySubmit={submitIntake}
+              onFixStep={handleFixStep}
               onClose={onClose}
             />
 

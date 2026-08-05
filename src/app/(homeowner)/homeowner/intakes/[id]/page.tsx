@@ -95,7 +95,15 @@ export default function HomeownerIntakePage() {
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (userLoading || !user) return;
+    if (userLoading) return;
+    if (!user) {
+      // Auth resolved with no user. Previously this returned early and
+      // `loading` never cleared, pinning the page on skeleton bars
+      // forever with no message and no way out.
+      setLoading(false);
+      setError("Sign in with the email you used for this project to view it.");
+      return;
+    }
     let cancelled = false;
 
     (async () => {
@@ -204,9 +212,13 @@ export default function HomeownerIntakePage() {
     timeStyle: "short",
   });
 
-  // Expected-contact window: today's date + 1 hour if matched, tomorrow otherwise.
+  // Expected-contact window: submission + 1h if matched, +24h otherwise.
+  // Only meaningful while it's still in the future — an intake submitted
+  // three weeks ago used to render "Expected contact by Tue 3:00 PM"
+  // pointing at a moment three weeks in the past.
   const expected = new Date(intake.created_at);
   expected.setHours(expected.getHours() + (intake.status === "matched" ? 1 : 24));
+  const expectedIsFuture = expected.getTime() > Date.now();
   const expectedLabel = expected.toLocaleString(undefined, {
     weekday: "short",
     hour: "numeric",
@@ -324,23 +336,48 @@ export default function HomeownerIntakePage() {
               {intake.matched_lead_id && (
                 <Link
                   href={`/homeowner/messages?thread=${intake.matched_lead_id}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm font-semibold text-cta-foreground transition-opacity hover:opacity-90"
                 >
                   <MessageSquare className="h-4 w-4" /> Message
                 </Link>
               )}
             </div>
           </div>
+          {/* Copy fix 2026-08-04: promised "an email and SMS when they
+              reach out". There is no such notification — nothing watches
+              for contractor outreach, and SMS depends on Twilio, which
+              isn't provisioned. Say what the homeowner can actually rely
+              on: the contractor has their details, and the message thread
+              lives here. Also stop rendering a past-dated "expected by". */}
           <p className="mt-4 rounded-md bg-bg-subtle p-3 text-xs text-muted-foreground">
-            Expected contact by <strong>{expectedLabel}</strong>. You&apos;ll get an
-            email and SMS when they reach out.
+            {expectedIsFuture ? (
+              <>
+                They usually reach out by <strong>{expectedLabel}</strong>.{" "}
+              </>
+            ) : (
+              <>Haven&apos;t heard from them yet? </>
+            )}
+            {intake.matched_lead_id ? (
+              <>
+                You can message them directly from this page &mdash; replies show
+                up in{" "}
+                <Link href="/homeowner/messages" className="text-primary hover:underline">
+                  Messages
+                </Link>
+                .
+              </>
+            ) : (
+              <>They have your contact details and will call or email you.</>
+            )}
           </p>
         </section>
       ) : (
         <section className="mt-8 rounded-xl border border-dashed border-border bg-card p-6 text-center">
+          {/* "You'll get an email within 24 hours" was an SLA nothing
+              enforces — no job or cron chases unmatched intakes. */}
           <p className="text-sm text-muted-foreground">
             We&apos;re still matching your project with a local contractor.
-            You&apos;ll get an email within 24 hours.
+            Check back here &mdash; this page updates as soon as one is assigned.
           </p>
         </section>
       )}
@@ -440,15 +477,12 @@ export default function HomeownerIntakePage() {
               </span>
             )}
           </div>
+          {/* /settings/account is the CONTRACTOR settings surface; a
+              homeowner sent there gets a contractor-shaped page. Point at
+              the control that actually applies to them instead. */}
           <p className="mt-3 text-xs text-muted-foreground">
-            Only your matched contractor can see this. Update it from{" "}
-            <Link
-              href="/settings/account"
-              className="text-primary hover:underline"
-            >
-              account settings
-            </Link>
-            .
+            Only your matched contractor can see this. To stop sharing it, use
+            Withdraw this project above.
           </p>
         </section>
       )}

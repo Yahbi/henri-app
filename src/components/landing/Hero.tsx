@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
 import { CoverageMap } from "@/components/landing/CoverageMap";
-import type { UsState } from "@/lib/stats/landing";
+import type { UsState } from "@/lib/stats/us-states";
 
 /**
  * Hero block on the marketing landing page.
@@ -25,13 +25,33 @@ interface HeroProps {
   permitsLabel: string;
   activeStatesLabel: string;
   activeStates: readonly UsState[];
+  /** Live per-state permit counts — shades the coverage map by volume. */
+  statePermits?: Readonly<Partial<Record<UsState, number>>>;
+  /** "18,000+" — omitted when the coverage cache hasn't been computed. */
+  zipsCoveredLabel?: string;
 }
 
-export function Hero({ permitsLabel, activeStatesLabel, activeStates }: HeroProps) {
+export function Hero({
+  permitsLabel,
+  activeStatesLabel,
+  activeStates,
+  statePermits,
+  zipsCoveredLabel,
+}: HeroProps) {
+  // The third badge only earns its place when it carries a real number.
+  // With no ZIP count available it falls back to the refresh cadence
+  // rather than rendering an empty or invented stat.
   const stats = [
     { label: `${permitsLabel} Permits Tracked`, top: "8%", left: "2%", delay: "0s" },
     { label: `${activeStatesLabel} States Covered`, top: "44%", left: "-2%", delay: "0.2s" },
-    { label: "Refreshed daily", top: "78%", left: "4%", delay: "0.4s" },
+    {
+      label: zipsCoveredLabel
+        ? `${zipsCoveredLabel} ZIP Codes`
+        : "Refreshed daily",
+      top: "78%",
+      left: "4%",
+      delay: "0.4s",
+    },
   ] as const;
 
   return (
@@ -135,7 +155,15 @@ export function Hero({ permitsLabel, activeStatesLabel, activeStates }: HeroProp
               </Badge>
             ))}
 
-            <CoverageMap activeStates={activeStates} />
+            <CoverageMap
+              activeStates={activeStates}
+              statePermits={statePermits}
+              caption={
+                zipsCoveredLabel
+                  ? `${permitsLabel} permits across ${zipsCoveredLabel} ZIP codes. Hover a state for its exact count.`
+                  : undefined
+              }
+            />
           </div>
         </div>
       </div>

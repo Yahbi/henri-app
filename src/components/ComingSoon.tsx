@@ -27,7 +27,7 @@ export function ComingSoon({
       <div className="mt-6 flex flex-wrap justify-center gap-3">
         <Link
           href="/dashboard"
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          className="rounded-lg bg-cta px-4 py-2 text-sm font-semibold text-cta-foreground transition-opacity hover:opacity-90"
         >
           Back to leads
         </Link>

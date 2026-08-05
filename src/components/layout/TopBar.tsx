@@ -2,10 +2,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, ChevronDown, LogOut, Settings, User } from "lucide-react";
+import { ChevronDown, LogOut, Settings, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
-import { Badge } from "@/components/ui/badge";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 
 interface TopBarProps {
@@ -56,20 +55,12 @@ export function TopBar({ title = "Dashboard" }: TopBarProps) {
           <ThemeSwitcher />
         </div>
 
-        {/* Notification bell */}
-        <button
-          className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          aria-label="Notifications (3 unread)"
-        >
-          <Bell className="h-4 w-4" aria-hidden="true" />
-          <Badge
-            variant="destructive"
-            className="absolute -top-1.5 -right-1.5 h-4 min-w-4 px-1 text-[10px] flex items-center justify-center"
-            aria-hidden="true"
-          >
-            3
-          </Badge>
-        </button>
+        {/* Notification bell removed 2026-08-04. It had no onClick, no
+         * state and a hardcoded "3 unread" badge — a fabricated metric on
+         * a dead tab stop. Every route that mounts this bar sits inside
+         * the (dashboard) group, whose layout already renders the real,
+         * data-backed <NotificationDropdown /> via DashboardTopBar, so the
+         * two bells stacked and disagreed. */}
 
         {/* User avatar dropdown */}
         <div ref={dropdownRef} className="relative">
@@ -94,8 +85,10 @@ export function TopBar({ title = "Dashboard" }: TopBarProps) {
               className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-card shadow-lg py-1 z-50"
               role="menu"
             >
+              {/* Both entries used to point at /settings/billing, so
+               * "Settings" and "Profile" landed on the invoices page. */}
               <a
-                href="/settings/billing"
+                href="/dashboard/settings"
                 className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors"
                 role="menuitem"
               >
@@ -103,7 +96,7 @@ export function TopBar({ title = "Dashboard" }: TopBarProps) {
                 Settings
               </a>
               <a
-                href="/settings/billing"
+                href="/settings/account"
                 className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors"
                 role="menuitem"
               >

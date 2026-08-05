@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
+import { clampLimit } from "@/lib/validation/params";
 
 /* Zod schema — PATCH body. Caps ids at 500 so a single request can't
  * carry an unbounded IN-list into the update query. */
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const limit = Number(request.nextUrl.searchParams.get("limit")) || 20;
+  const limit = clampLimit(request.nextUrl.searchParams.get("limit"), 20, 100);
   const unreadOnly = request.nextUrl.searchParams.get("unread") === "true";
 
   let query = supabase

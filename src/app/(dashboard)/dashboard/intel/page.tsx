@@ -308,6 +308,10 @@ export default function IntelPage() {
 
   const maxTradeCount = tradeBreakdown.length > 0 ? tradeBreakdown[0].count : 1;
 
+  // Count of cards the active chip is holding back (wedge #3 — the filter
+  // bar must never hide rows without saying so).
+  const hiddenByFilter = intelCards.length - filtered.length;
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
       {/* Header */}
@@ -440,20 +444,27 @@ export default function IntelPage() {
       <StageHistogram leads={leads} isLoading={isLoading} />
 
       {/* Filter Bar */}
-      <div className="flex gap-2 flex-wrap">
+      <div className="flex gap-2 flex-wrap items-center">
         {FILTERS.map((f) => (
           <button
             key={f}
             onClick={() => setActiveFilter(f)}
+            aria-pressed={activeFilter === f}
             className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
               activeFilter === f
-                ? "bg-primary text-white"
+                ? "bg-cta text-cta-foreground"
                 : "bg-card border border-border text-muted-foreground hover:text-foreground"
             }`}
           >
             {f}
           </button>
         ))}
+        {/* Never silently drop rows — say how many the active chip hides. */}
+        {hiddenByFilter > 0 && (
+          <span className="text-xs text-muted-foreground ml-1">
+            {hiddenByFilter.toLocaleString()} filtered out
+          </span>
+        )}
       </div>
 
       {/* ── 3. Enhanced Intel Cards ── */}
@@ -480,14 +491,12 @@ export default function IntelPage() {
                   <p className="text-sm font-medium text-foreground truncate">{card.address}</p>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <span className="text-xs text-muted-foreground">{card.permitType}</span>
-                    {card.permitNumber && (
-                      <>
-                        <span className="text-xs text-muted-foreground">--</span>
-                        <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-                          #{card.permitNumber}
-                        </span>
-                      </>
-                    )}
+                    {/* `permitNumber` is leads.permit_id — a uuid FK to
+                        permits(id), not a jurisdiction permit number. It
+                        rendered as a raw UUID chip; the Jobs board dropped
+                        the same display for the same reason (2026-06-10).
+                        Restore this once the human-readable
+                        permits.permit_number is on the lead shape. */}
                     {card.locationTag && (
                       <>
                         <span className="text-xs text-muted-foreground">--</span>

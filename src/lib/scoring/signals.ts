@@ -108,10 +108,25 @@ function detailFor(key: ScoreSignalKey, factors: string[], signals: ScoringSigna
       return days < 1 ? "Filed today" : `Filed ~${days} days ago`;
     }
     case "permit_value": {
-      const hit = find([/high value|\$\d|value/i]);
-      if (hit) return hit;
+      // Match ONLY permit-value factors. `scoreValue` pushes two different
+      // shapes into the same untagged array — "High-value permit ($120K)"
+      // from the permit's own declared value, and "High-value property
+      // ($600K)" from the assessed-value bonus. The old /high value|\$\d|
+      // value/i pattern matched the property one too, so a lead with no
+      // permit value but a $600K assessment rendered "Permit value 5/20 —
+      // High-value property ($600K)" and a contractor reasonably read that
+      // as a $600K permit (audit 2026-08-04). Both scoreValue factors end
+      // in " ($...)" preceded by the noun, so anchor on the noun.
+      const permitHit = find([/permit \(\$/i]);
+      if (permitHit) return permitHit;
       if (signals.permitValue && signals.permitValue > 0) {
         return `Permit value $${signals.permitValue.toLocaleString()}`;
+      }
+      // No permit value, but the row may still be non-zero because of the
+      // property-assessment bonus. Name that explicitly instead of
+      // claiming a permit value we don't have.
+      if (signals.propertyValue != null && signals.propertyValue >= 500_000) {
+        return `No permit value on file · property assessed at $${signals.propertyValue.toLocaleString()} (bonus applied)`;
       }
       return "No permit value on file";
     }

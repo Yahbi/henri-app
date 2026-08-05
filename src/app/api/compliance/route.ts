@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllTerritories } from "@/lib/territories/fetch-all";
 import { logger } from "@/lib/logger";
@@ -201,6 +202,22 @@ export async function GET() {
   }
 }
 
+/* ── PATCH body schema ─── */
+const CompliancePatchSchema = z.object({
+  license_number: z.string().trim().min(1).max(60).optional(),
+  license_state: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z]{2}$/u, "license_state must be a 2-letter state code")
+    .transform((v) => v.toUpperCase())
+    .optional(),
+  license_type: z.string().trim().max(80).optional(),
+  license_expiry: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u, "license_expiry must be YYYY-MM-DD")
+    .optional(),
+});
+
 /* ─── PATCH /api/compliance ─── */
 
 export async function PATCH(request: NextRequest) {
@@ -210,14 +227,21 @@ export async function PATCH(request: NextRequest) {
     if (gate.response) return gate.response;
     const user = gate.user;
 
-    const body = await request.json();
+    /* Zod-validated: `license_expiry` lands in a DATE column, so an
+     * unvalidated string used to reach Postgres and come back as a 500
+     * instead of a 400. The state code is normalized to the 2-letter form
+     * the license-roster cross-check expects. */
+    const parsed = CompliancePatchSchema.safeParse(
+      await request.json().catch(() => null)
+    );
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Invalid request" },
+        { status: 400 }
+      );
+    }
     const { license_number, license_state, license_type, license_expiry } =
-      body as {
-        license_number?: string;
-        license_state?: string;
-        license_type?: string;
-        license_expiry?: string;
-      };
+      parsed.data;
 
     // Build update payload — only include provided fields
     const updates: Record<string, unknown> = {

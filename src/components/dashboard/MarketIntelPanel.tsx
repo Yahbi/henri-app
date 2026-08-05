@@ -33,7 +33,7 @@ export function MarketIntelPanel({
 }) {
   const [zip, setZip] = useState<string>(initialZip ?? "");
   const [input, setInput] = useState<string>(initialZip ?? "");
-  const { intel, isLoading, migrationPending, error } = useMarketIntel(zip || null);
+  const { intel, isLoading, migrationPending, error, refresh } = useMarketIntel(zip || null);
 
   return (
     <div className={cn("rounded-xl border border-border bg-card", className)}>
@@ -47,7 +47,12 @@ export function MarketIntelPanel({
           onSubmit={(e) => {
             e.preventDefault();
             const clean = input.slice(0, 5).replace(/[^0-9]/g, "");
-            if (clean.length === 5) setZip(clean);
+            if (clean.length !== 5) return;
+            // Re-submitting the SAME zip set identical state, so React
+            // bailed out and nothing refetched — the only recovery from
+            // an error was to type a different ZIP and back.
+            if (clean === zip) refresh();
+            else setZip(clean);
           }}
           className="flex items-center gap-1.5"
         >
@@ -64,7 +69,7 @@ export function MarketIntelPanel({
           />
           <button
             type="submit"
-            className="px-2.5 py-1 rounded-md bg-primary text-white text-xs font-medium hover:opacity-90 transition-opacity"
+            className="px-2.5 py-1 rounded-md bg-cta text-cta-foreground text-xs font-medium hover:opacity-90 transition-opacity"
           >
             Go
           </button>
@@ -93,9 +98,18 @@ export function MarketIntelPanel({
       )}
 
       {!migrationPending && zip && !isLoading && error && (
-        <div className="px-4 py-6 text-[12px] text-destructive" role="alert">
-          Couldn&apos;t load market intelligence for {zip}. Check your
-          connection and try again.
+        <div className="px-4 py-6 text-[12px] text-destructive space-y-2" role="alert">
+          <p>
+            Couldn&apos;t load market intelligence for {zip}. Check your
+            connection and try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => refresh()}
+            className="font-medium underline underline-offset-2 hover:opacity-80"
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -107,7 +121,7 @@ export function MarketIntelPanel({
         </div>
       )}
 
-      {!migrationPending && intel && (
+      {!migrationPending && !error && intel && (
         <div className="p-4 space-y-4">
           <div className="grid grid-cols-3 gap-3 text-center">
             <Metric label="Permits" value={intel.permit_count_90d.toLocaleString()} />
@@ -155,6 +169,12 @@ export function MarketIntelPanel({
                   </li>
                 ))}
               </ul>
+              {/* Never silently drop rows. */}
+              {intel.top_applicants.length > 5 && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  +{intel.top_applicants.length - 5} more not shown
+                </p>
+              )}
             </div>
           )}
 
@@ -219,6 +239,11 @@ function TradeList({ label, items }: { label: string; items: MarketIntelTrade[] 
           </div>
         ))}
       </div>
+      {items.length > 5 && (
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          +{items.length - 5} more not shown
+        </p>
+      )}
     </div>
   );
 }

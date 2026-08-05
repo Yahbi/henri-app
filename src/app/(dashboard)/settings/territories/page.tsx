@@ -17,14 +17,27 @@ interface Territory {
 import { PLAN_ZIP_LIMITS } from "@/lib/plans/constants";
 
 export default function TerritoriesPage() {
-  const { user, profile } = useUser();
+  const { user, profile, loading: userLoading } = useUser();
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [loading, setLoading] = useState(true);
+  // A failed query must never render as "you own nothing" — territory
+  // exclusivity is the paid product, so a false empty here reads as
+  // "Henri lost my territories". Previously the `error` from the
+  // Supabase call was dropped entirely and an RLS denial / timeout /
+  // network failure fell straight through to the empty state.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const maxZips = PLAN_ZIP_LIMITS[profile?.plan ?? "starter"] ?? 5;
 
   const loadTerritories = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      // Auth resolved with no user: stop the skeleton rather than
+      // spinning forever.
+      if (!userLoading) setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
     const supabase = createClient();
     // Paginate — PostgREST silently caps unbounded selects at 1000 rows
     // and the founder has 5,601 claimed ZIPs. Client-side version of
@@ -33,19 +46,26 @@ export default function TerritoriesPage() {
     const PAGE = 1000;
     const rows: Territory[] = [];
     for (let offset = 0; offset < 60_000; offset += PAGE) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("territories")
         .select("id, zip, claimed_at")
         .eq("contractor_id", user.id)
         .order("claimed_at", { ascending: true })
         .range(offset, offset + PAGE - 1);
+      if (error) {
+        // Surface it — a mid-pagination failure previously truncated the
+        // list silently and looked like a complete result.
+        setLoadError(error.message || "Couldn't load your territories.");
+        setLoading(false);
+        return;
+      }
       if (!data || data.length === 0) break;
       rows.push(...(data as Territory[]));
       if (data.length < PAGE) break;
     }
     setTerritories(rows);
     setLoading(false);
-  }, [user]);
+  }, [user, userLoading]);
 
   // Fetch territories on mount; setState happens after IO inside loadTerritories
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -66,10 +86,13 @@ export default function TerritoriesPage() {
             Your exclusive ZIP code territories
           </p>
         </div>
-        {territories.length < maxZips && (
+        {/* Gate the CTA and the counter on a successful load — offering
+            "Add ZIP" against an unknown current count sends a contractor
+            at their cap into a raw `tier_cap_exceeded` error. */}
+        {!loadError && !loading && territories.length < maxZips && (
           <Link
             href="/onboarding/territory"
-            className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
+            className="px-4 py-2 bg-cta text-cta-foreground text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
           >
             Add ZIP
           </Link>
@@ -83,7 +106,9 @@ export default function TerritoriesPage() {
             {profile?.plan ?? "Starter"} plan
           </p>
           <p className="text-sm text-foreground mt-0.5">
-            {territories.length} of {maxZips} ZIP codes claimed
+            {loadError
+              ? `— of ${maxZips} ZIP codes claimed`
+              : `${territories.length} of ${maxZips} ZIP codes claimed`}
           </p>
         </div>
         <Link
@@ -107,6 +132,26 @@ export default function TerritoriesPage() {
             </div>
           ))}
         </div>
+      ) : loadError ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm"
+        >
+          <p className="font-semibold text-destructive">
+            Couldn&apos;t load your territories
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            This is <strong className="text-foreground">not</strong> your real
+            territory list — any ZIPs you hold are still yours. {loadError}
+          </p>
+          <button
+            type="button"
+            onClick={() => void loadTerritories()}
+            className="mt-3 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground transition-opacity hover:opacity-90"
+          >
+            Retry
+          </button>
+        </div>
       ) : territories.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 border border-dashed border-border rounded-xl text-center">
           <MapPin className="h-8 w-8 text-muted-foreground mb-3" />
@@ -116,7 +161,7 @@ export default function TerritoriesPage() {
           </p>
           <Link
             href="/onboarding/territory"
-            className="mt-4 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
+            className="mt-4 px-4 py-2 bg-cta text-cta-foreground text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
           >
             Claim your first ZIP
           </Link>

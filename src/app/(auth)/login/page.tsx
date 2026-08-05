@@ -187,8 +187,16 @@ export default function LoginPage() {
                 </div>
               </div>
 
+              {/* a11y (2026-08-04): the field had only a placeholder, so it
+                * announced as an unlabelled edit box once the user typed
+                * (placeholders are not accessible names). Added a visually
+                * hidden label bound by id. */}
               <div className="space-y-2">
+                <label htmlFor="magic-link-email" className="sr-only">
+                  Email address
+                </label>
                 <input
+                  id="magic-link-email"
                   type="email"
                   value={magicEmail}
                   onChange={(e) => setMagicEmail(e.target.value)}

@@ -12,9 +12,10 @@ import {
  * (homeowner / contractor / spec-investor). Drawer surfacing for the
  * Phase 1.3 DIY-vs-pro feature.
  *
- * The chip is tappable on touch devices — opens a tooltip-like
- * popover with the outreach hint. Desktop falls back to the native
- * `title` attribute.
+ * The outreach hint renders as visible text under the chip. It used to
+ * live only in a native `title`, which is unreachable on touch and by
+ * keyboard — and the docstring claimed a tap-popover that was never
+ * built.
  *
  * Color tokens:
  *   - homeowner → primary (terracotta) — high outreach intent
@@ -49,16 +50,21 @@ export function ApplicantBadge({ permit, lead, className }: ApplicantBadgeProps)
         : "bg-[color-mix(in_srgb,var(--warm)_12%,transparent)] text-warm border-[color-mix(in_srgb,var(--warm)_30%,transparent)]";
 
   return (
-    <span
-      title={result.hint}
-      className={[
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        toneClass,
-        className ?? "",
-      ].join(" ")}
-    >
-      <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
-      <span className="truncate max-w-[180px]">{result.label}</span>
+    <span className={["inline-flex flex-col gap-0.5", className ?? ""].join(" ")}>
+      <span
+        className={[
+          "inline-flex items-center gap-1.5 self-start rounded-full border px-2 py-0.5 text-[11px] font-medium",
+          toneClass,
+        ].join(" ")}
+      >
+        <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span className="truncate max-w-[180px]">{result.label}</span>
+      </span>
+      {result.hint && (
+        <span className="text-[10px] leading-tight text-muted-foreground">
+          {result.hint}
+        </span>
+      )}
     </span>
   );
 }

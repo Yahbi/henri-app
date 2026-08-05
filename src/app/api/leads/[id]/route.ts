@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { LeadPatchBodySchema, parseBody } from "@/lib/schemas/api";
 import { requireContractor } from "@/lib/auth/requireContractor";
+import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/params";
 
 /* GET /api/leads/[id] — fetch single lead with permit data */
 export async function GET(
@@ -9,6 +11,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "Malformed lead id" }, { status: 400 });
+  }
+
   const supabase = await createClient();
   const gate = await requireContractor(supabase);
   if (gate.response) return gate.response;
@@ -21,7 +27,10 @@ export async function GET(
     .eq("contractor_id", user.id)
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 404 });
+  if (error) {
+    logger.error("leads.get failed", { message: error.message });
+    return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+  }
   return NextResponse.json(data);
 }
 
@@ -31,12 +40,16 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "Malformed lead id" }, { status: 400 });
+  }
+
   const supabase = await createClient();
   const gate = await requireContractor(supabase);
   if (gate.response) return gate.response;
   const user = gate.user;
 
-  const raw = await req.json();
+  const raw = await req.json().catch(() => null);
   const parsed = parseBody(LeadPatchBodySchema, raw);
   if (parsed.response) return parsed.response;
 
@@ -62,6 +75,9 @@ export async function PATCH(
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    logger.error("leads.patch failed", { message: error.message });
+    return NextResponse.json({ error: "Failed to update lead" }, { status: 400 });
+  }
   return NextResponse.json(data);
 }

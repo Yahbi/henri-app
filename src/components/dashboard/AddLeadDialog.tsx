@@ -184,7 +184,7 @@ export function AddLeadDialog({ open, onClose }: AddLeadDialogProps) {
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="flex-1 px-4 py-2 text-sm font-medium bg-cta text-cta-foreground rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {loading ? "Adding..." : "Add to pipeline"}
             </button>

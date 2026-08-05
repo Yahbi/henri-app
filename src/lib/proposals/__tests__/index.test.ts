@@ -82,7 +82,8 @@ describe("generateProposal", () => {
       permitDescription: "10kW PV array, no battery",
     });
     expect(p.headline).toMatch(/Solar/);
-    expect(p.insight).toMatch(/40%\+/);
+    expect(p.insight).toMatch(/comparing installers/);
+    expect(p.insight).toMatch(/speed of response/i);
   });
 
   it("branches general-remodel on kitchen vs bathroom", () => {
@@ -134,23 +135,62 @@ describe("generateProposal", () => {
     expect(p.estimatedRevenue).toMatch(/\$40K - \$70K/);
   });
 
-  it("estimates revenue range from $M value", () => {
+  /* ── Revenue magnitude (audit 2026-08-04) ───────────────────────────
+   * The $M branch used to strip the "M" suffix, parse "$2.5M" as 2.5, and
+   * interpolate it into a template hardcoding "K" — so every $1M+ permit
+   * rendered "$0K - $1K contractor revenue" (1,957 live leads in the
+   * $1M-$10M band collapsed to $0). These tests pin the MAGNITUDE, not
+   * just the string shape, so the 1000x bug cannot come back. */
+  it("estimates revenue range from $M value at the correct magnitude", () => {
     const p = generateProposal({
       trade: "adu",
       permitAge: 2,
       value: "$1M",
       permitDescription: "ADU detached",
     });
-    expect(p.estimatedRevenue).toMatch(/\$0K - \$0K|contractor revenue/);
-    // 1.0 * 0.15 = 0.15K rounds to $0K, but the format is preserved.
-    // Real M-range values are typically 1.5-5M which produce sensible bands.
-    const big = generateProposal({
+    // $1M × 40-70% = $400K - $700K. Never "$0K".
+    expect(p.estimatedRevenue).toMatch(/\$400K - \$700K/);
+    expect(p.estimatedRevenue).not.toMatch(/\$0K/);
+
+    const p12 = generateProposal({
       trade: "adu",
       permitAge: 2,
-      value: "$3M",
+      value: "$1.2M",
       permitDescription: "Custom build",
     });
-    expect(big.estimatedRevenue).toContain("contractor revenue");
+    expect(p12.estimatedRevenue).toMatch(/\$480K - \$840K/);
+
+    // Above $1M on the LOW end the band re-formats into $M so it stays
+    // readable instead of printing "$1000K".
+    const p25 = generateProposal({
+      trade: "adu",
+      permitAge: 2,
+      value: "$2.5M",
+      permitDescription: "Custom build",
+    });
+    expect(p25.estimatedRevenue).toMatch(/\$1\.0M - \$1\.8M/);
+    expect(p25.estimatedRevenue).not.toMatch(/\$0K/);
+  });
+
+  it("discloses the derivation of the contract-value band", () => {
+    // Truthfulness: the band is a stated percentage of the permit's OWN
+    // declared value, so a contractor can reproduce the arithmetic. It is
+    // never presented as a measured margin or close rate.
+    const p = generateProposal({
+      trade: "roofing",
+      permitAge: 1,
+      value: "$100K",
+      permitDescription: "Roof replacement",
+    });
+    expect(p.estimatedRevenue).toContain("40-70% of the $100K permit value");
+    expect(p.estimatedRevenue).toContain("not a quote");
+  });
+
+  it("scales linearly across magnitudes (no unit mismatch between K and M)", () => {
+    const k = generateProposal({ trade: "adu", permitAge: 1, value: "$500K" });
+    const m = generateProposal({ trade: "adu", permitAge: 1, value: "$0.5M" });
+    // $500K and $0.5M are the same amount — they must produce the same band.
+    expect(k.estimatedRevenue).toBe(m.estimatedRevenue);
   });
 
   it("returns null revenue when value is missing", () => {
@@ -196,5 +236,83 @@ describe("generateProposal", () => {
       value: null,
     });
     expect(p.headline).toMatch(/New construction permit/);
+  });
+
+  /* ── Unknown permit age (audit 2026-08-04) ──────────────────────────
+   * `lead.permitAge ?? 0` used to turn "we have no filing date" into the
+   * single most urgent value in the model: an "Act Now" badge, a "48
+   * hours — first-mover advantage" window, and a "filed 0 days ago"
+   * sentence. /dashboard/map hardcodes `permitAge: undefined`, so EVERY
+   * lead opened from the map drawer hit this. Unknown must stay unknown. */
+  describe("unknown permit age", () => {
+    for (const missing of [undefined, null] as const) {
+      it(`permitAge=${String(missing)} never claims maximum urgency`, () => {
+        const p = generateProposal({
+          trade: "roofing",
+          permitAge: missing,
+          permitDescription: "Roof replacement",
+        });
+        expect(p.urgency).toBe("low");
+        expect(p.window).toMatch(/date unknown/i);
+        expect(p.window).not.toMatch(/48 hours/);
+      });
+    }
+
+    it("drops the 'filed N days ago' clause from the default proposal", () => {
+      const p = generateProposal({
+        trade: "stuccodonations",
+        type: "commercial",
+        permitAge: null,
+      });
+      expect(p.insight).not.toMatch(/filed \d+ days? ago/i);
+      expect(p.insight).toMatch(/filing date unknown/i);
+      expect(p.insight).toMatch(/commercial permit/);
+    });
+
+    it("treats a non-finite or negative age as unknown, not as fresh", () => {
+      for (const bad of [Number.POSITIVE_INFINITY, Number.NaN, -3]) {
+        const p = generateProposal({ trade: "roofing", permitAge: bad });
+        expect(p.urgency).toBe("low");
+        expect(p.window).toMatch(/date unknown/i);
+      }
+    });
+
+    it("still claims high urgency when the age IS known and fresh", () => {
+      // Guard against over-correcting: a real fresh permit must keep its
+      // first-mover framing.
+      const p = generateProposal({ trade: "roofing", permitAge: 0 });
+      expect(p.urgency).toBe("high");
+      expect(p.window).toMatch(/48 hours/);
+    });
+  });
+
+  /* ── Truthfulness (audit 2026-08-04) ────────────────────────────────
+   * Every insight string is rendered ungated in the drawer's "Predictive
+   * Proposal" block. None of them may assert a metric Henri has never
+   * measured. This is a standing guard, not a one-off assertion. */
+  it("no insight string asserts an unmeasured conversion rate or dollar average", () => {
+    const trades = [
+      "roofing", "hvac", "plumbing", "electrical", "solar", "adu",
+      "general remodel", "unknown-trade", null,
+    ];
+    const descriptions = ["", "replacement", "sewer repipe", "panel 200", "kitchen", "bathroom"];
+
+    for (const trade of trades) {
+      for (const permitDescription of descriptions) {
+        const p = generateProposal({
+          trade,
+          type: "residential",
+          permitAge: 2,
+          permitDescription,
+        });
+        // No percentage claims ("close at 40%+").
+        expect(p.insight).not.toMatch(/\d+\s*%/);
+        // No hardcoded dollar averages ("$35K-$75K", "$80K-$200K+").
+        expect(p.insight).not.toMatch(/\$\d/);
+        // No unquantified close-rate assertions either — the pattern the
+        // marketing sweep already removed from /contractors.
+        expect(p.insight).not.toMatch(/close (at|rate)/i);
+      }
+    }
   });
 });

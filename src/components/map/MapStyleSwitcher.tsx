@@ -55,6 +55,8 @@ export function MapStyleSwitcher({
   // wouldn't change. This flushes any pending pick the moment `map`
   // becomes non-null. Audit 2026-04-30.
   const pendingPickRef = useRef<MapStyleOption | null>(null);
+  /** Trigger button — focus target after the popover closes. */
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Close when the user clicks anywhere outside the popover — including
   // on the map canvas. Matches the Overlay panel pattern.
@@ -69,9 +71,20 @@ export function MapStyleSwitcher({
       () => document.addEventListener("mousedown", handler),
       0,
     );
+    // Escape closes too, and returns focus to the trigger — picking a
+    // style unmounts the button that was just clicked, so without this
+    // focus fell to <body> and there was no keyboard dismiss at all.
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKey);
     return () => {
       clearTimeout(t);
       document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", onKey);
     };
   }, [open]);
 
@@ -91,6 +104,7 @@ export function MapStyleSwitcher({
     // ready yet — eliminates the prior "click does nothing" failure.
     setCurrent(option.value);
     setOpen(false);
+    triggerRef.current?.focus();
     if (!map) {
       // Queue and apply the moment the map mounts.
       pendingPickRef.current = option;
@@ -113,8 +127,10 @@ export function MapStyleSwitcher({
     <div ref={ref} className={cn("absolute z-10", className)}>
       <button
         type="button"
+        ref={triggerRef}
         onClick={() => setOpen((o) => !o)}
         aria-label="Map style"
+        aria-haspopup="menu"
         aria-expanded={open}
         className={cn(
           "flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card/90 shadow-lg backdrop-blur-sm transition-colors hover:bg-accent",
@@ -125,7 +141,7 @@ export function MapStyleSwitcher({
       </button>
 
       {open && (
-        <div className="mt-2 w-56 rounded-lg border border-border bg-card/95 p-3 shadow-lg backdrop-blur-sm">
+        <div role="menu" aria-label="Basemap" className="mt-2 w-56 rounded-lg border border-border bg-card/95 p-3 shadow-lg backdrop-blur-sm">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Basemap
           </h3>
@@ -139,6 +155,8 @@ export function MapStyleSwitcher({
                   <li key={style.value}>
                     <button
                       type="button"
+                      role="menuitemradio"
+                      aria-checked={current === style.value}
                       onClick={() => handleChange(style)}
                       className={cn(
                         "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent",

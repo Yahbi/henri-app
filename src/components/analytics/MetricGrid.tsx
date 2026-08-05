@@ -100,10 +100,15 @@ export function MetricGrid({
         value={avgResponseH != null ? `${avgResponseH.toFixed(1)}h` : "—"}
         sub="Time to first contact"
       />
+      {/* No `sub` benchmark here. The card used to read "Industry avg
+       * $180+" — a literal with no query, no source and no conditional
+       * behind it, rendered even when costPerWin itself was "—". Same
+       * class of fabricated stat BenchmarkWidget already retired for peer
+       * averages; add it back only when a real cohort aggregate exists. */}
       <MetricCard
         label="Cost Per Win"
         value={costPerWin != null ? `$${Math.round(costPerWin)}` : "—"}
-        sub="Industry avg $180+"
+        sub={costPerWin != null ? "Subscription cost per won job" : undefined}
       />
       <MetricCard
         label="Henri ROI"

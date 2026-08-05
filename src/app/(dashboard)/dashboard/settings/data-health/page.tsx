@@ -269,7 +269,7 @@ export default function DataHealthPage() {
       </header>
 
       {error && (
-        <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-4 mb-4 text-[13px] text-rose-700">
+        <div role="alert" className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-4 mb-4 text-[13px] text-rose-700">
           {error}
         </div>
       )}

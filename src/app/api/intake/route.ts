@@ -23,21 +23,26 @@ import { logger } from "@/lib/logger";
 const IntakeBody = z.object({
   zip: z.string().regex(/^\d{5}$/, "zip must be a 5-digit US ZIP code"),
   trade: z.string().min(1).max(100),
-  timeline: z.string().max(100).optional(),
-  budget_range: z.string().max(100).optional(),
-  description: z.string().max(4000).optional(),
-  refinement_answers: z.array(z.unknown()).optional(),
-  photos: z.array(z.string()).optional(),
-  contact_name: z.string().max(200).optional(),
-  contact_phone: z.string().max(40).optional(),
-  contact_email: z.string().email().max(200).optional(),
-  henri_score: z.number().min(0).max(100).optional(),
+  // `.nullish()` (not `.optional()`) throughout: the chat intake client
+  // sends unanswered steps as an explicit `null`, and `.optional()` only
+  // widens to `T | undefined` — every submission 400'd on the null.
+  timeline: z.string().max(100).nullish(),
+  budget_range: z.string().max(100).nullish(),
+  description: z.string().max(4000).nullish(),
+  refinement_answers: z.array(z.unknown()).nullish(),
+  photos: z.array(z.string()).nullish(),
+  contact_name: z.string().max(200).nullish(),
+  contact_phone: z.string().max(40).nullish(),
+  contact_email: z.string().email().max(200).nullish(),
+  // Client always posts null here ("let server compute"); the authoritative
+  // value is the server-side calculateScore() result written below.
+  henri_score: z.number().min(0).max(100).nullish(),
   // Module 5 (2026-05-09) — TCPA-style consent. When true the row gets
   // consent_given_at = NOW(); when false / missing the outreach hygiene
   // gate refuses every send (still creates the in-app notification +
   // quote so the contractor sees the request).
-  consent_given: z.boolean().optional(),
-  consent_text_version: z.string().max(40).optional(),
+  consent_given: z.boolean().nullish(),
+  consent_text_version: z.string().max(40).nullish(),
 });
 
 /* ── Simple in-memory rate limiter (max 5 submissions per IP per hour) ── */
@@ -89,12 +94,27 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    const {
-      zip, trade, timeline, budget_range, description,
-      refinement_answers, photos, contact_name, contact_phone,
-      contact_email, henri_score,
-      consent_given, consent_text_version,
-    } = parsed;
+    /* The schema accepts `null` on every optional field because that is what
+     * the chat intake client actually sends for a skipped step. Normalize to
+     * `undefined` here so the rest of the handler keeps the single
+     * "absent = undefined" convention its helpers and `?? null` defaults are
+     * written against — the null-tolerance belongs at the wire boundary, not
+     * threaded through the pipeline. */
+    const nz = <T,>(v: T | null | undefined): T | undefined => v ?? undefined;
+
+    const zip = parsed.zip;
+    const trade = parsed.trade;
+    const timeline = nz(parsed.timeline);
+    const budget_range = nz(parsed.budget_range);
+    const description = nz(parsed.description);
+    const refinement_answers = nz(parsed.refinement_answers);
+    const photos = nz(parsed.photos);
+    const contact_name = nz(parsed.contact_name);
+    const contact_phone = nz(parsed.contact_phone);
+    const contact_email = nz(parsed.contact_email);
+    const henri_score = nz(parsed.henri_score);
+    const consent_given = nz(parsed.consent_given);
+    const consent_text_version = nz(parsed.consent_text_version);
 
     // Service-role client (2026-06-10 funnel fix). This endpoint is public
     // by design (anonymous homeowner intake) and is already guarded by the
@@ -159,6 +179,10 @@ export async function POST(req: NextRequest) {
 
     /* ── 3. If matches found, create leads and notify contractors ── */
     let leadId: string | null = null;
+    /* Authoritative score. The client posts `henri_score: null` ("let server
+     * compute"), so this — not the request body — is what gets persisted to
+     * the intake row and returned to the caller. */
+    let computedScore: number | null = null;
 
     if (matches.length > 0 && matchedContractorId) {
       /* Create a permit stub for the primary match */
@@ -183,6 +207,11 @@ export async function POST(req: NextRequest) {
       if (permit) {
         /* Score using the new engine for proper sub-scores */
         const { buildSignals, calculateScore } = await import("@/lib/scoring");
+        /* Not re-exported from the scoring barrel — import from the module
+         * directly, same as the score cron does (cron/score/route.ts:10). */
+        const { buildScoreSignalBreakdown } = await import(
+          "@/lib/scoring/signals"
+        );
         const signals = buildSignals({
           permit: {
             issue_date: new Date().toISOString(),
@@ -225,6 +254,14 @@ export async function POST(req: NextRequest) {
             score_value: scoreResult.value,
             score_contact: scoreResult.contact,
             score_demand: scoreResult.demand,
+            // All six components + the breakdown, mirroring the score cron.
+            // Without engagement/conversion/signals the drawer rendered the
+            // "(legacy score — re-score for full breakdown)" placeholder and
+            // showed homeowner_engagement as 0/15 on the warmest lead type
+            // in the product — a wedge-contract #2 violation.
+            score_engagement: scoreResult.engagement,
+            score_conversion: scoreResult.conversion,
+            score_signals: buildScoreSignalBreakdown(scoreResult, signals),
             notes: scoreResult.factors.length > 0
               ? `Scoring factors: ${scoreResult.factors.join(" | ")}`
               : null,
@@ -232,11 +269,18 @@ export async function POST(req: NextRequest) {
           .select()
           .single();
 
+        computedScore = scoreResult.total;
+
         if (lead) {
           leadId = lead.id;
           await supabase
             .from("homeowner_intakes")
-            .update({ matched_lead_id: lead.id })
+            .update({ matched_lead_id: lead.id, henri_score: scoreResult.total })
+            .eq("id", intake.id);
+        } else {
+          await supabase
+            .from("homeowner_intakes")
+            .update({ henri_score: scoreResult.total })
             .eq("id", intake.id);
         }
 
@@ -361,8 +405,18 @@ export async function POST(req: NextRequest) {
      * is a no-op in local dev without env wiring. */
     if (contact_email) {
       const primaryMatch = matches[0] ?? null;
-      const expected = new Date();
-      expected.setHours(expected.getHours() + (primaryMatch ? 1 : 24));
+      /* Honest label only. `estimatedResponseTime` is
+       * responseTimeLabel(profile.response_time_h) from the matching engine
+       * and degrades to "response time not yet measured" when we have no
+       * history — which we surface as a non-promise rather than a clock. */
+      const measured = primaryMatch?.estimatedResponseTime ?? null;
+      // null, not a placeholder string — the email template renders a
+      // different (non-committal) sentence for null. Passing prose here
+      // produced "They'll reach out by a time they'll confirm with you."
+      const contactLabel =
+        measured && measured !== "response time not yet measured"
+          ? measured
+          : null;
       const appUrl =
         process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
       sendIntakeConfirmation({
@@ -371,11 +425,7 @@ export async function POST(req: NextRequest) {
         trade,
         zip,
         contractorName: primaryMatch?.companyName ?? null,
-        expectedContactLabel: expected.toLocaleString(undefined, {
-          weekday: "short",
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+        expectedContactLabel: contactLabel,
         appUrl,
       }).catch((err) => {
         logger.error("Intake confirmation email error", { error: err instanceof Error ? err.message : String(err) });
@@ -389,6 +439,8 @@ export async function POST(req: NextRequest) {
       matched: matches.length > 0,
       match_count: matches.length,
       lead_id: leadId,
+      // Server-computed — the client posts null and reads this back.
+      henri_score: computedScore,
       contractors: matches.map((m) => ({
         name: m.companyName,
         trade,
