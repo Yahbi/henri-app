@@ -44,6 +44,29 @@ export const maxDuration = 300;
 // Anything that ADDS or REFRESHES data belongs in this map; the deliberate
 // exclusions (billing-sync, digests, follow-ups, review-requests) are
 // side-effecting and must stay on exact slots, as the docstring says.
+// 2026-08-05, second pass. A full inventory found 44 cron routes on disk,
+// 2 vercel.json slots, and 18 entries here — leaving 24 routes with NO
+// scheduling path of any kind. The 9 added below are the ones that are both
+// (a) genuinely needed and (b) safe to fire from here.
+//
+// The excluded 15, and why, so nobody has to re-derive this:
+//   cdc-svi, census-acs, hmda-rotate, hud-zipxw, code-violations,
+//   nifc-wildfires        — deliberately pruned in migration 00079 (data
+//                           collected but never read by any surface). Kept
+//                           on disk for fast re-enable. Leave unscheduled.
+//   digest, weekly-digest — SEND EMAIL and have no send-dedupe of their own.
+//                           Catchup's only dedupe is the cron_runs cadence
+//                           check, so a logging failure between "email sent"
+//                           and "run logged" would re-send. Needs a real
+//                           per-recipient sent-marker first.
+//   follow-ups, review-requests, blast-worker
+//                         — also send, but do carry their own dedupe. They
+//                           are safe to add ONCE they log to cron_runs;
+//                           until then catchup cannot see them and would
+//                           re-fire every pass. Add after that lands.
+//   license-check, engagement, permits, weekly-briefing
+//                         — no email, but same cron_runs blindness. Add once
+//                           they log.
 const CADENCE_H: Record<string, number> = {
   // permit ingest — the core pipeline
   scrape: 12,
@@ -52,6 +75,26 @@ const CADENCE_H: Record<string, number> = {
   // enrichment + published stats
   enrich: 24,
   "refresh-landing-stats": 24,
+  // scoring inputs. zip-demand feeds the `zip_demand` signal, which carries
+  // 15 of the 100 score points — a stale table silently mis-scores every
+  // lead in the product, which is worse than an obviously-missing feature.
+  "zip-demand": 24,
+  "geocode-backfill": 24,
+  "predictive-refresh": 24,
+  "market-intel": 168,
+  "re-enrich": 168,
+  // Stripe reconciliation. Unscheduled, a plan that drifts from Stripe (a
+  // failed webhook, a manual change in the dashboard) is never corrected,
+  // so entitlement silently diverges from what the customer is paying.
+  "billing-sync": 24,
+  // Sunday aggregates. These held the two vercel.json slots until those were
+  // repurposed for catchup + score, at which point they lost their only
+  // scheduling path and stopped running entirely.
+  "refresh-zip-aggregates": 168,
+  "synthesize-pre-intent": 168,
+  // Retention. cron_runs grows unbounded otherwise, and it is the table
+  // catchup itself reads on every pass.
+  "cron-runs-cleanup": 168,
   // daily sidecar ingest
   "openfema-ia": 24,
   "openfema-nfip": 24,
@@ -84,7 +127,22 @@ const PRIORITY = new Set(["scrape", "nj-statewide-permits", "enrich"]);
 // Each fire is a server-to-server call that returns quickly (the callee does
 // its own work within its own budget), so the 300s ceiling is not the
 // binding constraint here.
-const MAX_FIRES = 10;
+/**
+ * Ceiling on fires per invocation.
+ *
+ * Raised 10 -> 24 alongside the switch to bounded concurrency. The old
+ * sequential loop could not have used a higher number — 10 slow crons
+ * already exhausted the 250s budget. Firing four at a time makes the whole
+ * tracked fleet drainable in a single daily invocation, which is the point:
+ * on Hobby, catchup runs once a day, so "per invocation" and "per day" are
+ * the same number, and anything it cannot reach today falls further behind
+ * tomorrow.
+ *
+ * The real bound is still the DEADLINE_MS check inside the workers; this is
+ * a backstop so a pathological cron_runs state cannot queue every route at
+ * once.
+ */
+const MAX_FIRES = 24;
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
@@ -132,27 +190,77 @@ export async function GET(request: NextRequest) {
     })
     .slice(0, MAX_FIRES);
 
+  /* Fire with bounded CONCURRENCY, not one at a time.
+   *
+   * This used to be a sequential for-loop with a 120s per-call timeout
+   * inside a 250s budget, which capped a run at ~2 slow crons. On the Hobby
+   * plan catchup itself only fires ONCE A DAY (two slots, once-daily), so
+   * "10 per run" was really "10 per day" — and with the fleet now at 30+
+   * tracked crons, anything at the back of a fully-overdue queue would wait
+   * three days for a turn. Crons that ingest daily data would never catch up
+   * at all; they would fall further behind every day.
+   *
+   * Each fire is a server-to-server HTTP call that spends nearly all its
+   * time waiting on the callee, which does its own work inside its own
+   * function budget. So this is I/O-bound, not CPU-bound, and running four
+   * at once costs essentially nothing here while roughly quadrupling how
+   * much of the fleet one daily invocation can drain.
+   *
+   * 4 is deliberate rather than unbounded: every callee talks to the same
+   * Supabase instance, whose disk IOPS are the binding constraint (a bulk
+   * write took PostgREST down entirely on 2026-08-05). Firing 30 data crons
+   * simultaneously would recreate that. Four keeps the DB busy without
+   * stampeding it.
+   */
+  const CONCURRENCY = 4;
+  const DEADLINE_MS = 250_000; // headroom under maxDuration = 300
+
   const fired: Array<{ path: string; code: number; ageH: number }> = [];
-  for (const c of overdue) {
-    if (Date.now() - t0 > 250_000) break; // leave headroom under maxDuration
-    let code = 0;
-    try {
-      const res = await fetch(`${base}/api/cron/${c.path}`, {
-        headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
-        signal: AbortSignal.timeout(120_000),
-      });
-      code = res.status;
-    } catch {
-      code = 0; // timeout / network — will be retried next catch-up
+  const queue = [...overdue];
+
+  async function worker() {
+    for (;;) {
+      // Re-check the deadline per item, not per batch: one slow cron must
+      // not drag the whole run past maxDuration and lose the cron_runs
+      // record for everything that already succeeded.
+      if (Date.now() - t0 > DEADLINE_MS) return;
+      const c = queue.shift();
+      if (!c) return;
+      let code = 0;
+      try {
+        const res = await fetch(`${base}/api/cron/${c.path}`, {
+          headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
+          signal: AbortSignal.timeout(120_000),
+        });
+        code = res.status;
+      } catch {
+        code = 0; // timeout / network — will be retried next catch-up
+      }
+      fired.push({ path: c.path, code, ageH: Math.round(c.ageH) });
+      logger.info("catchup fired cron", { path: c.path, code, ageH: Math.round(c.ageH) });
     }
-    fired.push({ path: c.path, code, ageH: Math.round(c.ageH) });
-    logger.info("catchup fired cron", { path: c.path, code, ageH: Math.round(c.ageH) });
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker),
+  );
+
+  // Anything still queued ran out of clock. Say so explicitly — a silent
+  // truncation here reads as "the fleet is healthy" when it is not.
+  const skipped = queue.map((c) => c.path);
+  if (skipped.length > 0) {
+    logger.warn("catchup hit its deadline with crons still overdue", {
+      skipped,
+      firedCount: fired.length,
+    });
   }
 
   const summary = {
     tracked: paths.length,
     overdue: overdue.length,
     fired: fired.length,
+    skipped: skipped.length,
+    skippedPaths: skipped,
     details: fired,
   };
   await logCronRun("catchup", t0, {
