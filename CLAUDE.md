@@ -1589,3 +1589,157 @@ After step 8 → $745 MRR funds Apollo ($49/mo) → phone fill 1% → 25%+ → w
 - Onboarding cross-check against `discipline_actions` (~30 min)
 - Code cleanup for 4 dropped-table refs (~30 min)
 - State DNC outreach hygiene integration (~3 hours, depends on Twilio)
+
+## 2026-08-04 — 6-agent fix sweep + live coverage map (commit `74c6e1f`, pushed to main)
+
+Six parallel fix agents (dashboard / scrapers / API / settings-onboarding /
+marketing / core-lib) plus a 70-agent verification workflow that produced
+**61 independently-verified findings**. Everything below is shipped and live
+on meethenri.com unless marked otherwise.
+
+**Gate at commit time:** `tsc` clean · **965/965 tests** (was 860) · `pnpm build` clean.
+
+### Migrations applied this session (00115–00119)
+
+| # | What |
+|---|---|
+| 00115 | `landing_stats` cache table + `refresh_landing_stats()` |
+| 00116 | Homeowner write lanes — consent-withdrawal UPDATE policy + homeowner lead SELECT lane |
+| 00117 | **`profiles` privileged-column guard — closes a paywall bypass** |
+| 00118 | `refresh_landing_stats()` rewritten to stay index-only |
+| 00119 | `count_distinct_permit_zips()` helper |
+
+### Security — the paywall was open
+
+`profiles` had one UPDATE policy (`profiles_update_own`). **RLS gates rows,
+not columns**, so any signed-in user could PATCH their own billing columns
+straight through PostgREST and grant themselves the product:
+
+```js
+supabase.from('profiles').update({ stripe_subscription_id: 'sub_x', plan: 'enterprise' })
+```
+
+A second vector was worse: `claim_territory` (00113) exempts god-mode
+operators by matching `profiles.email` against `god_mode_emails`, and
+`email` was self-writable too — so setting it to a founder address bypassed
+payment with **no forged Stripe id at all**. Migration 00117 adds a
+BEFORE UPDATE trigger (service_role / postgres pass through). Verified live:
+forged subscription, email takeover and self-awarded trust badges all raise
+42501; legitimate profile edits still succeed.
+
+**`src/middleware.ts` was edited** (normally approval-gated — flagged here
+deliberately). `/settings/*` pages live at `src/app/(dashboard)/settings/**`,
+but `(dashboard)` is a route **group** and contributes nothing to the URL.
+The real path is `/settings/billing`, which no `startsWith("/dashboard")`
+check ever matched — so auth, role and onboarding-step gating **all skipped
+the entire settings surface**. Verified: `/settings/billing` now 307s to
+`/login`. Revert = restore the three `isContractorPath` uses to
+`pathname.startsWith("/dashboard")`.
+
+### Dead funnels that were shipping broken
+
+- **Every homeowner intake POST returned 400.** Client sends
+  `henri_score: null`; the Zod schema used `.optional()`, which rejects
+  `null`. The whole homeowner funnel was non-functional.
+- **ZIP availability was a hardcoded constant.** Code read
+  `!data?.is_claimed`, but `get_zip_availability` never returns that key —
+  `!undefined === true`, so every ZIP always displayed "Available" and the
+  Taken badge + waitlist flow were unreachable dead code. Now derives from
+  `slots_used < slots_total`.
+- **Partial territory claim stranded an already-charged contractor** —
+  successful claims kept, `onboarding_completed` never set, retry failed on
+  MORE ZIPs than the first attempt.
+- **Consent withdrawal was a silent no-op** (no UPDATE policy) while telling
+  the homeowner outreach was cancelled. TCPA-facing.
+- Settings upgrade created a **second** Stripe subscription.
+- `billing-sync` granted the **$749 Starter tier to any unrecognized price**.
+
+### Data integrity
+
+- Score cron's upsert sent `status:"new"` + `notes` with
+  `ignoreDuplicates:false`, so **every re-score reset won/quoted leads back
+  to "new" and overwrote contractor notes**. Both fields now omitted
+  (`leads.status` has a DB default).
+- Scrapers rebuilt: real CKAN scraper (**593 enabled ckan sources were
+  silently dispatched to the Socrata scraper**), per-source cursor (every run
+  restarted at offset 0 → 20k ceiling), ArcGIS pagination no longer depends
+  on the optional `exceededTransferLimit`, mapping failures no longer record
+  as success, 10-strike auto-disable reachable for the first time. Scraper
+  tests **26 → 144**.
+
+### Landing coverage map — now real
+
+The covered-states array was **hand-curated and frozen on 2026-05-07 (25
+states) while the DB held 46**, because `GROUP BY state` is a **37.5s**
+parallel seq scan against PostgREST's **8s** `statement_timeout`. Fixed by
+the 00115 cache. `VACUUM (ANALYZE) permits` then dropped that same query to
+9.6s (index-only, Heap Fetches 0) and a **single-state count from 94,907 ms
+to 89 ms** — the visibility map was stale and forcing 112k heap fetches per
+scan.
+
+`/api/cron/refresh-landing-stats` fans the aggregate into 51 single-state
+counts instead of one query, so every statement stays inside the 8s ceiling.
+Verified run: **2,251,330 permits · 273,941 leads · 18,037 ZIPs · 46 states
+in 20.4s**. Note `leads` uses `count:"planned"` — an exact count is 8.8s and
+trips the timeout.
+
+Map now shades every state by real volume with exact counts on hover; the
+coverage section shows the real top-12 states instead of 20 invented Los
+Angeles ZIP tiles.
+
+### Truthfulness
+
+`src/lib/license/verify.ts` **contacts no licensing board on any code path** —
+every branch returns `pending`. "License verified daily against the state
+board" was on marketing, onboarding, compliance, the tutorial and the
+homeowner contractor card. All corrected to the roster cross-check that does
+run (729,776 roster rows / 9 states). Also removed unbacked "insured" and
+"background-checked" claims (no such fields exist), a fabricated 40% close
+rate, "Industry avg $180+", default Kanban win probabilities, a BBB rating,
+competitor price ranges, and a 1000x bug rendering $2.5M permits as
+"$0K - $1K".
+
+### Accessibility
+
+97 hand-rolled buttons across 51 files used `bg-primary` + white text
+(**2.79:1, fails WCAG AA**) — swept to the existing AA-compliant `--cta`
+token (#9F6750, 4.6:1). The `Button` primitive was already correct; these
+bypassed it. Plus: Kanban had **no keyboard path** to move a lead between
+stages; compliance banners rendered at **1.05:1** on light theme.
+
+### Open — DB degraded by an over-aggressive repair
+
+126,754 Los Angeles permits have `address = '[object Object]'` with NULL
+zip / lat / lng (Socrata `location` objects stringified at ingest), making
+them invisible to territory matching. `raw_json` holds everything needed
+(`address_start` / `street_*` / `zip_code` / `location_1.coordinates`), and
+0 leads reference them.
+
+Attempting the repair as bulk `UPDATE`s through the Management API
+**saturated the database** — PostgREST began returning `PGRST002` (cannot
+query schema cache) and the Management API timed out. The app degrades
+gracefully (landing falls back to honest, under-claimed 1.5M+ / 25+), and no
+contractor has completed onboarding yet, so user impact is nil — but this
+must be finished.
+
+**Do it differently:** a `SECURITY DEFINER` function repairing ~2000 rows per
+call, invoked via RPC so each chunk stays inside the 8s statement_timeout —
+never a single large UPDATE through the Management API. Afterwards drop
+`idx_permits_objobj_repair` (created only to make the repair chunks
+index-scannable) and re-run `/api/cron/refresh-landing-stats`.
+
+**Lesson:** this DB will not absorb bulk DML from the Management API. Chunk
+everything through PostgREST RPC with per-call bounds.
+
+### Still open (not code — operator)
+
+- Rotate the service-role JWT (leaked in chat 2026-05-04).
+- Vercel connector needs reconnecting (MCP auth invalidated mid-session).
+- `append_homeowner_message` SECURITY DEFINER RPC — homeowner message SEND
+  still has no write lane (00116 added read lanes only). UI reports the
+  failure honestly rather than pretending to send.
+- **Product decision needed:** the backend allows **3 slots per ZIP**
+  (`claim_territory` only raises at 3/3) and never considers trade, while
+  copy said "one contractor per trade per ZIP". Onboarding copy was restated
+  to what the code guarantees; someone must decide which model is intended
+  and align `PricingSection.tsx`, `contractors/page.tsx`, `billing/page.tsx`.
