@@ -31,13 +31,45 @@ export async function POST() {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Password from env, with a LOCAL-ONLY fallback. Safe: we only reach here
-  // after isDevLoginAllowed() guaranteed NODE_ENV !== production AND
-  // VERCEL_ENV unset AND ENABLE_DEV_LOGIN=1 — i.e. a local `pnpm dev`. The
-  // fallback can never activate on any deploy, so it re-enables one-click
-  // local login without a manual env step (a hard-require with no fallback
-  // silently 404'd local dev login out of the box).
-  const DEV_PASSWORD = process.env.DEV_LOGIN_PASSWORD || "DevLogin!2026";
+  // Hard-required. There is NO fallback, and the removed one was dangerous
+  // in a way its own comment argued it was not.
+  //
+  // That comment reasoned: this route only runs when NODE_ENV !== production
+  // AND VERCEL_ENV is unset, i.e. a local `pnpm dev`, so a literal default
+  // "can never activate on any deploy". True, and irrelevant. The route does
+  // not write to a local database — it writes with the SERVICE-ROLE key from
+  // .env.local, which points at the PRODUCTION Supabase project. So "local
+  // only" describes where the code runs, not which database it mutates, and
+  // `admin.auth.admin.updateUserById(user.id, { password })` below set a
+  // password that is committed to this repository onto the founder's live
+  // god-mode account.
+  //
+  // That is not hypothetical. Production auth.users on 2026-08-05 showed
+  // y.abismuth@gmail.com with encrypted_password NOT NULL and last_sign_in_at
+  // 20:44:13Z — written by exactly this route during a local session. The two
+  // real end-user accounts have no password at all, which is what CLAUDE.md's
+  // "passwordless sign-in only, no passwords to leak" posture describes.
+  //
+  // Anyone with this repo would have had the founder's password, and
+  // Supabase's GoTrue password-grant endpoint is public, so the god-mode
+  // session was reachable from any browser with the public anon key. God mode
+  // is not cosmetic: leads_select_godmode exposes all 274,783 leads including
+  // owner names and phones, and every /api/admin/* route gates on it.
+  //
+  // Requiring the env var means a developer must deliberately choose a value,
+  // and no value ever ships in source. If dev login 404s, set
+  // DEV_LOGIN_PASSWORD in .env.local — and point .env.local at a NON-
+  // production Supabase project while you are there.
+  const DEV_PASSWORD = process.env.DEV_LOGIN_PASSWORD;
+  if (!DEV_PASSWORD) {
+    return NextResponse.json(
+      {
+        error:
+          "DEV_LOGIN_PASSWORD is not set. Set it in .env.local — this route writes a password to whatever Supabase project your service-role key points at, so it must never use a value from source control.",
+      },
+      { status: 500 },
+    );
+  }
 
   try {
     const admin = createAdminClient();

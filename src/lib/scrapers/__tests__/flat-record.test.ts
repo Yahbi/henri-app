@@ -190,10 +190,12 @@ describe("normalizeFlatRecord", () => {
     // distinct permit ZIPs fell 18,040 -> 16,551 across two scrape runs while
     // the geocoder was adding them. A permit with no ZIP cannot match a
     // territory, so every erased ZIP is a lead that cannot be created.
-    const noZipSource: PermitSource = { ...LA_SOURCE, zipField: "nonexistent_column" };
+    // ZIP is DERIVED (resolveZip: explicit zip field -> location object ->
+    // trailing ZIP in the address), so starving it means removing all three
+    // rather than pointing a mapping at a missing column.
     const { row } = normalizeFlatRecord(
-      { ...base, zip_code: undefined, location_1: undefined, address: undefined },
-      noZipSource,
+      { ...base, zip_code: undefined, location_1: undefined, address: "1660 W VENICE BLVD" },
+      LA_SOURCE,
       "socrata",
     );
     expect(Object.prototype.hasOwnProperty.call(row!, "zip")).toBe(false);
