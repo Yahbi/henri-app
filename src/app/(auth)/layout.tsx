@@ -18,10 +18,17 @@ export default function AuthLayout({
           ].join(", "),
         }}
       />
-      {/* Centered auth card */}
-      <div className="flex flex-1 items-center justify-center px-4 py-12">
+      {/* Centered auth card. A <main> rather than a <div>: this is the page's
+        * main landmark, and the auth layout previously had none at all, so
+        * the global skip-to-content link had nothing to target on /login and
+        * /signup (see the note in (dashboard)/layout.tsx). */}
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="flex flex-1 items-center justify-center px-4 py-12"
+      >
         {children}
-      </div>
+      </main>
       {/* Footer — legal links must be reachable on /login + /signup per
           Stripe/Google OAuth policy. */}
       <Footer />

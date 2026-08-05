@@ -150,3 +150,9 @@ co.json
 s.json
 dol/
 *.csv.gz
+
+# Scratch output from audit subagents (curl page dumps, DB wait probes).
+# These land at the repo root during audits and must never be committed.
+/henri/
+/home-snapshot.md
+*.tmp.mjs

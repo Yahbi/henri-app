@@ -19,6 +19,25 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Internal-only routes. `/dev/*` renders module names, source file paths
+  // and raw JSX as visible text for debugging.
+  //
+  // src/app/dev/intent-preview/page.tsx:10 asserts this "NEVER deploys to
+  // production: the route lives under /dev/* which proxy.ts rejects on
+  // Vercel." There is no src/proxy.ts — it does not exist in this repo, and
+  // no other guard replaced it — so the claim was false and the page was
+  // serving HTTP 200 on meethenri.com with `robots: index, follow`.
+  //
+  // A comment asserting a protection is not a protection. This is the guard
+  // the comment described, in the one file that actually runs on every
+  // request. Kept working in local dev, where the page is genuinely useful.
+  if (pathname === "/dev" || pathname.startsWith("/dev/")) {
+    if (process.env.NODE_ENV === "production") {
+      return new NextResponse("Not found", { status: 404 });
+    }
+    return NextResponse.next();
+  }
+
   // Public marketing routes — keep session refresh so cookies roll forward,
   // but don't perform role-based redirects.
   const publicPaths = ["/portal", "/contractors", "/login", "/signup", "/"];
@@ -92,8 +111,31 @@ export async function middleware(request: NextRequest) {
   // Note this is distinct from /dashboard/settings/*, a SEPARATE set of
   // pages under src/app/(dashboard)/dashboard/settings/** which were
   // always covered by the /dashboard prefix.
-  const isContractorPath =
-    pathname.startsWith("/dashboard") || pathname.startsWith("/settings");
+  //
+  // 2026-08-05: the same trap had TWO more victims. `(dashboard)` contains
+  // exactly four URL prefixes — dashboard, settings, leads, territories —
+  // and only the first two were listed here. Verified against production:
+  // /dashboard and /settings/billing returned 307 to an anonymous request
+  // while /leads, /territories and /territories/select all returned 200 and
+  // rendered the full contractor shell, including a live "Claim New
+  // Territory" call-to-action. Row data itself was safe (RLS answered the
+  // XHRs with 401), but the paid surface and the claim flow were served to
+  // logged-out visitors and, because robots.txt only disallows /dashboard,
+  // /homeowner, /onboarding, /settings and /api, were crawlable too.
+  //
+  // Enumerating the segments instead of hand-writing an || chain is the
+  // point: this list is now the same shape as the directory listing, so the
+  // next page added to the group is a one-line diff rather than a silent
+  // hole that takes an audit to find.
+  const CONTRACTOR_PREFIXES = [
+    "/dashboard",
+    "/settings",
+    "/leads",
+    "/territories",
+  ] as const;
+  const isContractorPath = CONTRACTOR_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
 
   // Protected routes: require authentication
   if (!user) {

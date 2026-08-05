@@ -18,7 +18,10 @@ export default function MarketingLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <MarketingNav />
-      <main className="flex-1 pt-14">{children}</main>
+      {/* Skip-link target — see the note in (dashboard)/layout.tsx. */}
+      <main id="main-content" tabIndex={-1} className="flex-1 pt-14">
+        {children}
+      </main>
       <Footer />
     </div>
   );

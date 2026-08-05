@@ -194,7 +194,14 @@ export function CoverageMap({
       <svg
         viewBox={`0 0 ${width} ${height}`}
         width="100%"
-        height="auto"
+        // No `height`. SVG geometry attributes take a <length>; `auto` is a
+        // CSS-only keyword, so the attribute parser rejected it and every
+        // single homepage view logged `Error: <svg> attribute height:
+        // Expected length, "auto"`. The map rendered correctly anyway — the
+        // viewBox plus `w-full` already give it an intrinsic ratio — so the
+        // only symptom was a guaranteed error on the most-visited page,
+        // burning the Sentry free tier's 5k events/month on a non-bug and
+        // burying real errors underneath it.
         role="img"
         aria-label={
           hasHistogram

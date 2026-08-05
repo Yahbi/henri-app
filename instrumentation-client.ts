@@ -50,12 +50,32 @@ if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
      * baseline. 0.1 = 10% of transactions captured. Bump after
      * looking at actual traffic vs. Sentry quota. */
     tracesSampleRate: 0.1,
-    /* Replay sample rate — only capture the page state on errors,
-     * not on every session, until we know we want full session
-     * replay. Default `replaysSessionSampleRate: 0` (off) plus
-     * `replaysOnErrorSampleRate: 1.0` (full capture on error). */
-    replaysSessionSampleRate: 0,
-    replaysOnErrorSampleRate: 1.0,
+    /* Session Replay recording is deliberately OFF.
+     *
+     * Context: the Sentry client chunk measured 145 KB gzip / 453 KB raw on
+     * production 2026-08-05 and is referenced by /, /contractors, /pricing
+     * and /login alike — the largest single asset on the site, shipped to
+     * every anonymous marketing visitor.
+     *
+     * Be clear about what removing the sample rates does and does not buy,
+     * because it is easy to assume it fixes the size problem and it does
+     * not. Rebuilt and measured after this change: the chunk is still
+     * 453,809 bytes and still contains the Replay code. @sentry/nextjs adds
+     * the integration to its client defaults, and the documented way to drop
+     * it is the bundler define `__SENTRY_EXCLUDE_REPLAY__`, which Turbopack
+     * in this Next version has no hook for — `turbopack` accepts only
+     * `rules` / `resolveAlias` / `resolveExtensions`, no `define`.
+     *
+     * What this DOES buy is runtime, not bytes: with no sample rate the
+     * integration never arms, so no replay buffer is retained and no DOM
+     * mutation observers run on any page. That is worth having on its own,
+     * for a product with no paying users yet and a 5k-events/month tier.
+     *
+     * Getting the 145 KB back needs one of: migrating this build off
+     * Turbopack, a `resolveAlias` stub for the replay module (fragile — the
+     * SDK imports it internally), or Sentry shipping a replay-free client
+     * entry point. Tracked, not solved. Error capture, the load-bearing
+     * part, is unaffected and stays fully enabled below. */
     /* Tag every event with the deploy SHA for release correlation
      * with the server-side instrumentation. */
     release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7),

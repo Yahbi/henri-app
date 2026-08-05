@@ -37,6 +37,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.3,
     },
     {
+      // Linked from the footer on every page (components/marketing/Footer.tsx)
+      // but was missing from this list, so the only legal page crawlers could
+      // not reach was the one governing acceptable use.
+      url: `${BASE_URL}/acceptable-use`,
+      lastModified: now,
+      changeFrequency: "yearly",
+      priority: 0.3,
+    },
+    {
       url: `${BASE_URL}/privacy`,
       lastModified: now,
       changeFrequency: "yearly",
