@@ -159,19 +159,27 @@ const VALID_STATES = new Set<string>(ALL_US_STATES);
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>;
 
 /**
- * `permit_sources.dataset_kind` value that marks a feed as real
- * construction permits.
+ * `permit_sources.dataset_kind` value meaning the registry has POSITIVE
+ * evidence this feed is not permits at all — a business-licence roster, a
+ * building-footprint layer, a sewer-wye inventory. Endpoints like these
+ * entered the catalog through mis-mapped auto-discovery, and their rows sit
+ * in `permits` inflating any count taken over the whole table, which breaks
+ * the truthfulness rule.
  *
- * Anything the registry has EXPLICITLY classified as something else
- * (business licences, building footprints, sewer records — endpoints that
- * entered the catalog through mis-mapped auto-discovery) produces rows in
- * `permits` that are not permits. Counting them in the headline breaks the
- * truthfulness rule.
+ * The vocabulary is defined by migration 00122's own column comment:
+ *   'unknown'    — never probed          (the DEFAULT; most of the catalog)
+ *   'permit'     — passed the screen
+ *   'non_permit' — positive evidence it is something else
  *
- * NULL is deliberately not excluded: it means "not yet classified", and
- * treating unclassified as junk would erase most of the catalog.
+ * Only 'non_permit' is grounds for subtracting rows from a published count.
+ * An earlier version keyed off `!= 'permit'`, which was written expecting
+ * unclassified rows to be NULL; 00122 shipped `NOT NULL DEFAULT 'unknown'`,
+ * so that predicate swept in every never-probed source — 479 of them on the
+ * first live run. Treating "we have not looked yet" as "junk" would erase
+ * most of the catalog, which is why the subtraction is opt-in on evidence
+ * rather than opt-out on absence.
  */
-const PERMIT_DATASET_KIND = "permit";
+const NON_PERMIT_DATASET_KIND = "non_permit";
 
 export interface NonPermitSource {
   /** The value rows from this feed carry in `permits.source_city`. */
@@ -206,7 +214,22 @@ export async function fetchNonPermitSources(
   const { data, error } = await supabase
     .from("permit_sources")
     .select("city, jurisdiction, state, dataset_kind")
-    .neq("dataset_kind", PERMIT_DATASET_KIND);
+    // Subtract ONLY rows with positive evidence of being non-permit.
+    //
+    // This was `.neq("dataset_kind", "permit")`, written against an assumed
+    // contract where unclassified rows were NULL. Migration 00122 shipped
+    // the column as `NOT NULL DEFAULT 'unknown'` instead, so `!= 'permit'`
+    // matched every never-probed source: the first live run classified 479
+    // of them as junk and the budget guard refused to publish, which is
+    // exactly what that guard is for.
+    //
+    // `= 'non_permit'` is also the semantically correct read. 00122's own
+    // column comment defines the vocabulary: 'unknown' = never probed,
+    // 'permit' = passed the screen, 'non_permit' = positive evidence of a
+    // licence / utility / footprint / wetland layer. Only the last is
+    // grounds for excluding rows from a published count — treating
+    // "we haven't looked yet" as "junk" would erase most of the catalog.
+    .eq("dataset_kind", NON_PERMIT_DATASET_KIND);
 
   if (error) {
     console.warn(
