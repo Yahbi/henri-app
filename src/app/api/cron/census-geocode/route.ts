@@ -47,6 +47,23 @@ interface GeocodeMatch {
   id: string;
   lat: number;
   lng: number;
+  /**
+   * ZIP parsed out of the Census matched-address column.
+   *
+   * This is the whole reason the cron matters. `leads` are only created for
+   * a permit whose ZIP falls inside a claimed territory
+   * (api/cron/score/route.ts:1034 `if (!zip) continue;`), so a permit with a
+   * NULL zip can never become a lead for ANY contractor, no matter how it
+   * scores. Measured 2026-08-05: 1,484,130 of 2,323,156 permits (63.9%) have
+   * no ZIP, and 957,520 of those have a geocodable street address.
+   *
+   * Census returns the ZIP for free — it is the tail of the matched-address
+   * field in the same CSV row we already parse for coordinates — and the old
+   * parser read only columns 0, 2 and 5, so it fetched the ZIP and discarded
+   * it. Nothing else in the codebase writes permits.zip after ingest, which
+   * made that discard permanent.
+   */
+  zip: string | null;
 }
 
 /** CSV cell escape — Census expects unquoted simple strings. */
@@ -81,7 +98,14 @@ function parseCensusBatch(text: string): GeocodeMatch[] {
     const lng = Number(lngStr);
     const lat = Number(latStr);
     if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
-    out.push({ id, lat, lng });
+    // cells[4] is the matched address, which Census normalises to
+    // "123 MAIN ST, ANYTOWN, TX, 78701" — the ZIP is the trailing token.
+    // Anchored to end-of-string so a house number or a street name that
+    // happens to contain five digits cannot be mistaken for a ZIP. ZIP+4 is
+    // accepted and truncated to the 5-digit form the rest of the schema uses
+    // (territories, zip_demand_scores and the score cron all key on 5).
+    const zipMatch = /(\d{5})(?:-\d{4})?\s*$/.exec(cells[4]?.trim() ?? "");
+    out.push({ id, lat, lng, zip: zipMatch ? zipMatch[1] : null });
   }
   return out;
 }
@@ -176,6 +200,10 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient();
 
   let totalGeocoded = 0;
+  // Tracked separately from totalGeocoded because it is the number that
+  // actually predicts lead growth: a coordinate helps the map, but only a
+  // ZIP can make a permit match a claimed territory.
+  let totalZipped = 0;
   let totalFetched = 0;
   let batches = 0;
 
@@ -184,11 +212,26 @@ export async function GET(request: NextRequest) {
       const remaining = MAX_PER_RUN - totalFetched;
       const fetchSize = Math.min(BATCH_SIZE, remaining);
 
+      // Candidates are permits missing EITHER coordinates OR a ZIP.
+      //
+      // This used to be `.is("latitude", null)` alone, which quietly excluded
+      // the 282,649 permits that already have coordinates and are missing
+      // only the ZIP — the exact rows that are one field away from being
+      // lead-eligible. Having a latitude was treated as "this row is done",
+      // but latitude is not what gates lead creation; ZIP is.
+      //
+      // `[object Object]` is excluded explicitly: 125,504 permits carry that
+      // literal string as their address because a Socrata location OBJECT was
+      // stringified at ingest. Sending it to Census wastes a slot in every
+      // batch and can never match. Those rows need their address rebuilt from
+      // raw_json first — a separate repair.
       const { data: pending, error: fetchErr } = await supabase
         .from("permits")
         .select("id, address, city, state, zip")
-        .is("latitude", null)
+        .or("latitude.is.null,zip.is.null")
         .not("address", "is", null)
+        .neq("address", "")
+        .neq("address", "[object Object]")
         .limit(fetchSize);
 
       if (fetchErr) {
@@ -206,14 +249,22 @@ export async function GET(request: NextRequest) {
       // a transaction-y loop with Promise.allSettled so a few failures
       // don't break the batch.
       const updates = matches.map(async (m) => {
-        const { error } = await supabase
-          .from("permits")
-          .update({ latitude: m.lat, longitude: m.lng })
-          .eq("id", m.id);
+        // Only ever ADD a zip, never overwrite one. A permit that arrived
+        // from its source with a ZIP has better provenance than a Census
+        // fuzzy match, and territory assignment keys off this column.
+        const patch: { latitude: number; longitude: number; zip?: string } =
+          { latitude: m.lat, longitude: m.lng };
+        if (m.zip) patch.zip = m.zip;
+
+        const q = supabase.from("permits").update(patch).eq("id", m.id);
+        const { error } = m.zip
+          ? await q.or("zip.is.null,zip.eq.")
+          : await q;
         if (error) logger.warn("census-geocode.update_failed", { id: m.id, error: error.message });
       });
       await Promise.allSettled(updates);
       totalGeocoded += matches.length;
+      totalZipped += matches.filter((m) => m.zip).length;
 
       logger.info("census-geocode.batch_done", {
         batch: batches,
@@ -229,6 +280,7 @@ export async function GET(request: NextRequest) {
       batches,
       fetched: totalFetched,
       geocoded: totalGeocoded,
+      zipped: totalZipped,
     });
     const result = {
       ok: true,
@@ -236,6 +288,7 @@ export async function GET(request: NextRequest) {
       batches,
       fetched: totalFetched,
       geocoded: totalGeocoded,
+      zipped: totalZipped,
     };
     await logCronRun("census-geocode", startedAt, {
       pulled: totalFetched, inserted: totalGeocoded,

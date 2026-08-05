@@ -119,7 +119,11 @@ const CADENCE_H: Record<string, number> = {
   "courtlistener-liens": 24,
   "usgs-quakes": 24,
   "swdi-events": 24,
-  "census-geocode": 24,
+  // Hourly: ZIP is what gates lead creation, and 957,520 permits are
+  // still missing one. See the cadence note in .github/workflows/cron-fleet.yml.
+  "census-geocode": 1,
+  // Every 2h. No-op unless a territory was claimed recently.
+  "territory-backfill": 2,
   "storm-events": 24,
   // weekly ingest
   "fema-nri": 168,

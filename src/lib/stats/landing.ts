@@ -158,6 +158,50 @@ const VALID_STATES = new Set<string>(ALL_US_STATES);
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>;
 
+/** The four values of the `lead_urgency` enum. */
+const LEAD_URGENCIES = ["hot", "warm", "cool", "cold"] as const;
+
+/**
+ * Exact lead count, summed over `urgency`.
+ *
+ * Both this read path and the refresh cron used `count: "planned"`, defended
+ * in comments as accurate to ~5%. Measured against production 2026-08-05 the
+ * planner returned 295,327 against a true 274,783 — an OVERSTATEMENT of
+ * 20,544 (+7.5%). The project truthfulness rule requires published figures to
+ * round DOWN, so an estimate that overshoots is not a rounding choice; it is a
+ * number we cannot defend if a contractor asks where it came from.
+ *
+ * A plain exact count is genuinely too slow (8.8s measured, against an 8s
+ * PostgREST statement_timeout). Splitting on `urgency` fixes that: the column
+ * is a 4-value enum backed by idx_leads_urgency, so each bucket is an Index
+ * Only Scan with Heap Fetches 0 at ~57ms. Every statement gets its own budget
+ * and the sum is exact — verified 237,290 cool + 20,543 warm + 16,950 cold =
+ * 274,783.
+ *
+ * The NULL bucket is included so the total cannot silently drift low if a
+ * future code path inserts a lead before urgency is assigned.
+ *
+ * Returns the `{ count, error }` shape of a PostgREST head-count so callers
+ * read the same as the query this replaced.
+ */
+export async function countLeadsExact(
+  supabase: SupabaseAdminClient,
+): Promise<{ count: number | null; error: { message: string } | null }> {
+  const buckets = await Promise.all([
+    ...LEAD_URGENCIES.map((u) =>
+      supabase.from("leads").select("*", { count: "exact", head: true }).eq("urgency", u),
+    ),
+    supabase.from("leads").select("*", { count: "exact", head: true }).is("urgency", null),
+  ]);
+
+  // A failed bucket would make the sum UNDERCOUNT silently, which reads as a
+  // real drop in coverage and would be acted on. Refuse instead.
+  const failed = buckets.find((b) => b.error);
+  if (failed?.error) return { count: null, error: { message: failed.error.message } };
+
+  return { count: buckets.reduce((sum, b) => sum + (b.count ?? 0), 0), error: null };
+}
+
 /**
  * `permit_sources.dataset_kind` value meaning the registry has POSITIVE
  * evidence this feed is not permits at all — a business-licence roster, a
@@ -390,9 +434,7 @@ export async function getLandingStats(): Promise<LandingStats> {
         supabase
           .from("permits")
           .select("*", { count: "planned", head: true }),
-        supabase
-          .from("leads")
-          .select("*", { count: "planned", head: true }),
+        countLeadsExact(supabase),
         // Junk-row subtraction (2026-06-09 truthfulness fix): loader bugs
         // left rows with state='US' / state='' / state IS NULL. They have
         // no ZIP, can never become leads, and inflating the headline with

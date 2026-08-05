@@ -47,7 +47,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
 import { logCronRun } from "@/lib/admin/cron-log";
 import { ALL_US_STATES } from "@/lib/stats/us-states";
-import { fetchNonPermitSources, type NonPermitSource } from "@/lib/stats/landing";
+import { fetchNonPermitSources, countLeadsExact, type NonPermitSource } from "@/lib/stats/landing";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -130,13 +130,27 @@ export async function GET(request: Request) {
           }
           throw new Error(`state ${state}: ${lastError}`);
         }),
-        // "planned", not "exact": an exact count over 273k leads is a full
-        // scan that measured 8.8s and tripped the 8s statement_timeout,
-        // while the planner estimate returns in 399ms and is accurate to
-        // within ~5% after ANALYZE. This figure is a marketing stat, not
-        // an invoice, and the legacy read path already used a planned
-        // count for it.
-        supabase.from("leads").select("*", { count: "planned", head: true }),
+        // EXACT, summed over the urgency enum.
+        //
+        // This was a "planned" count, justified as accurate to ~5% and "a
+        // marketing stat, not an invoice". Measured 2026-08-05, the planner
+        // said 295,327 against a true 274,783 — it OVERSTATED by 20,544
+        // (+7.5%). The project's truthfulness rule requires figures to round
+        // DOWN, so an estimate that overshoots is not a rounding choice, it
+        // is a published number we cannot defend. Being a marketing stat is
+        // the reason it has to be right, not a reason it can be loose.
+        //
+        // An unfiltered exact count really does take 8.8s and trip the 8s
+        // statement_timeout, so the count is split across `urgency`, which
+        // is a 4-value enum backed by idx_leads_urgency. Each bucket is an
+        // Index Only Scan with Heap Fetches 0 — measured 57ms — so every
+        // statement sits far under the ceiling and the sum is exact.
+        // Verified: 237,290 cool + 20,543 warm + 16,950 cold = 274,783.
+        //
+        // The NULL bucket is counted too. Leaving it out would silently
+        // undercount the day someone adds a code path that inserts a lead
+        // before urgency is assigned.
+        countLeadsExact(supabase),
         supabase.rpc("count_distinct_permit_zips"),
         // Empty list when `dataset_kind` hasn't shipped yet — the refresh
         // then behaves exactly as it did before, per the feature-flag rule.

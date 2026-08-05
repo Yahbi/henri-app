@@ -181,7 +181,10 @@ jobs:
               16:30) due+=(courtlistener-liens) ;;
               17:00) due+=(usgs-quakes) ;;
               18:00) [ "$DOW" = "0" ] && due+=(hud-reo) ;;
-              19:00) due+=(census-geocode) ;;
+              # census-geocode moved to the hourly block below — a daily slot
+              # could not keep up with the ZIP backlog. Slot left empty
+              # deliberately rather than refilled.
+              19:00) ;;
               20:00) [ "$DOW" = "0" ] && due+=(fema-nri) ;;
               22:00) due+=(openfema-declarations) ;;
               22:30) due+=(gdelt-triggers) ;;
@@ -203,6 +206,33 @@ jobs:
             # that grows coverage toward every municipality that publishes
             # open permit data, then keeps watching for new ones.
             if [ "$MM" = "00" ]; then due+=(discover-sources); fi
+
+            # ZIP backfill runs EVERY hour at :00 (was once daily at 19:00).
+            #
+            # This is the top of the lead funnel, not a map nicety. A permit
+            # with a NULL zip can never become a lead for anyone, because the
+            # score cron's lead-build loop does `if (!zip) continue`. Measured
+            # 2026-08-05: 1,484,130 of 2,323,156 permits (63.9%) have no ZIP,
+            # and 957,520 of those have a geocodable street address.
+            #
+            # At the old cadence — one run a day, 5,000 permits a run — that
+            # backlog needed ~191 days to clear. Hourly clears it in ~8. The
+            # Census batch geocoder is free, needs no key and publishes no
+            # rate limit, so the only real cost is our own function time, and
+            # each run is hard-bounded at MAX_PER_RUN.
+            if [ "$MM" = "00" ]; then due+=(census-geocode); fi
+
+            # Territory backfill, every 2 hours.
+            #
+            # Permits are considered for lead creation exactly once, when
+            # they are first scored, and are dropped with no `else` branch if
+            # their ZIP was unclaimed at that moment. So territory bought
+            # today delivers none of the permits already sitting in it: ZIP
+            # 28269 held 15,112 permits and 0 leads. This re-queues those
+            # orphans so the scorer can convert them. Cheap no-op when every
+            # claimed ZIP is already fully converted, which is the steady
+            # state — it only does work after a new claim.
+            if [ "$MM" = "00" ] && [ $((10#$HH % 2)) -eq 0 ]; then due+=(territory-backfill); fi
 
             # Catch-up self-heal (2026-06-10): GH throttles the fleet, so a
             # once-daily slot can be missed for days (audit found 5 data

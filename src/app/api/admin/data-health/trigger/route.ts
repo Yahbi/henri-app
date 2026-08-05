@@ -50,6 +50,7 @@ const ALLOWED: ReadonlySet<string> = new Set([
   "usgs-quakes",
   "hud-reo",
   "census-geocode",
+  "territory-backfill",
   "fema-nri",
   "openfema-declarations",
   "gdelt-triggers",
