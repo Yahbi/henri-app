@@ -26,36 +26,24 @@
 name: cron-fleet
 
 on:
-  # ── SCHEDULE PAUSED 2026-08-05 — Supabase Disk IO Budget exhausted ──
+  # 2026-08-05 incident, kept here because the shape of it is easy to repeat:
+  # Supabase exhausted its Disk IO Budget ("Your instance may become
+  # unresponsive" — their words, emailed 18:05 UTC 08-04) and every endpoint
+  # began hanging rather than failing. With --max-time 290 --retry 2 per
+  # endpoint, one run held the database for 20-30 minutes, and the next run
+  # started 30 minutes later, so the load was effectively continuous on an
+  # instance with no IO left. The run history shows it exactly: #1045-#1057
+  # took 4-12 SECONDS, #1058 took 15m, #1059-#1068 took 21-30m and all failed.
+  # The scheduler had become the reason the database could not recover.
   #
-  # Supabase emailed on 2026-08-04 18:05 UTC: "Your project is depleting its
-  # Disk IO Budget... Your instance may become unresponsive." It then became
-  # exactly that. PostgREST returns Cloudflare 522 on every request while
-  # storage and auth answer normally, and Postgres logs show WAL archiving
-  # failing repeatedly (`archive command failed with exit code 1`), so no WAL
-  # is being recycled — every checkpoint reports "0 removed, 0 recycled".
-  #
-  # THIS FLEET IS NOW PART OF THE PROBLEM. The run history is unambiguous:
-  #   runs #1045-#1057   4-12 SECONDS each   (healthy)
-  #   run  #1058         15m 10s             (the wall)
-  #   runs #1059-#1068   21-30 MINUTES each  (all failing)
-  # Each failing run holds the database for 20-30 minutes with curl retries
-  # (--max-time 290 --retry 2) and the next run starts 30 minutes later, so
-  # the load is effectively continuous on an instance that has no IO budget
-  # left to serve it. It cannot drain its backlog while this keeps firing.
-  #
-  # workflow_dispatch is intentionally KEPT so any endpoint can still be run
-  # by hand for a smoke test.
-  #
-  # RE-ENABLE once the instance is healthy — uncomment the schedule block.
-  # Verify first: a PostgREST read should return 200 in well under a second,
-  # and the Disk IO Budget chart in the Supabase dashboard should be
-  # recovering rather than pinned at zero. The durable fix is the compute
-  # add-on upgrade Supabase recommends in that email; re-enabling the fleet
-  # on the current tier will most likely reproduce this.
-  # schedule:
-  #   - cron: "0 * * * *"
-  #   - cron: "30 * * * *"
+  # The schedules below stay ON. The fix is the circuit breaker in the run
+  # step: it probes /api/health first and exits 0 without firing anything if
+  # the backend is unhealthy, so a run during an outage costs ~25 seconds
+  # instead of half an hour. That is strictly better than pausing, which
+  # needs a human to remember to switch it back on; this resumes by itself.
+  schedule:
+    - cron: "0 * * * *"
+    - cron: "30 * * * *"
   workflow_dispatch:
     inputs:
       endpoints:
@@ -79,6 +67,55 @@ jobs:
         run: |
           set -uo pipefail
           BASE="https://meethenri.com/api/cron"
+
+          # ── CIRCUIT BREAKER ────────────────────────────────────────────
+          # Added 2026-08-05 after this fleet turned a database outage into a
+          # much worse one.
+          #
+          # What happened: Supabase exhausted its Disk IO Budget and the
+          # instance stopped responding. Every endpoint below then hung
+          # instead of answering. With --max-time 290 --retry 2 per endpoint
+          # and a dozen endpoints due, a single run held the database for
+          # 20-30 minutes — and the next run started 30 minutes later, so the
+          # load was effectively CONTINUOUS on an instance that had no IO left
+          # to serve it. The run history shows the transition exactly:
+          # runs #1045-#1057 took 4-12 SECONDS; #1058 took 15m; #1059-#1068
+          # took 21-30m each and all failed. The fleet could not recover
+          # because the fleet was what prevented recovery.
+          #
+          # So: probe /api/health first. It is the right gate for this —
+          # it exercises the app -> database path with an ESTIMATED head
+          # count (pg_class.reltuples, not a scan, so it stays fast even on
+          # a 2.25M-row table), and it returns 503 ONLY when the database
+          # path is down. Merely-degraded auxiliary services (Stripe, Twilio,
+          # Resend unconfigured) still return 200, so this cannot false-trip
+          # on an unset optional env var and silently stop the whole fleet.
+          #
+          # exit 0, not 1, is deliberate. A red run here is not actionable —
+          # it says "the database is down", which the operator already knows
+          # from Supabase's own alerting, and one failure per 30 minutes
+          # buries real alerts under noise. The skip is loud in the log and
+          # in the step summary instead.
+          HEALTH_CODE=$(curl -sS -o /tmp/health.json -w "%{http_code}" \
+            --max-time 25 \
+            "https://meethenri.com/api/health" 2>/dev/null) || HEALTH_CODE="000"
+
+          echo "health probe -> HTTP $HEALTH_CODE"
+          head -c 300 /tmp/health.json 2>/dev/null || true
+          echo
+          if [ "$HEALTH_CODE" != "200" ]; then
+            echo "::warning::Backend unhealthy (HTTP $HEALTH_CODE) — firing NOTHING this slot."
+            {
+              echo "### cron-fleet skipped"
+              echo ""
+              echo "Health probe returned **HTTP $HEALTH_CODE**, so no endpoints were fired."
+              echo ""
+              echo "This is the circuit breaker, not a cron bug. Firing into an"
+              echo "unresponsive backend is what amplified the 2026-08-05 outage."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           HH=$(date -u +%H)
           MM_RAW=$(date -u +%M)
           DOW=$(date -u +%w)   # 0 = Sunday
@@ -156,18 +193,42 @@ jobs:
           fi
 
           failed=0
+          consecutive=0
           for ep in "${due[@]}"; do
             echo "── $ep ──"
+            # --retry removed. Retrying a request that timed out because the
+            # database is saturated just multiplies the load that caused the
+            # timeout; the endpoints are idempotent and the next slot (or
+            # /api/cron/catchup) re-fires anything that was missed, so a retry
+            # here buys nothing and costs three times the IO.
             code=$(curl -sS -o /tmp/body.json -w "%{http_code}" \
-              --max-time 290 --retry 2 --retry-delay 10 \
+              --max-time 290 \
               -H "Authorization: Bearer $CRON_SECRET" \
               "$BASE/$ep") || code="000"
             echo "HTTP $code"
             head -c 600 /tmp/body.json || true
             echo
-            if [ "$code" != "200" ]; then
+
+            if [ "$code" = "200" ]; then
+              consecutive=0
+            else
               echo "::error::$ep returned HTTP $code"
               failed=1
+              consecutive=$((consecutive + 1))
+              # Two in a row means the backend went down mid-run, not that one
+              # endpoint is broken. Keep going and this run spends 290s per
+              # remaining endpoint hammering something that cannot answer —
+              # which is exactly how a 4-second run became a 30-minute one.
+              if [ "$consecutive" -ge 2 ]; then
+                echo "::warning::2 consecutive failures — backend appears down. Abandoning the remaining endpoints this slot."
+                {
+                  echo "### cron-fleet aborted mid-run"
+                  echo ""
+                  echo "Two consecutive endpoint failures, so the rest of the slot was skipped."
+                  echo "Endpoints are idempotent and catchup re-fires whatever was missed."
+                } >> "$GITHUB_STEP_SUMMARY"
+                break
+              fi
             fi
             sleep 3
           done

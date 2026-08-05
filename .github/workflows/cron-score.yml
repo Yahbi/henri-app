@@ -16,35 +16,23 @@
 name: cron-score
 
 on:
-  # ── SCHEDULE PAUSED 2026-08-05 — Supabase Disk IO Budget exhausted ──
+  # 2026-08-05 incident, kept here because the shape of it is easy to repeat:
+  # Supabase exhausted its Disk IO Budget ("Your instance may become
+  # unresponsive" — their words, emailed 18:05 UTC 08-04) and every endpoint
+  # began hanging rather than failing. With --max-time 290 --retry 2 per
+  # endpoint, one run held the database for 20-30 minutes, and the next run
+  # started 30 minutes later, so the load was effectively continuous on an
+  # instance with no IO left. The run history shows it exactly: #1045-#1057
+  # took 4-12 SECONDS, #1058 took 15m, #1059-#1068 took 21-30m and all failed.
+  # The scheduler had become the reason the database could not recover.
   #
-  # Supabase emailed on 2026-08-04 18:05 UTC: "Your project is depleting its
-  # Disk IO Budget... Your instance may become unresponsive." It then became
-  # exactly that. PostgREST returns Cloudflare 522 on every request while
-  # storage and auth answer normally, and Postgres logs show WAL archiving
-  # failing repeatedly (`archive command failed with exit code 1`), so no WAL
-  # is being recycled — every checkpoint reports "0 removed, 0 recycled".
-  #
-  # THIS FLEET IS NOW PART OF THE PROBLEM. The run history is unambiguous:
-  #   runs #1045-#1057   4-12 SECONDS each   (healthy)
-  #   run  #1058         15m 10s             (the wall)
-  #   runs #1059-#1068   21-30 MINUTES each  (all failing)
-  # Each failing run holds the database for 20-30 minutes with curl retries
-  # (--max-time 290 --retry 2) and the next run starts 30 minutes later, so
-  # the load is effectively continuous on an instance that has no IO budget
-  # left to serve it. It cannot drain its backlog while this keeps firing.
-  #
-  # workflow_dispatch is intentionally KEPT so any endpoint can still be run
-  # by hand for a smoke test.
-  #
-  # RE-ENABLE once the instance is healthy — uncomment the schedule block.
-  # Verify first: a PostgREST read should return 200 in well under a second,
-  # and the Disk IO Budget chart in the Supabase dashboard should be
-  # recovering rather than pinned at zero. The durable fix is the compute
-  # add-on upgrade Supabase recommends in that email; re-enabling the fleet
-  # on the current tier will most likely reproduce this.
-  # schedule:
-  #   - cron: "*/20 * * * *"
+  # The schedules below stay ON. The fix is the circuit breaker in the run
+  # step: it probes /api/health first and exits 0 without firing anything if
+  # the backend is unhealthy, so a run during an outage costs ~25 seconds
+  # instead of half an hour. That is strictly better than pausing, which
+  # needs a human to remember to switch it back on; this resumes by itself.
+  schedule:
+    - cron: "*/20 * * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -64,11 +52,42 @@ jobs:
       - name: Drain /api/cron/score
         run: |
           set -uo pipefail
+
+          # ── CIRCUIT BREAKER (added 2026-08-05) ─────────────────────────
+          # See cron-fleet.yml for the full incident write-up. Short version:
+          # when Supabase exhausted its Disk IO Budget, every request hung
+          # instead of failing, so each scheduled run held the database for
+          # 20-30 minutes and the next run started before it finished. The
+          # schedulers became the reason the database could not recover.
+          #
+          # /api/health exercises the app -> database path with an ESTIMATED
+          # head count (pg_class.reltuples, not a scan) and returns 503 ONLY
+          # when the database is down — degraded auxiliary services still
+          # return 200, so this cannot false-trip on an unset optional env
+          # var and silently stop the drain forever.
+          #
+          # exit 0 rather than 1: "the database is down" is not an actionable
+          # workflow failure, and one red run every 20 minutes buries the
+          # alerts that ARE actionable.
+          HEALTH_CODE=$(curl -sS -o /tmp/health.json -w "%{http_code}" \
+            --max-time 25 \
+            "https://meethenri.com/api/health" 2>/dev/null) || HEALTH_CODE="000"
+          echo "health probe -> HTTP $HEALTH_CODE"
+          if [ "$HEALTH_CODE" != "200" ]; then
+            echo "::warning::Backend unhealthy (HTTP $HEALTH_CODE) — draining nothing this run."
+            {
+              echo "### skipped — backend unhealthy"
+              echo ""
+              echo "Health probe returned **HTTP $HEALTH_CODE**. Nothing was fired."
+              echo "This is the circuit breaker, not a cron bug."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           deadline=$(( $(date +%s) + 1320 ))
           runs=0; fails=0
           while [ "$(date +%s)" -lt "$deadline" ]; do
             code=$(curl -sS -o /tmp/body.json -w "%{http_code}" \
-              --max-time 290 --retry 1 --retry-delay 5 \
+              --max-time 290 \
               -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
               "https://meethenri.com/api/cron/score") || code="000"
             runs=$((runs+1))
