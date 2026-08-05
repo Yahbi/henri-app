@@ -1,39 +1,6 @@
 {
   "crons": [
-    { "path": "/api/cron/score", "schedule": "*/30 * * * *" },
-    { "path": "/api/cron/enrich", "schedule": "15 * * * *" },
-    { "path": "/api/cron/permits", "schedule": "0 */4 * * *" },
-    { "path": "/api/cron/nj-statewide-permits", "schedule": "20 */2 * * *" },
-    { "path": "/api/cron/catchup", "schedule": "50 * * * *" },
-
-    { "path": "/api/cron/re-enrich", "schedule": "45 2 * * *" },
-    { "path": "/api/cron/geocode-backfill", "schedule": "0 5 * * *" },
-    { "path": "/api/cron/zip-demand", "schedule": "0 6 * * *" },
-    { "path": "/api/cron/license-check", "schedule": "30 6 * * *" },
-    { "path": "/api/cron/swdi-events", "schedule": "0 7 * * *" },
-    { "path": "/api/cron/usgs-quakes", "schedule": "30 7 * * *" },
-    { "path": "/api/cron/courtlistener-liens", "schedule": "0 8 * * *" },
-    { "path": "/api/cron/state-licenses-rotate", "schedule": "30 8 * * *" },
-    { "path": "/api/cron/activate-arcgis-sources", "schedule": "0 9 * * *" },
-    { "path": "/api/cron/gdelt-triggers", "schedule": "30 9 * * *" },
-    { "path": "/api/cron/market-intel", "schedule": "0 10 * * *" },
-    { "path": "/api/cron/engagement", "schedule": "30 10 * * *" },
-    { "path": "/api/cron/billing-sync", "schedule": "0 11 * * *" },
-    { "path": "/api/cron/follow-ups", "schedule": "0 */2 * * *" },
-    { "path": "/api/cron/storm-events", "schedule": "45 */6 * * *" },
-    { "path": "/api/cron/cron-runs-cleanup", "schedule": "0 12 * * *" },
-
-    { "path": "/api/cron/fema-nri", "schedule": "0 2 * * 0" },
-    { "path": "/api/cron/openfema-declarations", "schedule": "30 2 * * 0" },
-    { "path": "/api/cron/openfema-nfip", "schedule": "0 13 * * 0" },
-    { "path": "/api/cron/openfema-ia", "schedule": "30 13 * * 0" },
-    { "path": "/api/cron/hud-reo", "schedule": "0 14 * * 0" },
-    { "path": "/api/cron/discover-sources", "schedule": "0 15 * * 0" },
-    { "path": "/api/cron/weekly-digest", "schedule": "0 17 * * 1" },
-    { "path": "/api/cron/predictive-refresh", "schedule": "0 18 * * 0" },
-    { "path": "/api/cron/review-requests", "schedule": "0 19 * * 1" },
-
-    { "path": "/api/cron/refresh-zip-aggregates", "schedule": "0 3 * * 0" },
-    { "path": "/api/cron/synthesize-pre-intent", "schedule": "0 4 * * 0" }
+    { "path": "/api/cron/catchup", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/score", "schedule": "0 7 * * *" }
   ]
 }

@@ -1,5 +1,30 @@
 # Cron schedule — rationale and revert plan
 
+## ⚠️ PLAN CONSTRAINT — read this first (verified 2026-08-05)
+
+**The Vercel account is on HOBBY, not Pro.** Confirmed by reading the dashboard
+directly: the org badge reads `Hobby`.
+
+Hobby allows **2 cron jobs, once per day each**. An earlier revision of
+`vercel.json` in this repo declared **32** crons on the assumption the account
+had been upgraded. It had not been. `vercel.json` is therefore pinned to the
+two highest-leverage daily jobs:
+
+- `catchup` — reads `cron_runs` and fires whichever tracked data crons are
+  overdue, so it self-heals the rest of the fleet from a single slot.
+- `score` — drains the unscored-permit backlog into leads.
+
+**Everything else must be triggered externally** (the historical arrangement: an
+outside scheduler hitting the Vercel HTTPS endpoints with the CRON_SECRET
+bearer), or from the god-mode admin panel at
+`/dashboard/settings/data-health`.
+
+**If the account is upgraded to Pro**, restore the full 32-entry fleet — the
+cadence reasoning below still applies, and `enrich` hourly is the single
+highest-value change (a 274k-lead backlog needs ~57 days at 4 runs/day but ~10
+at 24).
+
+
 Companion to `vercel.json`. That file **cannot carry comments** — Vercel's schema
 validation rejects unknown keys, including `$comment`, and the deployment fails
 before the build starts with:
