@@ -26,7 +26,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isGodModeEmail } from "@/lib/auth/god-mode";
+import { isGodModeSession } from "@/lib/auth/god-mode";
 import { SOURCE_SPECS, periodKey } from "@/lib/enrichment/quota";
 
 interface QuotaRow {
@@ -227,7 +227,8 @@ export async function GET() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!isGodModeEmail(user?.email)) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!isGodModeSession(user?.email, session?.access_token)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

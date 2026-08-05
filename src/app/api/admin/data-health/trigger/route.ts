@@ -22,7 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { isGodModeEmail } from "@/lib/auth/god-mode";
+import { isGodModeSession } from "@/lib/auth/god-mode";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -105,7 +105,8 @@ export async function POST(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!isGodModeEmail(user?.email)) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!isGodModeSession(user?.email, session?.access_token)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

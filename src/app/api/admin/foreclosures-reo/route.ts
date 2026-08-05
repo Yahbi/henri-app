@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isGodModeEmail } from "@/lib/auth/god-mode";
+import { isGodModeSession } from "@/lib/auth/god-mode";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -28,7 +28,8 @@ export async function GET(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!isGodModeEmail(user?.email)) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!isGodModeSession(user?.email, session?.access_token)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

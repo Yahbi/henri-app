@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isGodModeEmail } from "@/lib/auth/god-mode";
+import { isGodModeSession } from "@/lib/auth/god-mode";
 import { probeSource } from "@/lib/sources/probe";
 import { logApiError } from "@/lib/log";
 import { SourceProbeBodySchema, parseBody } from "@/lib/schemas/api";
@@ -35,7 +35,8 @@ export async function POST(req: NextRequest) {
     // God-mode gate. Admin action, not a subscriber flow.
     const userClient = await createClient();
     const { data: { user } } = await userClient.auth.getUser();
-    if (!user || !isGodModeEmail(user.email)) {
+    const { data: { session } } = await userClient.auth.getSession();
+    if (!user || !isGodModeSession(user.email, session?.access_token)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

@@ -14,8 +14,8 @@
  *    5. Whitespace around env-var entries is tolerated.
  * ─────────────────────────────────────────────────────────────────────── */
 
-import { afterEach, describe, expect, it } from "vitest";
-import { isGodModeEmail } from "../god-mode";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isGodModeEmail, isPasswordSession, isGodModeSession } from "../god-mode";
 
 const ORIGINAL_ENV = process.env.GOD_MODE_EMAILS;
 
@@ -107,5 +107,68 @@ describe("isGodModeEmail — env-var override", () => {
     expect(isGodModeEmail("alice@x.com")).toBe(true);
     expect(isGodModeEmail("bob@x.com")).toBe(true);
     expect(isGodModeEmail("")).toBe(false);
+  });
+});
+
+/**
+ * Session-aware god mode (2026-08-05).
+ *
+ * A password committed to this PUBLIC repo was live on the founder's
+ * production account, and god mode reads all 274,783 leads. The allowlist
+ * alone could not tell a Google sign-in from a login using that published
+ * string. These lock the distinction in.
+ */
+describe("isPasswordSession / isGodModeSession", () => {
+  /** Build an unsigned JWT-shaped token. Only the payload is ever read. */
+  const tokenWithAmr = (methods: string[]): string => {
+    const payload = Buffer.from(
+      JSON.stringify({ amr: methods.map((m) => ({ method: m })) }),
+      "utf8",
+    ).toString("base64url");
+    return `header.${payload}.signature`;
+  };
+
+  beforeEach(() => {
+    process.env.GOD_MODE_EMAILS = "founder@x.com";
+  });
+
+  it("flags a password-derived session", () => {
+    expect(isPasswordSession(tokenWithAmr(["password"]))).toBe(true);
+  });
+
+  it("does not flag oauth or magic-link sessions", () => {
+    expect(isPasswordSession(tokenWithAmr(["oauth"]))).toBe(false);
+    expect(isPasswordSession(tokenWithAmr(["otp"]))).toBe(false);
+  });
+
+  it("flags a session where password is one of several methods", () => {
+    // MFA and step-up flows produce multi-entry amr arrays; a password
+    // anywhere in the chain still means the published string opened it.
+    expect(isPasswordSession(tokenWithAmr(["oauth", "password"]))).toBe(true);
+  });
+
+  it("returns false — never throws — on absent or malformed tokens", () => {
+    // Fail-open on ABSENCE is deliberate: a claim we cannot read must not
+    // lock the founder out. The primary control is disabling the provider.
+    expect(isPasswordSession(null)).toBe(false);
+    expect(isPasswordSession(undefined)).toBe(false);
+    expect(isPasswordSession("")).toBe(false);
+    expect(isPasswordSession("not-a-jwt")).toBe(false);
+    expect(isPasswordSession("a.!!!not-base64!!!.c")).toBe(false);
+    expect(isPasswordSession(`header.${Buffer.from("{}", "utf8").toString("base64url")}.sig`)).toBe(false);
+  });
+
+  it("denies god mode to an allowlisted email on a password session", () => {
+    expect(isGodModeSession("founder@x.com", tokenWithAmr(["password"]))).toBe(false);
+  });
+
+  it("grants god mode to an allowlisted email on oauth or magic link", () => {
+    expect(isGodModeSession("founder@x.com", tokenWithAmr(["oauth"]))).toBe(true);
+    expect(isGodModeSession("founder@x.com", tokenWithAmr(["otp"]))).toBe(true);
+  });
+
+  it("still denies a non-allowlisted email however it signed in", () => {
+    expect(isGodModeSession("attacker@x.com", tokenWithAmr(["oauth"]))).toBe(false);
+    expect(isGodModeSession("attacker@x.com", tokenWithAmr(["password"]))).toBe(false);
   });
 });
