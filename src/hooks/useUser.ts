@@ -126,9 +126,38 @@ export function useUser(): UseUserReturn {
     // Historical footgun — see plan gap G11 + G12.
     const getUser = async () => {
       try {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
+        // Two round-trips in series used to gate every dashboard render:
+        // getUser() over the network, and only then fetchProfile(). This hook
+        // feeds DashboardTopBar, which mounts on every dashboard page, so the
+        // full serial cost was paid on every navigation by every contractor.
+        //
+        // getSession() reads the persisted session from local storage with no
+        // network call, so it hands back the user id immediately. getUser() is
+        // still the authoritative check and still runs — it just runs
+        // ALONGSIDE the profile fetch rather than in front of it, which
+        // removes one full round-trip from the critical path.
+        //
+        // The optimistic id is never trusted on its own: the profile is only
+        // kept if getUser() confirms the same user, and is refetched or
+        // cleared otherwise. A revoked or expired session cannot leak a
+        // profile this way either, because fetchProfile goes through RLS with
+        // that same token and PostgREST rejects it.
+        const { data: { session } } = await supabase.auth.getSession();
+        const cachedId = session?.user?.id ?? null;
+
+        const [{ data: { user: authUser } }] = await Promise.all([
+          supabase.auth.getUser(),
+          cachedId ? fetchProfile(cachedId) : Promise.resolve(),
+        ]);
+
         setUser(authUser);
-        if (authUser) await fetchProfile(authUser.id);
+        if (!authUser) {
+          setProfile(null);
+        } else if (authUser.id !== cachedId) {
+          // Stored session disagreed with the verified user — discard the
+          // speculative profile and fetch the right one.
+          await fetchProfile(authUser.id);
+        }
       } catch (err) {
         logger.error("useUser init failed", { error: err instanceof Error ? err.message : String(err) });
       } finally {

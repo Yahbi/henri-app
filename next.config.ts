@@ -117,6 +117,25 @@ const nextConfig: NextConfig = {
         source: "/(.*)",
         headers: securityHeaders,
       },
+      {
+        /* PMTiles archives are immutable content served via HTTP range
+         * requests — MapLibre issues many small ranged GETs per pan/zoom
+         * (see ZoningLayer.tsx). Next's default for files in /public is
+         * `public, max-age=0, must-revalidate`, which forces a conditional
+         * GET on EVERY one of those ranges, so a 59 MB zoning archive costs
+         * a network round-trip per tile even when the bytes are already in
+         * the browser cache.
+         *
+         * The archive is regenerated offline and replaced wholesale, so it
+         * is safe to cache hard. Note the filename is NOT content-hashed:
+         * if the atlas is ever regenerated, ship it under a new filename
+         * (or add a version query param at the call site) rather than
+         * overwriting in place, because clients will hold this for a year. */
+        source: "/:path*.pmtiles",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
     ];
   },
 };
