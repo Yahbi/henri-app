@@ -1,12 +1,38 @@
-# Detroit, MI — Building Permits Applications.
-# Verified 2026-05-06: 95,035 records on the live FeatureServer.
-# BSEED is the issuing agency. Old Socrata domain (data.detroitmi.gov)
-# is decommissioned — use ArcGIS REST.
+# Detroit, MI — BSEED Trades Permits.
 #
-# Trade coverage is excellent: PermitType field separates
-# "Electrical", "Mechanical", "Plumbing", "Building", and
-# "Demolition". ConstructionType + WorkType give finer-grained
-# remodel-vs-new resolution.
+# ─── 2026-08-05: THIS CONFIG WAS POINTED AT THE WRONG STATE ───────────────
+# The previous URL here was
+#   services2.arcgis.com/CyVvlIiUfRBmMQuu/.../Building_Permits_Applications_view
+# and it serves VIRGINIA BEACH, VA — not Detroit. Verified by fetching it:
+# 103,672 rows, and every sampled row reads City="Virginia Beach", State="VA",
+# Zip=23451. The file was nonetheless named DETROIT-MI, declared state: MI,
+# and carried `status: verified`, so nothing downstream had any reason to
+# doubt it.
+#
+# That single mistake is the likely explanation for Michigan sitting at 79
+# permits in a database of 2.25M. It was never a coverage gap — the config
+# that was supposed to cover Detroit could not return a Michigan row.
+#
+# The Virginia Beach feed is genuinely useful and has been re-filed under its
+# real identity at configs/virginia-beach-va.yml rather than deleted.
+#
+# ─── The real Detroit source ──────────────────────────────────────────────
+# BSEED (Buildings, Safety Engineering and Environmental Department) is the
+# issuing agency. Verified live 2026-08-05: 117,481 rows.
+#
+# Why this layer specifically:
+#   - owner_name is populated (99.6% table-wide, 56,568 distinct values —
+#     checked against the repeated-placeholder failure mode, and it passes).
+#   - permit_type is a clean trade enum: Electrical / Mechanical / Plumbing /
+#     Boiler / Fire Alarm / Generator / Elevator. That is direct trade
+#     attribution with no keyword guessing.
+#   - contractor_address 99.8% and contact_business_name 87.5% give
+#     competitive intel on who is already working the address.
+#   - parcel_id + lat/lng present, so it joins to the parcel sidecar.
+#
+# contact_name is deliberately NOT mapped: it is only 35.4% filled overall
+# and declining (23.2% in the trailing 12 months), so treating it as a
+# contact signal would overstate contact completeness on most rows.
 
 loader: arcgis
 name: DETROIT-MI
@@ -14,20 +40,20 @@ city: Detroit
 state: MI
 status: verified
 
-url: https://services2.arcgis.com/CyVvlIiUfRBmMQuu/arcgis/rest/services/Building_Permits_Applications_view/FeatureServer/0/query
+url: https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/bseed_trades_permits/FeatureServer/0/query
 limit: 200
 where: '1=1'
-order_field: IssueDate
+order_field: issued_date
 
-fields:
-  permit_no:        PermitNumber
-  issued_date:      IssueDate
-  address:          StreetAddress
-  zip:              Zip
-  description:      WorkDesc
-  estimated_value:  EstimatedCost
-  applicant:        Applicant
-  contractor:       ContractorName
-  record_type:      PermitType
-  work_type:        WorkType
-  status:           Status
+field_map:
+  id:               record_id
+  permit_type:      permit_type
+  description:      work_description
+  address:          address
+  zip:              zip_code
+  issued_date:      issued_date
+  owner_name:       owner_name
+  contractor_name:  contact_business_name
+  parcel_id:        parcel_id
+  lat:              latitude
+  lng:              longitude

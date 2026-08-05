@@ -1,0 +1,60 @@
+# Bozeman, MT — Building Permits (layer 2: Certificate of Occupancy).
+#
+# Permits that reached certificate of occupancy. Verified 2026-08-05: 317 rows.
+# Lowest urgency of the three (the work is finished), but it completes the
+# lifecycle and is the right surface for follow-on trades — a finished build
+# is a landscaping, fencing or finish-carpentry lead.
+#
+# WHY THIS FILE EXISTS: Henri had a config for layer 1 only, so it was
+# reading one third of a service that has three layers — all of which
+# carry the SAME 100%-filled CONTRACTOR_EMAIL and CONTRACTOR_PHONE_1.
+# Bozeman is the only US permit feed found so far that publishes both to
+# an anonymous request, and phone fill is Henri's binding constraint at
+# ~1%, so leaving two thirds of it unread was expensive.
+# Verified 2026-05-06: ~720 active records on a rolling 6-month window.
+# ~1.5-2k/yr issued city-wide.
+#
+# **JACKPOT**: this dataset publishes contractor email + phone in the
+# public REST response. Henri's #1 score-cap blocker is contact-
+# completeness sparsity (1% phone, 39% owner_name fleet-wide). For
+# Bozeman leads specifically, both will be ~100%. Score the leads
+# accordingly — they should pop to the top of the urgency feed for
+# any contractor with MT in their territory.
+#
+# Bozeman is small (city pop 57k, county pop ~120k). The volume
+# itself isn't large but the data quality is uniquely high.
+#
+# Layer numbering on this MapServer:
+#   /MapServer/0 = Plan Review
+#   /MapServer/1 = Active and Open  ← we ingest this
+#   /MapServer/2 = Certificate of Occupancy
+
+loader: arcgis
+name: BOZEMAN-MT-CO
+city: Bozeman
+state: MT
+status: verified
+
+url: https://gisweb.bozeman.net/arcgis/rest/services/Internal/Building_Permits/MapServer/2/query
+limit: 200
+where: '1=1'
+order_field: PERMIT_ISSUE_DATE
+
+fields:
+  permit_no:        PERMIT_NUMBER
+  issued_date:      PERMIT_ISSUE_DATE
+  address:          LOCATION
+  description:      APPLICATION_DESC
+  estimated_value:  VALUATION
+  applicant:        OWNER_NAME
+  contractor:       CONTRACTOR_NAME
+  record_type:      PERMIT_TYPE
+  work_type:        APPLICATION_TYPE
+  status:           PERMIT_STATUS
+
+# NB: load_arcgis.py only normalizes the canonical Henri schema fields.
+# CONTRACTOR_EMAIL and CONTRACTOR_PHONE_1 land in raw_json (they're in
+# the upstream response automatically since we request outFields=*).
+# A follow-up enricher pass can mine them out via:
+#   raw_json->>'CONTRACTOR_EMAIL'  / raw_json->>'CONTRACTOR_PHONE_1'
+# in description-miner.ts or a dedicated bozeman_contact_extractor.

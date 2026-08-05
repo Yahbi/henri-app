@@ -1,0 +1,40 @@
+# Virginia Beach, VA — Building Permit Applications.
+#
+# ─── Provenance: this feed was misfiled as Detroit ────────────────────────
+# This exact URL lived in configs/detroit-mi.yml until 2026-08-05, named
+# DETROIT-MI and declared state: MI with status: verified. It is not Detroit
+# and never was. Verified by fetching it: 103,672 rows, and sampled rows read
+# City="Virginia Beach", State="VA", Zip=23451.
+#
+# The feed itself is fine and worth having — Virginia Beach is ~460k people
+# and Henri holds only 11,342 VA rows total. So it is re-filed here under its
+# real identity rather than deleted. Note that some portion of Henri's
+# existing VA count may already have come from this endpoint under the wrong
+# label; the state attribution would still have been correct if the loader
+# read State from the row rather than from the config, but the CITY
+# attribution would have said Detroit.
+#
+# Lesson worth keeping: `status: verified` meant someone confirmed the URL
+# RESPONDS, not that it responds with the jurisdiction named on the file. Any
+# future verification pass should assert on a sampled row's City/State, not
+# just on HTTP 200 and a row count.
+
+loader: arcgis
+name: VIRGINIA-BEACH-VA
+city: Virginia Beach
+state: VA
+status: verified
+
+url: https://services2.arcgis.com/CyVvlIiUfRBmMQuu/arcgis/rest/services/Building_Permits_Applications_view/FeatureServer/0/query
+limit: 200
+where: '1=1'
+order_field: IssueDate
+
+field_map:
+  id:            PermitNumber
+  permit_type:   PermitType
+  address:       StreetAddress
+  city:          City
+  state:         State
+  zip:           Zip
+  issued_date:   IssueDate
