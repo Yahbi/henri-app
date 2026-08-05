@@ -79,12 +79,36 @@ interface ArcGISResponse {
 
 export const DEFAULT_PAGE_SIZE = 1000;
 
+/**
+ * Newest-first ordering (2026-08-05).
+ *
+ * This query used to carry no `orderByFields` at all. Without one, ArcGIS
+ * returns rows in whatever order the backend finds convenient — in practice
+ * ascending OBJECTID, i.e. OLDEST FIRST. Combined with the resume cursor in
+ * lib/scrapers/cursor.ts, that put every newly-issued permit at the very END
+ * of a feed the cursor was walking from the front. A source with 1M rows of
+ * history therefore had to be fully re-ingested — 50+ runs at 20k rows each —
+ * before a permit issued today could be reached. Measured consequence, from
+ * the 20:04 UTC run: 191,775 rows fetched, 186,704 updated, **0 inserted**.
+ * The scraper was busy and productive-looking and could not surface a single
+ * new permit.
+ *
+ * Ordering DESC makes offset 0 the newest page, which is what the freshness
+ * pass in /api/cron/scrape depends on.
+ *
+ * `orderBy` is best-effort: ArcGIS rejects an unknown field with an in-band
+ * `error` object (HTTP 200) rather than a status code, so the caller retries
+ * once unordered and remembers the downgrade for the rest of the run. Worst
+ * case we are back to the previous behaviour for that source, never worse.
+ */
 async function fetchArcGISPage(
   baseUrl: string,
   offset: number,
-  limit: number = DEFAULT_PAGE_SIZE
+  limit: number = DEFAULT_PAGE_SIZE,
+  orderBy: string | null = null,
 ): Promise<ArcGISResponse> {
-  const url = `${baseUrl}/query?where=1%3D1&outFields=*&f=json&resultOffset=${offset}&resultRecordCount=${limit}&returnGeometry=true`;
+  const order = orderBy ? `&orderByFields=${encodeURIComponent(orderBy)}` : "";
+  const url = `${baseUrl}/query?where=1%3D1&outFields=*&f=json&resultOffset=${offset}&resultRecordCount=${limit}&returnGeometry=true${order}`;
 
   for (let attempt = 0; attempt <= 3; attempt++) {
     try {
@@ -232,6 +256,37 @@ export function resolveId(
   return null;
 }
 
+/**
+ * Fetch one page, degrading to unordered if the server rejects the ordering.
+ *
+ * ArcGIS signals a bad `orderByFields` in-band — HTTP 200 with an `error`
+ * object — so a status-code check alone would miss it and we would silently
+ * treat an error envelope as an empty page.
+ *
+ * Returns the ordering that actually worked so the caller can stop paying for
+ * a retry on every subsequent page of the same run.
+ */
+async function fetchPageWithOrderFallback(
+  endpoint: string,
+  offset: number,
+  pageSize: number,
+  orderBy: string | null,
+): Promise<{ data: ArcGISResponse; orderBy: string | null }> {
+  if (orderBy === null) {
+    return { data: await fetchArcGISPage(endpoint, offset, pageSize, null), orderBy: null };
+  }
+  try {
+    const data = await fetchArcGISPage(endpoint, offset, pageSize, orderBy);
+    if (!data.error) return { data, orderBy };
+    // Could be the ordering, could be something else. Retrying unordered
+    // costs one request and tells us which: if the error persists it is
+    // real and the existing page-0 error handling reports it unchanged.
+    return { data: await fetchArcGISPage(endpoint, offset, pageSize, null), orderBy: null };
+  } catch {
+    return { data: await fetchArcGISPage(endpoint, offset, pageSize, null), orderBy: null };
+  }
+}
+
 export interface ArcGISScrapeOptions {
   maxPages?: number;
   pageSize?: number;
@@ -270,11 +325,22 @@ export async function scrapeArcGISSource(
   let writeFailures = 0;
   let lastPageFingerprint: string | null = null;
 
+  // Prefer the configured date field — "most recently issued" is the ordering
+  // the freshness pass actually wants. Fall back to OBJECTID, which every
+  // FeatureServer exposes and which increases with insertion order, so it is
+  // a good proxy for recency when no date field is mapped. Either may be
+  // rejected; fetchPageWithOrderFallback degrades to unordered if so.
+  let orderBy: string | null = source.date_field
+    ? `${source.date_field} DESC`
+    : "OBJECTID DESC";
+
   for (let page = 0; page < maxPages; page++) {
     let data: ArcGISResponse;
 
     try {
-      data = await fetchArcGISPage(source.endpoint, offset, pageSize);
+      const res = await fetchPageWithOrderFallback(source.endpoint, offset, pageSize, orderBy);
+      data = res.data;
+      orderBy = res.orderBy;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("ArcGIS fetch error", { source_key: source.source_key, page, offset, error: message });

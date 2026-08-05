@@ -71,6 +71,14 @@ interface SourceResult {
   errors: number;
   nextOffset: number;
   detail: string | null;
+  /**
+   * Rows inserted by the freshness pass specifically, split out from the
+   * backfill. Without this split the summary cannot answer the only question
+   * that matters after the 2026-08-05 change — "are we picking up NEW
+   * permits, or just re-reading history?" — because a single `inserted`
+   * total looks identical either way.
+   */
+  headInserted: number;
 }
 
 /** Field mapping echoed into the diagnostic so an operator can diff it. */
@@ -95,6 +103,7 @@ function configuredMapping(source: DBPermitSource): Record<string, string | null
 async function runOneSource(
   source: DBPermitSource,
   startOffset: number,
+  maxPages?: number,
 ): Promise<{ report: ScrapeReport; scraper: ScraperKind }> {
   const scraper = resolveScraperKind(source.source_type, source.endpoint);
 
@@ -115,17 +124,17 @@ async function runOneSource(
           date_field: source.dateField,
           value_field: source.valueField,
         },
-        { startOffset },
+        { startOffset, maxPages },
       ),
     };
   }
 
   if (scraper === "ckan") {
-    return { scraper, report: await scrapeCkanSource(source, { startOffset }) };
+    return { scraper, report: await scrapeCkanSource(source, { startOffset, maxPages }) };
   }
 
   if (scraper === "socrata") {
-    return { scraper, report: await scrapeSocrataSource(source, { startOffset }) };
+    return { scraper, report: await scrapeSocrataSource(source, { startOffset, maxPages }) };
   }
 
   // BLOCKER 5 (general case): fail LOUDLY rather than mis-dispatching into the
@@ -141,7 +150,7 @@ async function runOneSource(
   };
 }
 
-async function handler(request: NextRequest): Promise<NextResponse> {
+async function runScrape(request: NextRequest): Promise<NextResponse> {
   const authHeader = request.headers.get("authorization");
   if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -203,6 +212,33 @@ async function handler(request: NextRequest): Promise<NextResponse> {
   const BUDGET_MS = 230_000;
   let budgetExhausted = false;
 
+  // ── FRESHNESS PASS vs BACKFILL (2026-08-05) ───────────────────────────
+  // Measured before this change (20:04 UTC run): 191,775 rows fetched,
+  // 186,704 updated, **0 inserted**, 10 sources processed, budget exhausted.
+  // Every run spent its full 230s re-upserting permits we already had.
+  //
+  // The cause is the interaction of two individually-reasonable decisions.
+  // The resume cursor walks each feed from the newest row backwards through
+  // history, and each source was allowed 20 pages x 1,000 rows per run. So a
+  // source with 1M rows of history needed 50+ consecutive runs of backfill
+  // before the cursor wrapped and the newest page came up again — and until
+  // it did, a permit issued today was unreachable. The 20k/source cap also
+  // meant only ~10 of ~239k enabled sources were touched per run.
+  //
+  // Splitting the budget fixes both. Every source in the rotation now reads
+  // its newest HEAD_PAGES first (offset 0 = newest, which is what the DESC
+  // ordering in the Socrata and ArcGIS scrapers guarantees), so new permits
+  // land on EVERY run regardless of how much history is left to backfill.
+  // Backfill continues from the cursor with the smaller remaining allowance,
+  // which also lets each run cover ~2.5x more sources.
+  //
+  // Backfill is deliberately the side that gave up pages: permit_freshness is
+  // the heaviest scoring signal, so a permit from 2019 is worth far less to a
+  // contractor than one from this morning. History still fills in, just at a
+  // rate that no longer starves the thing customers actually pay for.
+  const HEAD_PAGES = 2;
+  const BACKFILL_PAGES = 6;
+
   if (useDbSources) {
     // Process DB sources in batches of 5 concurrent
     const BATCH = 5;
@@ -223,12 +259,44 @@ async function handler(request: NextRequest): Promise<NextResponse> {
           // restarting at 0 and re-reading the same newest 20k rows forever.
           const startOffset = explicitOffset ?? source.cursorOffset;
           try {
-            const { report, scraper } = await runOneSource(source, startOffset);
+            // Freshness pass — only meaningful when the cursor has already
+            // moved off the newest page. At offset 0 the backfill call below
+            // IS the newest page, so a head pass would just fetch it twice.
+            // Skipped entirely for manual ?offset= backfills, which exist
+            // precisely to read one specific slice of history.
+            let headInserted = 0;
+            let headUpdated = 0;
+            let headFetched = 0;
+            if (explicitOffset === null && startOffset > 0) {
+              try {
+                const head = await runOneSource(source, 0, HEAD_PAGES);
+                headInserted = head.report.inserted;
+                headUpdated = head.report.updated;
+                headFetched = head.report.fetched;
+              } catch (err) {
+                // A head-pass failure must not cost this source its backfill;
+                // the backfill call below has its own error handling.
+                logger.warn("scrape.head_pass_failed", {
+                  source_key: source.source_key,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
+
+            const { report, scraper } = await runOneSource(
+              source,
+              startOffset,
+              BACKFILL_PAGES,
+            );
 
             await recordSourceRun(source.source_key, {
               outcome: report.outcome,
-              rowCount: report.inserted + report.updated,
-              fetched: report.fetched,
+              // Head rows count toward the source's health metric — they are
+              // real rows this source produced this run, and excluding them
+              // would make a source that is delivering fresh permits look
+              // less productive than one only replaying history.
+              rowCount: report.inserted + report.updated + headInserted + headUpdated,
+              fetched: report.fetched + headFetched,
               mapped: report.mapped,
               usable: report.usable,
               observedKeys: report.observedKeys,
@@ -244,10 +312,10 @@ async function handler(request: NextRequest): Promise<NextResponse> {
                   : report.nextOffset,
             });
 
-            totalInserted += report.inserted;
-            totalUpdated += report.updated;
+            totalInserted += report.inserted + headInserted;
+            totalUpdated += report.updated + headUpdated;
             totalErrors += report.errors;
-            totalFetched += report.fetched;
+            totalFetched += report.fetched + headFetched;
             outcomeCounts[report.outcome] = (outcomeCounts[report.outcome] ?? 0) + 1;
 
             if (isFailureOutcome(report.outcome)) {
@@ -265,13 +333,14 @@ async function handler(request: NextRequest): Promise<NextResponse> {
               type: source.source_type,
               scraper,
               outcome: report.outcome,
-              fetched: report.fetched,
+              fetched: report.fetched + headFetched,
               mapped: report.mapped,
-              inserted: report.inserted,
-              updated: report.updated,
+              inserted: report.inserted + headInserted,
+              updated: report.updated + headUpdated,
               errors: report.errors,
               nextOffset: report.nextOffset,
               detail: report.detail,
+              headInserted,
             });
           } catch (err) {
             // Catch-all: a broken source must never crash the whole cron run.
@@ -293,6 +362,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
               errors: 1,
               nextOffset: startOffset,
               detail: message,
+              headInserted: 0,
             });
           }
         })
@@ -321,6 +391,9 @@ async function handler(request: NextRequest): Promise<NextResponse> {
           errors: report.errors,
           nextOffset: report.nextOffset,
           detail: report.detail,
+          // Hardcoded-fallback path has no cursor, so it always reads the
+          // newest page; there is no separate head lane to report.
+          headInserted: 0,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
@@ -340,6 +413,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
           errors: 1,
           nextOffset: 0,
           detail: message,
+          headInserted: 0,
         });
       }
     }
@@ -357,6 +431,10 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     // NOT in this blob — a 661-entry map written 24x/day would add ~90MB/month
     // to cron_runs on a DB that has already hit disk-full once.
     resumed: results.filter((r) => r.nextOffset > 0).length,
+    // The number to watch. If this is 0 across consecutive runs, the
+    // freshness pass is not finding new permits and the pipeline is idling
+    // even though totalUpdated will look healthy.
+    headInserted: results.reduce((sum, r) => sum + r.headInserted, 0),
   };
 
   const failed = results.filter((r) => r.outcome !== "ok" && r.outcome !== "empty").length;
@@ -375,6 +453,37 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     results,
     timestamp: new Date().toISOString(),
   });
+}
+
+/**
+ * Guarantees an audit row even when the run dies.
+ *
+ * `runScrape` writes its cron_runs row on the LAST line of the happy path, so
+ * every other exit — an unhandled throw, an early return, or Vercel killing
+ * the function at the 300s wall — left no trace at all. The consequence was
+ * not subtle: `scrape` is scheduled 24x/day and `cron_runs` contained ZERO
+ * rows for it, ever, so the single most important job in the pipeline was
+ * invisible to the data-health page and to every "is ingest alive?" query. A
+ * failure that never logs is indistinguishable from a job that was never
+ * scheduled, which is exactly the ambiguity that let this sit.
+ *
+ * The catch does not swallow: it records, then returns 500 so the fleet's
+ * non-200 check still marks the workflow run failed.
+ */
+async function handler(request: NextRequest): Promise<NextResponse> {
+  const startedAt = Date.now();
+  try {
+    return await runScrape(request);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error("scrape.unhandled", { error: message });
+    await logCronRun(SCRAPE_CRON_PATH, startedAt, {
+      status: "error",
+      error: message,
+      trigger: detectTrigger(request),
+    });
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
 }
 
 export const GET  = handler;

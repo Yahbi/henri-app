@@ -96,19 +96,44 @@ jobs:
           # from Supabase's own alerting, and one failure per 30 minutes
           # buries real alerts under noise. The skip is loud in the log and
           # in the step summary instead.
-          HEALTH_CODE=$(curl -sS -o /tmp/health.json -w "%{http_code}" \
-            --max-time 25 \
-            "https://meethenri.com/api/health" 2>/dev/null) || HEALTH_CODE="000"
+          # RETRY, added 2026-08-05 (same day, second incident). The single-shot
+          # version of this probe cost ~9 hours of ingest on its first day.
+          #
+          # /api/health runs on a Vercel lambda that cold-starts. A cold start
+          # opens a NEW database connection, and the first query on a cold
+          # connection to a busy instance can take 15-20s — the failing run at
+          # 18:15 reported latency_ms 19723 with uptime_seconds 19, i.e. the
+          # probe WAS the first request that container ever served. Fourteen
+          # minutes later the same endpoint answered in 110ms. Nothing about
+          # the database had changed; the probe had simply paid the cold-start
+          # cost and attributed it to Supabase.
+          #
+          # One slow sample is therefore not evidence of an outage, but the
+          # old code treated it as proof and skipped the entire slot. Three
+          # samples with backoff distinguishes the two cases that matter: a
+          # cold container (first fails, second succeeds — proceed) from a
+          # genuinely down backend (all three fail — skip, which is the
+          # behaviour the breaker exists for and is preserved exactly).
+          HEALTH_CODE="000"
+          for attempt in 1 2 3; do
+            HEALTH_CODE=$(curl -sS -o /tmp/health.json -w "%{http_code}" \
+              --max-time 30 \
+              "https://meethenri.com/api/health" 2>/dev/null) || HEALTH_CODE="000"
+            echo "health probe attempt $attempt -> HTTP $HEALTH_CODE"
+            head -c 300 /tmp/health.json 2>/dev/null || true
+            echo
+            [ "$HEALTH_CODE" = "200" ] && break
+            # Don't sleep after the last attempt — it only delays the skip.
+            [ "$attempt" -lt 3 ] && sleep 15
+          done
 
-          echo "health probe -> HTTP $HEALTH_CODE"
-          head -c 300 /tmp/health.json 2>/dev/null || true
-          echo
           if [ "$HEALTH_CODE" != "200" ]; then
-            echo "::warning::Backend unhealthy (HTTP $HEALTH_CODE) — firing NOTHING this slot."
+            echo "::warning::Backend unhealthy (HTTP $HEALTH_CODE after 3 attempts) — firing NOTHING this slot."
             {
               echo "### cron-fleet skipped"
               echo ""
-              echo "Health probe returned **HTTP $HEALTH_CODE**, so no endpoints were fired."
+              echo "Health probe returned **HTTP $HEALTH_CODE** on all 3 attempts,"
+              echo "so no endpoints were fired."
               echo ""
               echo "This is the circuit breaker, not a cron bug. Firing into an"
               echo "unresponsive backend is what amplified the 2026-08-05 outage."
