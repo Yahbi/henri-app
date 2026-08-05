@@ -72,13 +72,26 @@ interface SourceResult {
   nextOffset: number;
   detail: string | null;
   /**
-   * Rows inserted by the freshness pass specifically, split out from the
-   * backfill. Without this split the summary cannot answer the only question
-   * that matters after the 2026-08-05 change — "are we picking up NEW
-   * permits, or just re-reading history?" — because a single `inserted`
-   * total looks identical either way.
+   * Rows WRITTEN by the freshness pass specifically, split out from the
+   * backfill, so the summary can answer "is the head lane doing any work?"
+   *
+   * Written, not inserted, and the distinction is not pedantic: the scrapers
+   * cannot tell an insert from an update. `.upsert()` through PostgREST
+   * returns the affected rows with no flag for which branch each took, so
+   * socrata.ts:296 hardcodes `inserted: 0` and counts everything as
+   * `updated`. Any field here named "inserted" would therefore report a
+   * constant 0 and mean nothing — a metric that cannot vary is worse than no
+   * metric, because it reads as a finding.
+   *
+   * For the count of genuinely-new permits, measure the table, not the
+   * scraper: `count(*) FROM permits WHERE created_at > <run start>`. That is
+   * how the 2026-08-05 fix was verified (12,999 new rows on the old code vs
+   * 58,427 on the new one, same 230s budget). Wiring that number in here
+   * wants a BRIN index on permits.created_at first — the column is unindexed
+   * today, so the query seq-scans 2.26M rows and would risk the 8s PostgREST
+   * statement timeout inside the cron itself.
    */
-  headInserted: number;
+  headWritten: number;
 }
 
 /** Field mapping echoed into the diagnostic so an operator can diff it. */
@@ -340,7 +353,7 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
               errors: report.errors,
               nextOffset: report.nextOffset,
               detail: report.detail,
-              headInserted,
+              headWritten: headInserted + headUpdated,
             });
           } catch (err) {
             // Catch-all: a broken source must never crash the whole cron run.
@@ -362,7 +375,7 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
               errors: 1,
               nextOffset: startOffset,
               detail: message,
-              headInserted: 0,
+              headWritten: 0,
             });
           }
         })
@@ -393,7 +406,7 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
           detail: report.detail,
           // Hardcoded-fallback path has no cursor, so it always reads the
           // newest page; there is no separate head lane to report.
-          headInserted: 0,
+          headWritten: 0,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
@@ -413,7 +426,7 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
           errors: 1,
           nextOffset: 0,
           detail: message,
-          headInserted: 0,
+          headWritten: 0,
         });
       }
     }
@@ -431,10 +444,10 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
     // NOT in this blob — a 661-entry map written 24x/day would add ~90MB/month
     // to cron_runs on a DB that has already hit disk-full once.
     resumed: results.filter((r) => r.nextOffset > 0).length,
-    // The number to watch. If this is 0 across consecutive runs, the
-    // freshness pass is not finding new permits and the pipeline is idling
-    // even though totalUpdated will look healthy.
-    headInserted: results.reduce((sum, r) => sum + r.headInserted, 0),
+    // The number to watch. 0 across consecutive runs means the freshness
+    // lane is not fetching anything, i.e. the head pass is broken or every
+    // source in the rotation is sitting at cursor 0.
+    headWritten: results.reduce((sum, r) => sum + r.headWritten, 0),
   };
 
   const failed = results.filter((r) => r.outcome !== "ok" && r.outcome !== "empty").length;
