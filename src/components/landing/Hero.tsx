@@ -36,6 +36,26 @@ export function Hero({ permitsLabel, activeStatesLabel, activeStates }: HeroProp
 
   return (
     <section className="relative min-h-screen flex items-center overflow-hidden bg-background">
+      {/* Blueprint plate — roof-framing plans + parcel boundaries, the actual
+          source material Henri works from. Anchored right so the headline
+          column on the left stays on flat background; masked to nothing by
+          ~55% width so text contrast is never affected. Sits UNDER the
+          gradient mesh below. Decorative only. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-20 hidden lg:block"
+        style={{
+          backgroundImage: "url(/brand/hero-blueprint.webp)",
+          backgroundSize: "cover",
+          backgroundPosition: "right center",
+          opacity: 0.5,
+          maskImage:
+            "linear-gradient(to right, transparent 0%, transparent 45%, rgba(0,0,0,0.85) 75%, rgba(0,0,0,1) 100%)",
+          WebkitMaskImage:
+            "linear-gradient(to right, transparent 0%, transparent 45%, rgba(0,0,0,0.85) 75%, rgba(0,0,0,1) 100%)",
+        }}
+      />
+
       {/* Gradient mesh background */}
       <div
         aria-hidden="true"
