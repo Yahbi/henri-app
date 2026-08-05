@@ -233,6 +233,90 @@ describe("Wave 1.5/2.A/2.B disaster-context tokens", () => {
   });
 });
 
+/* ── Send-path safety ─────────────────────────────────────────────────────
+ *
+ * Added after the 2026-08-05 audit found that POST /api/outreach enqueued
+ * the RAW template body — literal {{owner_first}} / {{permit_number}} text
+ * reached homeowners over SMS and email, because nothing on the send path
+ * ever called this renderer. Two fixes landed: the enqueue path now calls
+ * renderTemplate, and the follow-ups cron refuses to transmit any body
+ * that still contains a double-brace placeholder.
+ *
+ * These cases lock the invariant that makes that guard safe to run: a
+ * fully-known template must ALWAYS render clean (otherwise the guard would
+ * start blocking legitimate sends), and an unknown token must ALWAYS
+ * survive (otherwise the guard would have nothing to catch).
+ * ─────────────────────────────────────────────────────────────────────── */
+describe("send-path safety — no placeholder may reach a homeowner", () => {
+  /* Mirrors the pre-send guard in src/app/api/cron/follow-ups/route.ts.
+   * Duplicated on purpose: the guard lives inside a cron route handler
+   * that can't be imported without a Next request context, and this is
+   * precisely the invariant the renderer exists to satisfy. If the token
+   * grammar in tokens.ts changes, both this literal and the cron's must
+   * change with it. */
+  const UNRESOLVED_TOKEN = /\{\{\s*[a-z0-9_]+\s*\}\}/i;
+
+  const ALL_TOKENS_BODY = KNOWN_TOKENS.map((t) => `{{${t}}}`).join(" | ");
+
+  it("resolves every KNOWN_TOKEN — a fully-populated context renders clean", () => {
+    const out = resolveTokens(ALL_TOKENS_BODY, FULL_CTX);
+    expect(UNRESOLVED_TOKEN.test(out)).toBe(false);
+    expect(out).not.toContain("undefined");
+    expect(out).not.toContain("null");
+  });
+
+  it("clears every placeholder even from an EMPTY context (fallbacks only)", () => {
+    // The enqueue path builds its context best-effort: if the lead or
+    // profile lookup degrades, the context can be near-empty. That must
+    // still produce a sendable message, not a blocked one.
+    const out = resolveTokens(ALL_TOKENS_BODY, {});
+    expect(UNRESOLVED_TOKEN.test(out)).toBe(false);
+    expect(out).not.toContain("undefined");
+    expect(out).not.toContain("null");
+  });
+
+  it("never renders 'undefined' or 'null' for a missing or null value", () => {
+    for (const token of KNOWN_TOKENS) {
+      const asNull = { [token]: null } as Partial<OutreachTokenContext>;
+      const asUndefined = { [token]: undefined } as Partial<OutreachTokenContext>;
+      expect(resolveTokens(`{{${token}}}`, {})).not.toMatch(/undefined|null/);
+      expect(resolveTokens(`{{${token}}}`, asNull)).not.toMatch(/undefined|null/);
+      expect(resolveTokens(`{{${token}}}`, asUndefined)).not.toMatch(
+        /undefined|null/,
+      );
+    }
+  });
+
+  it("a missing owner first name reads as 'there', never 'undefined'", () => {
+    // The single highest-consequence case: this is the opening word of
+    // the message the homeowner reads.
+    expect(resolveTokens("Hi {{owner_first}},", {})).toBe("Hi there,");
+    expect(resolveTokens("Hi {{owner_first}},", { owner_first: null })).toBe(
+      "Hi there,",
+    );
+    expect(
+      resolveTokens("Hi {{owner_first}},", { owner_first: undefined }),
+    ).toBe("Hi there,");
+  });
+
+  it("leaves a MISSPELLED token intact so the pre-send guard blocks the send", () => {
+    // A contractor typing {{owner_firstname}} must not have it silently
+    // deleted — the guard needs to see it and fail the row loudly.
+    const out = resolveTokens("Hi {{owner_firstname}}", FULL_CTX);
+    expect(out).toBe("Hi {{owner_firstname}}");
+    expect(UNRESOLVED_TOKEN.test(out)).toBe(true);
+  });
+
+  it("the guard regex catches an unknown token in the SUBJECT too", () => {
+    const out = renderTemplate(
+      { subject: "Re: {{job_number}}", body: "Hi {{owner_first}}" },
+      FULL_CTX,
+    );
+    expect(UNRESOLVED_TOKEN.test(out.body)).toBe(false);
+    expect(UNRESOLVED_TOKEN.test(out.subject)).toBe(true);
+  });
+});
+
 describe("renderTemplate", () => {
   it("renders subject + body in one call", () => {
     const t = {

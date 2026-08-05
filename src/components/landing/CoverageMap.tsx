@@ -25,7 +25,11 @@
  * Truthfulness: every number here is a stored count. The only editorial
  * choice is ACTIVE_STATE_MIN_PERMITS, the floor at which we are willing
  * to call a state "covered" — states below it still render, in their
- * own dimmer tier, rather than being hidden.
+ * own dimmer tier, rather than being hidden. As of 2026-08-05 that floor
+ * is measured on ZIP-bearing permits, because a permit with no ZIP
+ * cannot enter a territory and so cannot be sold; the tiles' shading
+ * respects it (see the tier assignment) while the tooltips keep
+ * reporting each state's full permit count.
  */
 
 import {
@@ -124,6 +128,11 @@ const STRIDE = CELL + GAP;
  * permits but not enough to promise a contractor anything, so they get
  * a visible-but-faint treatment instead of being counted in the
  * "N states" headline. See ACTIVE_STATE_MIN_PERMITS.
+ *
+ * Since 2026-08-05 a state also lands in `seeded` when it holds plenty
+ * of permits but too few that carry a ZIP — records we cannot place in
+ * a territory. The tier thresholds below therefore only apply to states
+ * already qualified as covered; see the tier assignment in the render.
  */
 type Tier = "none" | "seeded" | "low" | "mid" | "high" | "top";
 
@@ -152,13 +161,22 @@ const TIER_STYLES: Record<Tier, { rect: string; text: string }> = {
   top: { rect: "fill-primary stroke-primary", text: "fill-background" },
 };
 
-/** Legend swatches, densest first — mirrors how the eye reads the map. */
+/**
+ * Legend swatches, densest first — mirrors how the eye reads the map.
+ *
+ * The faintest swatch was labelled "Seeded", which described only one of
+ * the two ways a tile now lands there. Since 2026-08-05 it also catches
+ * states holding real volume that we cannot yet place in a territory, and
+ * calling those "seeded" would read as "barely any data" when the truth
+ * is "plenty of records, nothing sellable". "Records only" covers both
+ * without claiming either.
+ */
 const LEGEND: ReadonlyArray<{ tier: Tier; label: string }> = [
   { tier: "top", label: "100k+" },
   { tier: "high", label: "25k+" },
   { tier: "mid", label: "5k+" },
   { tier: "low", label: "500+" },
-  { tier: "seeded", label: "Seeded" },
+  { tier: "seeded", label: "Records only" },
 ];
 
 const nf = new Intl.NumberFormat("en-US");
@@ -217,8 +235,26 @@ export function CoverageMap({
           const count = counts[state];
           // Without a histogram, reproduce the old binary so the map
           // still reads correctly rather than going entirely dark.
+          //
+          // With one, volume alone no longer earns a state a "covered"
+          // shade. `activeStates` is now decided on ZIP-BEARING permits
+          // (see ACTIVE_STATE_MIN_PERMITS) because territories are sold
+          // per ZIP, and 63.9% of the catalog carries none — so a state
+          // can hold tens of thousands of permits and still have nothing
+          // a contractor could buy. Such a state is clamped to `seeded`:
+          // visible, honest about holding records, but not shaded like
+          // territory that is on sale. The tooltip still reports its true
+          // permit count, so this dims a claim without hiding a number.
+          //
+          // No-op while the two agree (raw volume and ZIP-bearing volume
+          // certified the same list before 2026-08-05); it exists so the
+          // map cannot drift back into over-claiming when they diverge.
           const tier: Tier = hasHistogram
-            ? tierFor(count)
+            ? activeSet.has(state)
+              ? tierFor(count)
+              : count != null && count > 0
+                ? "seeded"
+                : "none"
             : activeSet.has(state)
               ? "high"
               : "none";

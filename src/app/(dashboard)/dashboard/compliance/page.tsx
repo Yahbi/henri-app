@@ -160,7 +160,13 @@ function buildVerificationHistory(license: LicenseRecord | null): VerificationEv
       events.push({
         date: formatDate(license.expiry_date, { month: "short", day: "numeric", year: "numeric" }),
         status: "failed",
-        detail: "License has expired — leads paused until renewed",
+        // 2026-08-05 truthfulness pass: was "leads paused until renewed".
+        // Nothing pauses. No lead-delivery path reads license expiry —
+        // the score cron, the leads query and the notification dispatch
+        // all ignore contractor_licenses entirely. Telling a contractor
+        // their feed has stopped when it has not is worse than saying
+        // nothing: it invites them to ignore a real renewal deadline.
+        detail: "License has expired — renew to stay compliant",
       });
     }
   }
@@ -172,7 +178,14 @@ function buildVerificationHistory(license: LicenseRecord | null): VerificationEv
         ? formatDate(license.last_checked_at, { month: "short", day: "numeric", year: "numeric" })
         : "On file",
       status: "verified",
-      detail: `${license.license_state}${license.license_type ? ` ${license.license_type}` : ""} license active — daily auto-verification enabled`,
+      // 2026-08-05 truthfulness pass: was "daily auto-verification enabled".
+      // src/lib/license/verify.ts contacts no licensing board on any code
+      // path — every branch returns `pending`, and recheckLicense() just
+      // calls back into it, so no cron can detect a revocation or a lapse.
+      // The one check that genuinely runs is the roster cross-check at
+      // signup (/api/onboarding/verify-license against
+      // state_license_rosters), which is what this line now describes.
+      detail: `${license.license_state}${license.license_type ? ` ${license.license_type}` : ""} license on file — matched against the ${license.license_state} state license roster at signup`,
     });
   }
 
@@ -333,7 +346,13 @@ export default function CompliancePage() {
       };
       await refresh();
       const pieces: string[] = [];
-      if (result.license.expired) pieces.push("License EXPIRED — leads paused");
+      // 2026-08-05 truthfulness pass: was "License EXPIRED — leads paused".
+      // /api/compliance/verify returns `leads_paused: licenseExpired`, but
+      // that flag is never acted on anywhere — no delivery path gates on
+      // license state. The route also treats a MISSING licensed_until as
+      // expired (route.ts:40-42), so this banner claimed a paused feed for
+      // every contractor who simply has no expiry date on file.
+      if (result.license.expired) pieces.push("License expired or no expiry on file");
       else if (result.license.expiring_soon) pieces.push("License expires soon");
       else pieces.push("License current");
       if (result.permits.already_expired > 0) pieces.push(`${result.permits.already_expired} expired permits`);
@@ -449,7 +468,15 @@ export default function CompliancePage() {
                   Last verified {formatDate(license.last_checked_at, { month: "short", day: "numeric" })}
                 </p>
               )}
-              <p className="text-[10px] text-green-400">Henri verifies your license daily</p>
+              {/* 2026-08-05: was "Henri verifies your license daily" — the
+                * same board-verification claim corrected in
+                * buildVerificationHistory() above. No board is contacted on
+                * any code path, so there is no daily check to advertise.
+                * Left standing it would have contradicted the timeline
+                * directly below it. */}
+              <p className="text-[10px] text-muted-foreground">
+                Checked against the state license roster at signup
+              </p>
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -515,8 +542,14 @@ export default function CompliancePage() {
             </div>
             <div className="text-center space-y-1">
               <p className="text-sm font-medium text-foreground">No insurance on file</p>
+              {/* 2026-08-05: "and unlock full lead delivery" removed — same
+                * defect class as the "leads paused" strings corrected above.
+                * No delivery path gates on insurance (or on anything else in
+                * this tab), so the copy implied a throttle that does not
+                * exist. The compliance-score half is true: insurance is 50 of
+                * the 100 points in ComplianceScore's weights. */}
               <p className="text-xs text-muted-foreground">
-                Connect your insurance to improve your compliance score and unlock full lead delivery
+                Connect your insurance to improve your compliance score
               </p>
             </div>
             <a
@@ -627,8 +660,11 @@ export default function CompliancePage() {
             <div className="flex flex-col items-center justify-center py-6 space-y-2">
               <Clock className="h-8 w-8 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">No verification history yet</p>
+              {/* 2026-08-05: was "Add your license to start daily
+                * verification" — third instance of the daily-board-check
+                * claim on this page. Nothing runs daily. */}
               <a href="/onboarding/license" className="text-xs text-primary hover:underline">
-                Add your license to start daily verification
+                Add your license to run the roster cross-check
               </a>
             </div>
           ) : (

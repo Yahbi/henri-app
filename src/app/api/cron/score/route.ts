@@ -185,6 +185,30 @@ function stateFromCourtName(court: string): string | null {
   return null;
 }
 
+/* ── Value-forecast model cache (audit finding F) ────────────────────────
+ *
+ * The model is trained on up to 100,000 `leads` rows. That query + the
+ * bucket build is the single most expensive non-permit operation in the
+ * run, and it was paid once per HTTP invocation — which reads as "once"
+ * only if you stop at this file. The scheduled run is a DRAIN: an external
+ * loop (`scripts/_score_drain.mjs`, plus the admin trigger) calls this
+ * endpoint back-to-back until the queue empties, so a single scheduled
+ * pass rebuilt the same model dozens of times from the same rows.
+ *
+ * There is no inner batch loop in this handler to hoist the build out of,
+ * so the equivalent fix one level up is a module-scoped memo: consecutive
+ * invocations that land on a warm Node isolate reuse the model instead of
+ * re-querying. A cold isolate rebuilds, which is correct — the cache is an
+ * optimisation, never a correctness input.
+ *
+ * TTL is 10 minutes. The training set is historical won/quoted lead values
+ * that move on a scale of days, so a 10-minute-stale model is
+ * indistinguishable from a fresh one, while a drain pass finishes well
+ * inside the window.
+ */
+const VALUE_MODEL_TTL_MS = 10 * 60 * 1000;
+let cachedValueModel: { model: ValueModel; builtAt: number } | null = null;
+
 /* ── Main cron handler ───────────────────────────────────────────────────── */
 
 export async function GET(request: NextRequest) {
@@ -206,37 +230,139 @@ export async function GET(request: NextRequest) {
   const deadlineExceeded = (): boolean => Date.now() > deadlineMs;
 
   try {
-    /* ── 1. Fetch unscored permits ──────────────────────────────────────── */
+    /* ── 1. Fetch unscored permits INSIDE a claimed territory ───────────── */
 
-    // 2026-05-02 fix: reduced LIMIT from 5000 → 1000 because a 5000-row
-    // SELECT that includes raw_json (jsonb, ~10KB per row average) was
-    // pulling ~50MB and timing out the Supabase 60s statement budget
-    // when the cron table was under heavy concurrent UPDATE pressure
-    // from the parallel enrich + backfill ops:
-    //   "Failed to fetch unscored permits: canceling statement due to
-    //    statement timeout"
-    // Per-run throughput is unchanged because the inner deadlineExceeded
-    // guard already caps work at ~1000 permits per invocation. Smaller
-    // SELECT = lower memory pressure on the planner + faster bitmap
-    // heap scan via idx_permits_unscored.
-    const { data: unscoredPermits, error: fetchError } = await supabase
-      .from("permits")
-      .select("id, permit_type, status, description, address, city, state, zip, latitude, longitude, estimated_value, issued_date, applied_date, applicant_name, created_at, raw_json")
-      .is("scored_at", null)
-      .limit(1000);
+    // 2026-08-05 fix (audit finding A): this select carried NO territory
+    // predicate. It pulled 1,000 arbitrary unscored permits, stamped
+    // `scored_at` on ALL of them at step 7, and then built a lead only for
+    // the subset whose ZIP resolved to an active territory. Because a permit
+    // is considered for lead creation exactly once — at the moment it is
+    // first scored — every permit in an unclaimed ZIP was permanently
+    // burned: marked scored, never converted, never reconsidered.
+    //
+    // Measured on production 2026-08-05: 2,436,095 permits, 869,599 with a
+    // ZIP, but only 10 ZIPs claimed (all Tampa FL). 240 runs/day of full
+    // read + score + UPDATE work yielded ~1,000 leads — a 0.4% yield, and
+    // the other 99.6% was destroyed on the way past.
+    //
+    // Restricting the queue to claimed ZIPs makes the cron pay only for
+    // permits that can actually become leads. It COMPOSES with
+    // /api/cron/territory-backfill rather than duplicating it: that route
+    // owns recovery of the already-burned backlog (it clears `scored_at` on
+    // lead-less permits inside claimed ZIPs when a territory is newly
+    // bought); this predicate simply stops adding to that backlog.
+    const { data: territoryZipRows, error: territoryZipErr } = await supabase
+      .from("territories")
+      .select("zip")
+      .eq("status", "active");
 
-    if (fetchError) {
-      throw new Error(`Failed to fetch unscored permits: ${fetchError.message}`);
+    if (territoryZipErr) {
+      throw new Error(`Failed to fetch active territories: ${territoryZipErr.message}`);
     }
 
-    if (!unscoredPermits || unscoredPermits.length === 0) {
-      return NextResponse.json({
-        success: true,
-        summary: { scored: 0, leadsCreated: 0, assigned: 0, notified: 0 },
+    const claimedZips = [
+      ...new Set((territoryZipRows ?? []).map((t) => t.zip).filter(Boolean)),
+    ] as string[];
+
+    // Audit finding B: the territory gate is correct product behaviour but
+    // was completely invisible — 175 of the last 240 runs matched zero
+    // territories and the summary said nothing at all. With no active
+    // territory, no permit anywhere can become a lead, so scoring any is
+    // pure waste. Return early, but say WHY in cron_runs.
+    if (claimedZips.length === 0) {
+      const emptySummary = {
+        scored: 0,
+        leadsCreated: 0,
+        assigned: 0,
+        notified: 0,
+        active_territory_zips: 0,
+        permits_considered: 0,
+        permits_dropped_null_zip: 0,
+        permits_dropped_no_territory: 0,
+        permits_deferred_deadline: 0,
+        note: "no active territories — nothing can become a lead",
+      };
+      await logCronRun("score", t0, {
+        pulled: 0,
+        inserted: 0,
+        summary: emptySummary,
+        trigger: detectTrigger(request),
       });
+      return NextResponse.json({ success: true, summary: emptySummary });
     }
 
-    const permits = unscoredPermits as PermitRow[];
+    // 2026-05-02 fix: LIMIT is 1000, not 5000, because a 5000-row SELECT
+    // that includes raw_json (jsonb, ~10KB per row average) pulled ~50MB and
+    // timed out the Supabase statement budget under concurrent UPDATE
+    // pressure from the parallel enrich + backfill ops. Per-run throughput
+    // is unchanged because the inner deadlineExceeded guard already caps
+    // work at ~1000 permits per invocation.
+    //
+    // `.in()` values travel in the QUERY STRING (~8KB ceiling), so the ZIP
+    // list is chunked at 200 — the same bound territory-backfill uses for
+    // UUIDs. 200 five-char ZIPs is ~1.4KB of URL. Today there are 10 claimed
+    // ZIPs and this loop runs once; the chunking exists so that growing to
+    // hundreds of territories can never produce the silent 414 that
+    // supabase-js does not surface as an error.
+    const ZIP_IN_CHUNK = 200;
+    const PERMIT_LIMIT = 1000;
+    const permits: PermitRow[] = [];
+    for (
+      let i = 0;
+      i < claimedZips.length && permits.length < PERMIT_LIMIT;
+      i += ZIP_IN_CHUNK
+    ) {
+      const zipChunk = claimedZips.slice(i, i + ZIP_IN_CHUNK);
+      const { data: page, error: fetchError } = await supabase
+        .from("permits")
+        .select("id, permit_type, status, description, address, city, state, zip, latitude, longitude, estimated_value, issued_date, applied_date, applicant_name, created_at, raw_json")
+        .is("scored_at", null)
+        .in("zip", zipChunk)
+        // Audit finding E: freshness is the heaviest single component (0-20)
+        // and it reads `issued_date` alone, so the order the queue is drained
+        // in decides which permits get the limited per-run budget.
+        //
+        // The 2026-08-05 deep audit argued AGAINST this ordering, on two
+        // grounds: newest-first would permanently starve the 16,611 unscored
+        // permits with a NULL `issued_date`, and it would sort a 1.5M-row
+        // unfiltered set. Both objections were measured against the
+        // UNFILTERED select, and the claimed-ZIP predicate above defuses
+        // both. The queue is now bounded by the claimed-ZIP permit count
+        // (16,548 today), which drains completely at 1,000/run — so
+        // NULLS LAST defers those rows by hours, it does not starve them —
+        // and the sort runs over that same bounded set rather than the whole
+        // corpus. Do NOT re-add this ordering if the ZIP predicate is ever
+        // removed.
+        .order("issued_date", { ascending: false, nullsFirst: false })
+        .limit(PERMIT_LIMIT - permits.length);
+
+      if (fetchError) {
+        throw new Error(`Failed to fetch unscored permits: ${fetchError.message}`);
+      }
+      permits.push(...((page ?? []) as PermitRow[]));
+    }
+
+    if (permits.length === 0) {
+      const emptySummary = {
+        scored: 0,
+        leadsCreated: 0,
+        assigned: 0,
+        notified: 0,
+        active_territory_zips: claimedZips.length,
+        permits_considered: 0,
+        permits_dropped_null_zip: 0,
+        permits_dropped_no_territory: 0,
+        permits_deferred_deadline: 0,
+        note: "no unscored permits inside a claimed territory",
+      };
+      await logCronRun("score", t0, {
+        pulled: 0,
+        inserted: 0,
+        summary: emptySummary,
+        trigger: detectTrigger(request),
+      });
+      return NextResponse.json({ success: true, summary: emptySummary });
+    }
 
     /* ── 2. Gather enrichment data for scoring ─────────────────────────── */
 
@@ -381,34 +507,50 @@ export async function GET(request: NextRequest) {
      * through ScoringSignals so signals.ts / model.ts can label it is the
      * outstanding half of this fix (both live in the scoring lib).
      *
-     * Cap at 100k training rows to keep the cron query fast (~2s). */
+     * Cap at 100k training rows to keep the cron query fast (~2s).
+     *
+     * Audit finding F: reuse a recently-built model rather than re-running
+     * the 100k-row training query on every invocation of a multi-call drain
+     * pass. See VALUE_MODEL_TTL_MS above for why a warm memo is safe here. */
     let valueModel: ValueModel | null = null;
-    try {
-      const { data: trainingRows } = await supabase
-        .from("leads")
-        .select("permit_type, zip, year_built, permit_value")
-        .not("permit_value", "is", null)
-        .gt("permit_value", 0)
-        .limit(100_000);
-      if (trainingRows && trainingRows.length > 0) {
-        valueModel = buildValueModel(
-          trainingRows.map((r) => ({
-            permit_type: (r.permit_type as string | null) ?? null,
-            zip: (r.zip as string | null) ?? null,
-            year_built: (r.year_built as number | null) ?? null,
-            estimated_value: r.permit_value as number,
-          })),
-        );
-        logger.info("value-forecast model built", {
-          training_rows: trainingRows.length,
-          buckets: valueModel.buckets.size,
-        });
-      }
-    } catch (e) {
-      logger.warn("value-forecast model build failed", {
-        error: e instanceof Error ? e.message : String(e),
+    if (
+      cachedValueModel != null &&
+      Date.now() - cachedValueModel.builtAt < VALUE_MODEL_TTL_MS
+    ) {
+      valueModel = cachedValueModel.model;
+      logger.info("value-forecast model reused", {
+        buckets: valueModel.buckets.size,
+        age_ms: Date.now() - cachedValueModel.builtAt,
       });
-      valueModel = null;
+    } else {
+      try {
+        const { data: trainingRows } = await supabase
+          .from("leads")
+          .select("permit_type, zip, year_built, permit_value")
+          .not("permit_value", "is", null)
+          .gt("permit_value", 0)
+          .limit(100_000);
+        if (trainingRows && trainingRows.length > 0) {
+          valueModel = buildValueModel(
+            trainingRows.map((r) => ({
+              permit_type: (r.permit_type as string | null) ?? null,
+              zip: (r.zip as string | null) ?? null,
+              year_built: (r.year_built as number | null) ?? null,
+              estimated_value: r.permit_value as number,
+            })),
+          );
+          cachedValueModel = { model: valueModel, builtAt: Date.now() };
+          logger.info("value-forecast model built", {
+            training_rows: trainingRows.length,
+            buckets: valueModel.buckets.size,
+          });
+        }
+      } catch (e) {
+        logger.warn("value-forecast model build failed", {
+          error: e instanceof Error ? e.message : String(e),
+        });
+        valueModel = null;
+      }
     }
 
     /* Per-address history rollup (populates cascade_flag, pipeline_value, etc.)
@@ -1017,21 +1159,35 @@ export async function GET(request: NextRequest) {
     /* Track which contractor gets which scored lead for notifications */
     const assignmentMap = new Map<string, { scored: ScoredLead; contractor: { id: string; phone?: string; email?: string; name?: string } }>();
 
-    for (const sl of scoredLeads) {
+    /* Audit finding B — the loop below drops permits in three distinct ways
+     * and, until now, said nothing about any of them. A run that produced
+     * zero leads was indistinguishable from a run that had nothing to do.
+     * These three counters are surfaced in the cron_runs summary so an
+     * operator can tell "no territory matched" apart from "no ZIP on the
+     * permit" apart from "we ran out of time". */
+    let permitsDroppedNullZip = 0;
+    let permitsDroppedNoTerritory = 0;
+    let permitsDeferredDeadline = 0;
+
+    for (const [slIndex, sl] of scoredLeads.entries()) {
       // Audit priority #8: inline 280s deadline. The lead-build loop is
       // the heaviest part of the cron (rules engine + LLM mining +
       // signal-jsonb construction). Bail early so the orchestrator still
       // gets to write the leads it has prepared so far.
       if (deadlineExceeded()) {
+        permitsDeferredDeadline = scoredLeads.length - slIndex;
         logger.warn("score cron deadline reached during lead build", {
           processedLeads: leadsToInsert.length,
-          remainingScored: scoredLeads.length - leadsToInsert.length,
+          remainingScored: permitsDeferredDeadline,
           elapsedMs: Date.now() - t0,
         });
         break;
       }
       const zip = sl.permit.zip;
-      if (!zip) continue;
+      if (!zip) {
+        permitsDroppedNullZip += 1;
+        continue;
+      }
       const contractors = zipToContractors.get(zip);
 
       if (contractors && contractors.length > 0) {
@@ -1211,13 +1367,23 @@ export async function GET(request: NextRequest) {
         });
 
         assignmentMap.set(`${sl.permit.id}:${contractor.id}`, { scored: sl, contractor });
+      } else {
+        /* A ZIP that came back from the claimed-territory query but has no
+         * contractor after the `profiles!inner` join. `territories.
+         * contractor_id` references `profiles(id)`, so this should be
+         * unreachable — count it rather than let it vanish, because if it
+         * ever fires it means the two territory queries disagree. */
+        permitsDroppedNoTerritory += 1;
       }
-      /* Skip permits in ZIPs with no contractors — they'll be picked up
-         when a contractor claims that territory. */
     }
 
     let assignedCount = 0;
     let notifiedCount = 0;
+
+    /* Audit finding A (second half) — permit ids that actually produced a
+     * lead row. Only these get `scored_at` stamped at step 7; see the
+     * comment there for why the rest are deliberately left NULL. */
+    const leadProducingPermitIds = new Set<string>();
 
     if (leadsToInsert.length > 0) {
       // Use UPSERT on (permit_id, contractor_id) so the scorer is idempotent —
@@ -1306,6 +1472,9 @@ export async function GET(request: NextRequest) {
       }
 
       assignedCount = insertedLeads?.length ?? 0;
+      for (const l of insertedLeads ?? []) {
+        if (l.permit_id) leadProducingPermitIds.add(l.permit_id as string);
+      }
 
       /* ── 6. Send notifications ───────────────────────────────────────── */
 
@@ -1478,8 +1647,29 @@ export async function GET(request: NextRequest) {
      *
      * Fix: chunk into 200-id batches (~7.4KB URL ceiling) and explicitly
      * capture errors so any future regression is visible in cron_runs.
+     *
+     * 2026-08-05 fix (audit finding A, second half): this stamped EVERY
+     * permit the run fetched, including the ones that never produced a lead.
+     * `scored_at` is the queue cursor — stamping it is what made a
+     * non-converted permit unreachable forever. It now stamps only the
+     * permits that actually landed a lead row, so anything the run could
+     * not convert stays NULL and re-enters the queue on the next pass.
+     *
+     * This does NOT create an endless re-score loop, for two reasons.
+     * First, the queue is now bounded by the claimed-ZIP predicate at step
+     * 1, so a permit left NULL is retried against a small fixed set rather
+     * than competing with 2.4M rows. Second, the only two ways to reach
+     * this point without a lead are (a) the 280s deadline cut the lead-build
+     * loop short, which is transient and resolves on the very next run, and
+     * (b) a claimed ZIP whose contractor has no `profiles` row — which the
+     * `territories.contractor_id -> profiles(id)` FK makes unreachable, and
+     * which `permits_dropped_no_territory` in the summary would expose if it
+     * ever happened. Leaving these rows NULL also keeps them invisible to
+     * /api/cron/territory-backfill, whose scan filters on
+     * `scored_at IS NOT NULL` — so the two routes cannot fight over the same
+     * row by alternately setting and clearing the cursor.
      */
-    const permitIds = permits.map((p) => p.id);
+    const permitIds = [...leadProducingPermitIds];
     const scoredAt = new Date().toISOString();
     let scoredAtUpdated = 0;
     let scoredAtErrors = 0;
@@ -1516,6 +1706,16 @@ export async function GET(request: NextRequest) {
         notified: notifiedCount,
         // Diagnostic fields for the audit pass — surfaces where the
         // assignment pipeline drops permits.
+        //
+        // Audit finding B: the three `permits_dropped_*` / `_deferred_`
+        // counters plus `active_territory_zips` are what make a zero-lead
+        // run self-explaining. Before them, a run that matched no territory
+        // and a run with nothing to do produced byte-identical summaries.
+        active_territory_zips: claimedZips.length,
+        permits_considered: permits.length,
+        permits_dropped_null_zip: permitsDroppedNullZip,
+        permits_dropped_no_territory: permitsDroppedNoTerritory,
+        permits_deferred_deadline: permitsDeferredDeadline,
         unique_lead_zips: leadZips.length,
         territory_rows: territoryRows?.length ?? 0,
         zip_to_contractors_map_size: zipToContractors.size,

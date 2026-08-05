@@ -139,6 +139,45 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       outreachProcessed++;
 
       try {
+        /* ── Pre-send guard: never transmit an unresolved placeholder ──────
+         *
+         * What was wrong: /api/outreach used to enqueue the raw template
+         * body, so rows landed here with literal {{owner_first}} /
+         * {{permit_number}} text and this loop shipped them straight to
+         * Twilio and Resend. Homeowners saw the braces.
+         *
+         * The enqueue path now renders tokens (src/lib/outreach/tokens.ts),
+         * but this is the last gate before the message is irreversible, and
+         * rows can reach the queue from other writers (sequence engine,
+         * scorer auto-fire, backfilled rows queued before that fix). A
+         * message that goes out with a visible placeholder is worse than
+         * one that doesn't go out at all — it is unrecoverable and it is
+         * the homeowner's first impression of the contractor. So: refuse,
+         * log, and let the catch below mark the row failed. Failed rows
+         * stay visible in the contractor's Outreach history.
+         *
+         * Pattern matches resolveTokens' own token grammar (alphanumeric +
+         * underscore, optional inner whitespace) so it flags exactly the
+         * placeholders that renderer was supposed to have consumed. The
+         * sequence engine's single-brace {var} syntax is intentionally NOT
+         * matched — it is a different, already-substituted grammar.
+         */
+        const UNRESOLVED_TOKEN = /\{\{\s*[a-z0-9_]+\s*\}\}/i;
+        const unresolvedIn =
+          (item.body && UNRESOLVED_TOKEN.exec(item.body)?.[0]) ||
+          (item.subject && UNRESOLVED_TOKEN.exec(item.subject)?.[0]) ||
+          null;
+        if (unresolvedIn) {
+          logger.error("Outreach blocked — unresolved template placeholder", {
+            itemId: item.id,
+            channel: item.channel,
+            placeholder: unresolvedIn,
+          });
+          throw new Error(
+            `Unresolved template placeholder ${unresolvedIn} — refusing to send`
+          );
+        }
+
         let success = false;
         let externalId: string | null = null;
 

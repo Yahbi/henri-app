@@ -18,7 +18,19 @@ import { hasSupabase } from "@/lib/env";
 import { isGodModeEmail, GOD_MODE_MAP_LIMIT } from "@/lib/auth/god-mode";
 import { fetchAllTerritoryZips } from "@/lib/territories/fetch-all";
 import { requireContractor } from "@/lib/auth/requireContractor";
-import { resolveTradeGate } from "@/lib/auth/trade-gating";
+import {
+  resolveTradeGate,
+  tradeTagsFor,
+  GENERIC_TRADE_BUCKETS,
+} from "@/lib/auth/trade-gating";
+
+/**
+ * Trade values are interpolated raw into a PostgREST `or=` expression below
+ * (supabase-js does not escape inside `.or()`), and `?trade=` is caller
+ * supplied. Anything outside this character class is rejected and we fall
+ * back to the parameterised `.eq()` path.
+ */
+const SAFE_TRADE = /^[a-z0-9_]{1,40}$/i;
 
 export const runtime = "nodejs";
 
@@ -58,9 +70,52 @@ export async function GET(request: NextRequest) {
     // to a single trade when the contractor sees all trades. Founder-tier
     // contractors who try to ?trade=hvac when their gate says plumbing still
     // get the gate's plumbing filter.
-    const tradeFilter: string | null = tradeGate.seesAllTrades
-      ? (requestedTrade && requestedTrade !== "all" ? requestedTrade : null)
+    const gatedTrade: string | null = tradeGate.seesAllTrades
+      ? null
       : tradeGate.tradeFilter;
+    const narrowedTrade: string | null = tradeGate.seesAllTrades
+      ? (requestedTrade && requestedTrade !== "all" ? requestedTrade : null)
+      : null;
+    const tradeFilter: string | null = gatedTrade ?? narrowedTrade;
+
+    /* ── 2026-08-05 correctness fix — the gate was `.eq("trade", X)` ────────
+     * `leads.trade` is 57% the literal string "other" (156,457 of 274,783),
+     * and 90% of the table is one of other / residential / commercial /
+     * general — buckets that mean "the ingest could not classify this
+     * permit". Every genuinely trade-specific value is tiny: hvac 776,
+     * plumbing 233, roofing 843. So exact-string equality showed a paying
+     * hvac contractor 776 rows out of 274,783 — a near-empty map — while
+     * the permits that actually were theirs sat unclassified in the "other"
+     * pile and were silently dropped.
+     *
+     * The gate now matches on the richer taxonomy that IS populated:
+     * `leads.trade_tags` (derived from the permit description by
+     * deriveTradeTags(); 62,239 leads tagged, of which 16,922 carry
+     * trade='other'), OR'd with the original trade equality, OR'd with an
+     * always-include for the four generic buckets. A lead nobody could
+     * classify is never hidden from the one contractor who could work it.
+     *
+     * `trade_tags.cs.{tag}` (contains) is used rather than a single
+     * `ov.{a,b}` overlap because PostgREST splits an `or=` expression on
+     * commas and a comma inside `{}` is not reliably protected. One `cs`
+     * term per tag is comma-free and still hits leads_trade_tags_gin.
+     *
+     * Applied with the generic always-include only for the involuntary PLAN
+     * gate. A voluntary `?trade=` narrowing (contractor already sees all
+     * trades and chose to focus) keeps trade + tags but not the generic
+     * buckets, otherwise the UI filter would return the whole table. */
+    const tradeOr: string | null =
+      tradeFilter && SAFE_TRADE.test(tradeFilter)
+        ? [
+            `trade.eq.${tradeFilter}`,
+            ...tradeTagsFor(tradeFilter)
+              .filter((t) => SAFE_TRADE.test(t))
+              .map((t) => `trade_tags.cs.{${t}}`),
+            ...(gatedTrade
+              ? [`trade.in.(${GENERIC_TRADE_BUCKETS.join(",")})`]
+              : []),
+          ].join(",")
+        : null;
     // Plan-gated default.
     //   god-mode (dev/owner allowlist): no cap — paginate until Supabase
     //     returns an empty page or a statement timeout aborts a later page
@@ -190,7 +245,11 @@ export async function GET(request: NextRequest) {
       if (!allTime) {
         pageQuery = pageQuery.gte("created_at", sinceDate.toISOString());
       }
-      if (tradeFilter) pageQuery = pageQuery.eq("trade", tradeFilter);
+      // Trade gate — see the tradeOr comment above. `.or()` when we could
+      // build a safe expression, otherwise the original parameterised `.eq()`
+      // (an unexpected trade string must never reach a raw PostgREST filter).
+      if (tradeOr) pageQuery = pageQuery.or(tradeOr);
+      else if (tradeFilter) pageQuery = pageQuery.eq("trade", tradeFilter);
       if (statusFilter) pageQuery = pageQuery.eq("status", statusFilter);
 
       const { data: pageRows, error: pageErr } = await pageQuery;
@@ -208,6 +267,51 @@ export async function GET(request: NextRequest) {
       if (!pageRows || pageRows.length === 0) break;
       leads.push(...(pageRows as LeadsRow[]));
       if (pageRows.length < PAGE) break; // last page
+    }
+
+    /* ── Wedge contract rule 3 — never silently drop rows ───────────────
+     * Whatever survives of the trade gate has to be countable, so the UI can
+     * render the mandatory "N filtered out, widen to see" counter. Two exact
+     * head-counts over the same universe (same contractor, window and status)
+     * differing only in the trade predicate; the difference is the honest
+     * number of leads the gate is hiding.
+     *
+     * Skipped for god-mode: the gate never applies there, and an exact count
+     * over all 274,783 leads would risk the 8s statement timeout. Null (not
+     * zero) when the count can't be obtained — an unknown count must not be
+     * reported as "nothing hidden". */
+    let filteredOut: number | null = null;
+    if (tradeFilter && !godMode) {
+      const countBase = () => {
+        let q = supabase
+          .from("leads")
+          // Same `permits!inner` shape as the feature query so both counts
+          // describe the same universe as the map itself.
+          .select("id, permits!inner(id)", { count: "exact", head: true })
+          .eq("contractor_id", user.id);
+        if (!allTime) q = q.gte("created_at", sinceDate.toISOString());
+        if (statusFilter) q = q.eq("status", statusFilter);
+        return q;
+      };
+      let matchedQuery = countBase();
+      if (tradeOr) matchedQuery = matchedQuery.or(tradeOr);
+      else matchedQuery = matchedQuery.eq("trade", tradeFilter);
+      const [totalRes, matchedRes] = await Promise.all([
+        countBase(),
+        matchedQuery,
+      ]);
+      if (
+        !totalRes.error &&
+        !matchedRes.error &&
+        typeof totalRes.count === "number" &&
+        typeof matchedRes.count === "number"
+      ) {
+        filteredOut = Math.max(0, totalRes.count - matchedRes.count);
+      } else {
+        logger.warn("leads/map: trade-gate filtered-out count unavailable", {
+          error: totalRes.error?.message ?? matchedRes.error?.message ?? null,
+        });
+      }
     }
 
     /* ── Build GeoJSON ─────────────────────────────────────────────────── */
@@ -383,6 +487,13 @@ export async function GET(request: NextRequest) {
         gatedTrade: tradeGate.tradeFilter,
         plan: tradeGate.plan,
         profileTrade: tradeGate.profileTrade,
+        // 2026-08-05 — added so the UI can honour wedge rule 3. `tradeTags`
+        // is the trade_tags taxonomy the gate also matches on; `filteredOut`
+        // is the exact number of the contractor's leads the gate is hiding
+        // (null = not counted, which is NOT the same as zero).
+        gatedTradeTags: tradeGate.tradeTags,
+        tradeFilterApplied: tradeFilter,
+        filteredOut,
       },
     };
 

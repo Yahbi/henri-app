@@ -93,17 +93,33 @@ const KEY_LISTS = {
     "gc_name", "general_contractor", "primary_contractor",
     "contractor_business_name", "builder_name", "builder",
   ],
+  // HOMEOWNER phone only.
+  //
+  // 2026-08-05 fix (audit finding C): `contractor_phone`, `gc_phone`,
+  // `contractor_phone_number` and `contractor_phone_1` were in this list —
+  // added to lift phone fill, since Orlando ships 18,804 populated
+  // `contractor_phone_number` values and Bozeman MT ships
+  // `contractor_phone_1`. But this field is written to `permits.phone` and
+  // `leads.phone`, which the lead drawer renders under the "Homeowner"
+  // heading and which outreach uses as the SMS destination for messages
+  // written in the homeowner's voice. The result was Henri texting a
+  // COMPETING CONTRACTOR a message addressed to a homeowner — wrong for the
+  // contractor who paid for the lead, wrong for the recipient, and a TCPA
+  // exposure on a business line that never consented.
+  //
+  // There is no `contractor_phone` column on `permits` or `leads`, so the
+  // number is not re-homed here — it simply stops being presented as the
+  // homeowner's. It remains in `raw_json` under its original key, available
+  // verbatim to a future contractor-intel surface. `contractor_name` above
+  // is unaffected: a name rendered under a "Contractor" label is honest,
+  // a phone rendered under "Homeowner" is not.
   phone: [
     "owner_phone", "owner_s_phone__", "owner_s_phone",
     "ownerphone", "phone", "contact_phone",
     "permittee_s_phone__", "permittee_s_phone", "permittee_phone",
-    "applicant_phone", "contractor_phone", "gc_phone", "homeowner_phone",
-    // `..._number` / `..._1` variants. Orlando ships 18,804 populated
-    // `contractor_phone_number` values (e.g. "(407)592-6291") that the old
-    // list could not see; Bozeman MT ships `contractor_phone_1`. Phone fill
-    // is the wedge's hardest ceiling — these were already in raw_json.
-    "contractor_phone_number", "owner_phone_number", "applicant_phone_number",
-    "permittee_phone_number", "contractor_phone_1", "phone_number",
+    "applicant_phone", "homeowner_phone",
+    "owner_phone_number", "applicant_phone_number",
+    "permittee_phone_number", "phone_number",
   ],
   email: [
     "owner_email", "email", "contact_email", "applicant_email",

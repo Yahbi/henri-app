@@ -52,13 +52,24 @@ const HOW_IT_WORKS_STEPS = [
   },
   {
     num: "04",
-    title: "One matched contractor",
-    desc: "You get exactly one vetted contractor - not a flood of sales calls from strangers.",
+    // 2026-08-05 truthfulness pass: was "One matched contractor / You get
+    // exactly one vetted contractor". The intake handler passes EVERY match
+    // to notifyAllMatches() (src/app/api/intake/route.ts:312), and
+    // findMatches() returns the top three (src/lib/matching/engine.ts:390,
+    // `scored.slice(0, 3)`) — so a homeowner's project reaches up to three
+    // contractors, each of whom gets an SMS/email with the project details.
+    // The single-match promise was the headline claim on this page and the
+    // code has never delivered it. Copy now states the cap that is enforced.
+    title: "Up to three matched contractors",
+    desc: "You hear from up to three vetted contractors licensed for your area - not a flood of sales calls from strangers.",
   },
   {
     num: "05",
     title: "Direct connection",
-    desc: "Your contractor receives your project details and reaches out directly. No middlemen, no spam, no nonsense.",
+    // Pluralized 2026-08-05 for consistency with the corrected step 04 —
+    // notifyAllMatches() sends the project details to every matched
+    // contractor, not just the top-ranked one.
+    desc: "Your matched contractors receive your project details and reach out directly. No middlemen, no spam, no nonsense.",
   },
 ] as const;
 
@@ -66,9 +77,12 @@ const HOW_IT_WORKS_STEPS = [
 // Replace with verified quotes from real users before broader launch.
 const HOW_IT_FEELS = [
   {
+    // 2026-08-05 truthfulness pass: "exactly one vetted, licensed
+    // contractor" — see the HOW_IT_WORKS_STEPS comment above. The match
+    // engine returns up to three and all three are notified.
     scenario: "No flood of sales calls",
     description:
-      "You describe your project once. We match you with exactly one vetted, licensed contractor — not a list of five companies all racing to call you first.",
+      "You describe your project once. We match you with up to three vetted, licensed contractors who cover your area — not an open marketplace where every company in the county can buy your number.",
   },
   {
     scenario: "Someone who knows your project",
@@ -93,8 +107,16 @@ const FAQS = [
     a: "Yes, completely free. Contractors pay to be on our platform. You will never be charged. No hidden fees, no credit card required.",
   },
   {
+    // 2026-08-05 truthfulness pass: was "Henri matches you with exactly one
+    // vetted, licensed contractor. Your information is never sold or shared
+    // beyond that single match." Both halves were wrong: the match engine
+    // returns up to three contractors and notifies all of them, so there is
+    // no "single match" for the sharing promise to be bounded by. The
+    // never-SOLD half is true and stays; the never-shared-beyond-one half
+    // is replaced with the bound that actually holds — matched contractors
+    // only.
     q: "How is Henri different from other platforms?",
-    a: "Other platforms sell your information to multiple contractors who all call you at once. Henri matches you with exactly one vetted, licensed contractor. Your information is never sold or shared beyond that single match.",
+    a: "Other platforms sell your details to whoever pays for them, and you field calls from strangers for weeks. Henri matches you with up to three vetted, licensed contractors who cover your area. Your details go to those matches and nowhere else — we never sell your information.",
   },
   {
     // 2026-08-04 truthfulness pass: dropped "Contractors attest to active
@@ -325,8 +347,12 @@ export function PortalContent({ activeStatesLabel }: PortalContentProps) {
               not a sales call avalanche
             </em>
           </h1>
+          {/* 2026-08-05 truthfulness pass: "exactly one vetted, licensed
+            * contractor" — the match engine returns up to three and the
+            * intake handler notifies every one of them. See the
+            * HOW_IT_WORKS_STEPS comment for the code walk. */}
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground">
-            Henri matches you with exactly one vetted, licensed contractor for
+            Henri matches you with up to three vetted, licensed contractors for
             your project. No bidding wars, no spam calls, no selling your info.
             Just the right pro, fast.
           </p>
@@ -397,9 +423,13 @@ export function PortalContent({ activeStatesLabel }: PortalContentProps) {
               <span className="h-1.5 w-1.5 rounded-full bg-success" />
               Licensed contractors only
             </span>
+            {/* 2026-08-05: was "1 contractor, not 5". Same single-match
+              * overclaim as the hero paragraph above — the match engine
+              * returns up to three. Restated to the enforced cap rather
+              * than left standing beside corrected copy. */}
             <span className="flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-success" />
-              1 contractor, not 5
+              3 contractors at most
             </span>
           </div>
         </div>
@@ -427,18 +457,24 @@ export function PortalContent({ activeStatesLabel }: PortalContentProps) {
               <ShieldIcon />
               Your info never sold
             </span>
+            {/* 2026-08-05: was "One-to-one match" — the same single-match
+              * claim the hero and FAQ carried. Up to three contractors are
+              * matched and notified. */}
             <span className="flex items-center gap-2">
               <ShieldIcon />
-              One-to-one match
+              Matched contractors only
             </span>
           </div>
 
           {/* Model-describing cards, not outcome claims */}
           <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {/* 2026-08-05: this card read "1 / Contractor per match. That's
+              * it." findMatches() caps at three and every match is notified,
+              * so the ceiling is 3, not 1. */}
             <div className="rounded-xl border border-border bg-background p-6 text-center">
-              <p className="text-3xl font-semibold text-primary">1</p>
+              <p className="text-3xl font-semibold text-primary">3</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Contractor per match. That&apos;s it.
+                Matched contractors, at most. Never more.
               </p>
             </div>
             <div className="rounded-xl border border-border bg-background p-6 text-center">

@@ -480,3 +480,48 @@ describe("isScoreSignalBreakdown — type guard for jsonb defenses", () => {
     expect(isScoreSignalBreakdown([])).toBe(true);
   });
 });
+
+/* Audit finding D (2026-08-05) — the drawer's `permit_value` detail line is
+ * the sentence a paying contractor actually reads. When `estimated_value`
+ * is null the scorer substitutes the value-forecast model's estimate, and
+ * this row used to render it as "Permit value $250,000" — a number the city
+ * never published, stated as fact. Truthfulness rule: a modeled figure must
+ * be visibly distinguishable from a filed one. */
+describe("permit_value detail — modeled vs filed provenance", () => {
+  const filed: ScoringSignals = { ...populatedSignals, permitValue: 250_000 };
+  const modeled: ScoringSignals = {
+    ...populatedSignals,
+    permitValue: 250_000,
+    permitValueIsModeled: true,
+  };
+  /* No permit-value factor string, so `detailFor` falls through to the
+   * signal-derived sentence — which is exactly the path that fabricated the
+   * figure. */
+  const resultWithoutValueFactor: ScoreResult = {
+    ...populatedResult,
+    factors: ["Filed 2 days ago", "Phone number available"],
+  };
+
+  const detailOf = (signals: ScoringSignals, result: ScoreResult) =>
+    buildScoreSignalBreakdown(result, signals)
+      .find((r) => r.signal === "permit_value")!.detail;
+
+  it("states a filed value plainly", () => {
+    expect(detailOf(filed, resultWithoutValueFactor)).toBe("Permit value $250,000");
+  });
+
+  it("marks a modeled value as modeled, and never as a filed permit value", () => {
+    const detail = detailOf(modeled, resultWithoutValueFactor);
+    expect(detail).not.toBe("Permit value $250,000");
+    expect(detail).toMatch(/modeled/i);
+    expect(detail).toMatch(/no value filed/i);
+    expect(detail).toContain("~$250,000");
+  });
+
+  it("wins over a stale filed-value factor string", () => {
+    // `detailFor` prefers a matching factor string. A modeled lead must not
+    // be able to reach that branch, or the provenance is lost again.
+    const detail = detailOf(modeled, populatedResult); // has "Substantial permit ($75K)"
+    expect(detail).toMatch(/modeled/i);
+  });
+});

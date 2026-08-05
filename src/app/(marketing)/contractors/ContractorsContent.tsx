@@ -229,7 +229,14 @@ const SOLUTIONS = [
 const STEPS = [
   {
     title: "Permit filed",
-    desc: "A homeowner pulls a roofing, solar, or ADU permit with the city. The permit hits Henri's daily catalog refresh within 24 hours of filing.",
+    // 2026-08-05 truthfulness pass: was "within 24 hours of filing". Henri
+    // cannot see a permit until its jurisdiction publishes it, and that lag
+    // is not 24 hours — measured on live ingest, the MEDIAN permit is 292
+    // days past its issue date when Henri first stores it. The 24-hour
+    // figure is real but it measures our refresh cadence AFTER publication,
+    // which is the claim src/components/landing/FAQ.tsx:42 already makes
+    // correctly. Reused that phrasing verbatim so the two pages agree.
+    desc: "A homeowner pulls a roofing, solar, or ADU permit with the city. Once the jurisdiction publishes it, the permit lands in Henri's catalog on the next daily refresh — typically within 24 hours of the source jurisdiction publishing it.",
   },
   {
     title: "AI scores the lead",
@@ -257,7 +264,10 @@ const FEATURES = [
     badge: "Core",
     icon: <PermitIcon />,
     title: "Permit intelligence",
-    desc: "Daily building-permit refresh across your territory ZIPs. New permits appear in your dashboard within 24 hours of filing.",
+    // 2026-08-05: second instance of the "within 24 hours of filing" claim
+    // corrected in STEPS above — the 24 hours is our refresh cadence after
+    // a jurisdiction publishes, not the gap since the homeowner filed.
+    desc: "Daily building-permit refresh across your territory ZIPs. New permits appear in your dashboard within 24 hours of the source jurisdiction publishing them.",
   },
   {
     badge: "Core",
@@ -420,7 +430,12 @@ const COMPARISON_ROWS = [
 const FAQ_ITEMS = [
   {
     q: "What exactly is a building permit lead?",
-    a: "When a building permit is filed in your territory, Henri picks it up on the next daily catalog refresh (typically within 24 hours), scores it 0\u2013100 for urgency and value, and \u2014 when public records or licensed enrichment sources have it \u2014 adds the homeowner name, phone, email, mailing address, property value, and project details. Coverage of the enriched fields varies by jurisdiction. The underlying permit is a public record; what Henri delivers is the scored, best-effort enriched packet ready to act on.",
+    // 2026-08-05: third instance of the filing-anchored 24-hour claim. The
+    // sentence tied "within 24 hours" to the moment a permit is FILED; the
+    // measured median gap between a permit's issue date and Henri first
+    // storing it is 292 days, because that gap belongs to the jurisdiction's
+    // publication schedule, not to our refresh. Re-anchored to publication.
+    a: "When a building permit in your territory is published by its jurisdiction, Henri picks it up on the next daily catalog refresh (typically within 24 hours of publication), scores it 0\u2013100 for urgency and value, and \u2014 when public records or licensed enrichment sources have it \u2014 adds the homeowner name, phone, email, mailing address, property value, and project details. Coverage of the enriched fields varies by jurisdiction. The underlying permit is a public record; what Henri delivers is the scored, best-effort enriched packet ready to act on.",
   },
   // FAQ "How is exclusivity guaranteed?" removed 2026-04-30. The lock
   // schema exists in DB and a lock library + API are wired, but no UI

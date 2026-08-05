@@ -108,6 +108,17 @@ function detailFor(key: ScoreSignalKey, factors: string[], signals: ScoringSigna
       return days < 1 ? "Filed today" : `Filed ~${days} days ago`;
     }
     case "permit_value": {
+      // Audit finding D — checked FIRST, before any factor-string matching,
+      // because a modeled value must never be rendered in the same words as
+      // a filed one. When `estimated_value` is null the scorer substitutes
+      // the value-forecast model's estimate; without this branch the detail
+      // line below would print "Permit value $250,000" for a permit whose
+      // value the city never published. The tilde + the parenthetical are
+      // the whole point: the contractor has to be able to tell which of the
+      // two numbers they are looking at.
+      if (signals.permitValueIsModeled && signals.permitValue != null && signals.permitValue > 0) {
+        return `Estimated value ~$${signals.permitValue.toLocaleString()} (modeled from comparable permits — no value filed)`;
+      }
       // Match ONLY permit-value factors. `scoreValue` pushes two different
       // shapes into the same untagged array — "High-value permit ($120K)"
       // from the permit's own declared value, and "High-value property

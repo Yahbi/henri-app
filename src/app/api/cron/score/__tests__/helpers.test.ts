@@ -138,6 +138,40 @@ describe("extractOwnerFields", () => {
     expect(out.email).toBe("pat@example.com");
   });
 
+  /* Audit finding C (2026-08-05). `contractor_phone_number` and
+   * `contractor_phone_1` used to be in the homeowner phone candidate list.
+   * `out.phone` is written to `leads.phone`, which renders under the
+   * "Homeowner" heading and is the SMS destination for outreach written in
+   * the homeowner's voice — so a permit that shipped only a GC's number made
+   * Henri text a competing contractor a message addressed to a homeowner.
+   * These cases lock the number out of the homeowner field; the raw value
+   * still exists in permits.raw_json for a future contractor-intel surface. */
+  it("never returns a contractor phone as the homeowner phone", () => {
+    const raw = {
+      // Orlando's shape: owner name present, homeowner phone absent, GC
+      // phone present. 18,804 Orlando permits look exactly like this.
+      parcel_owner_name: "MORGAN MATTHEW B",
+      contractor_name: "Acme Roofing LLC",
+      contractor_phone_number: "(407)592-6291",
+      contractor_phone_1: "406-555-0134", // Bozeman MT's key
+    };
+    const out = extractOwnerFields(raw);
+    expect(out.phone).toBeNull();
+    // The GC's NAME is still extracted — it renders under a "Contractor"
+    // label, which is honest. Only the phone was mislabelled.
+    expect(out.contractor).toBe("Acme Roofing LLC");
+    expect(out.full).toBe("MORGAN MATTHEW B");
+  });
+
+  it("still prefers a real homeowner phone when one is present", () => {
+    const raw = {
+      owner_name: "Dana Kim",
+      owner_phone: "813-555-0177",
+      contractor_phone_number: "(407)592-6291",
+    };
+    expect(extractOwnerFields(raw).phone).toBe("813-555-0177");
+  });
+
   it("returns all-null when raw is null", () => {
     const out = extractOwnerFields(null);
     expect(out.first).toBeNull();

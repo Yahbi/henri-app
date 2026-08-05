@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
 import { OutreachQueueBodySchema, parseBody } from "@/lib/schemas/api";
 import { requireContractor } from "@/lib/auth/requireContractor";
+import { renderTemplate, type OutreachTokenContext } from "@/lib/outreach/tokens";
 
 /* ─── GET /api/outreach — outreach history + stats for the current contractor ─── */
 export async function GET() {
@@ -155,6 +156,124 @@ export async function POST(request: NextRequest) {
         ? lead.phone ?? "unknown"
         : lead.email ?? "unknown";
 
+    /* ── Resolve {{tokens}} BEFORE the body is persisted ───────────────────
+     *
+     * What was wrong: this handler enqueued `message` verbatim. A template
+     * body like "Hi {{owner_first}}, about permit {{permit_number}}" was
+     * written to outreach_queue.body with the braces intact, and the
+     * follow-ups cron transmits `item.body` unchanged — so homeowners
+     * received SMS/email containing the literal placeholder text. The
+     * renderer in src/lib/outreach/tokens.ts already existed and was
+     * correct, but nothing on the send path called it: its only callers
+     * were its own unit tests, i.e. it was dead code.
+     *
+     * Why render at enqueue time rather than at transmit time: the body
+     * the contractor sees in Outreach history is then byte-identical to
+     * what was sent, and the cron's pre-send guard has a stable invariant
+     * to assert (no double-brace placeholder may ever leave the queue).
+     *
+     * Both lookups below are deliberately best-effort — they must never
+     * turn a send into a failure. Every field in OutreachTokenContext has
+     * a documented fallback ("there" / "your property" / "your recent
+     * permit"), and resolveTokens maps null/undefined/"" onto that
+     * fallback, so a partial context still yields a readable sentence and
+     * never the strings "undefined" or "null".
+     */
+    const { data: leadCtxRow } = await supabase
+      .from("leads")
+      .select(
+        "owner_first, owner_last, owner_name, address, city, state, zip, " +
+          "trade, permit_value, permit_description, permit_filed_date, " +
+          "permit_age_days, permits ( permit_number )"
+      )
+      .eq("id", lead_id)
+      .eq("contractor_id", user.id)
+      .single();
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("full_name, company_name, phone")
+      .eq("id", user.id)
+      .single();
+
+    /* The untyped Supabase client widens any embedded-select result to a
+     * union that includes GenericStringError, so the row has to be narrowed
+     * before use — same `as unknown as` pattern the GET handler above uses
+     * for its `leads(…)` embed. Every field stays optional/nullable so the
+     * fallback path in resolveTokens is what actually guarantees output
+     * quality, not this cast. */
+    const leadCtx = leadCtxRow as unknown as {
+      owner_first?: string | null;
+      owner_last?: string | null;
+      owner_name?: string | null;
+      address?: string | null;
+      city?: string | null;
+      state?: string | null;
+      zip?: string | null;
+      trade?: string | null;
+      permit_value?: number | null;
+      permit_description?: string | null;
+      permit_filed_date?: string | null;
+      permit_age_days?: number | null;
+      permits?: { permit_number?: string | null } | null;
+    } | null;
+
+    const permit = leadCtx?.permits ?? null;
+
+    // 39% of leads carry owner_name but only some carry the split
+    // owner_first, so fall back to the first whitespace-delimited token
+    // rather than dropping straight to the "there" fallback.
+    const ownerFirst =
+      leadCtx?.owner_first ??
+      (leadCtx?.owner_name
+        ? leadCtx.owner_name.trim().split(/\s+/)[0] || null
+        : null);
+
+    // permit_age_days is denormalized onto leads by the score cron, but
+    // is null on manually-added and parcel-synthesized leads; derive from
+    // the filed date when it's missing. A malformed date yields NaN,
+    // which formatContextValue turns into the "recently" fallback.
+    const daysAgo =
+      leadCtx?.permit_age_days ??
+      (leadCtx?.permit_filed_date
+        ? Math.round(
+            (Date.now() - new Date(leadCtx.permit_filed_date).getTime()) /
+              86_400_000
+          )
+        : null);
+
+    const addressFull = [
+      leadCtx?.address,
+      leadCtx?.city,
+      [leadCtx?.state, leadCtx?.zip].filter(Boolean).join(" "),
+    ]
+      .filter((part) => !!part && String(part).trim() !== "")
+      .join(", ");
+
+    const tokenCtx: Partial<OutreachTokenContext> = {
+      owner_first: ownerFirst,
+      owner_last: leadCtx?.owner_last ?? null,
+      address_short: leadCtx?.address ?? "",
+      address_full: addressFull,
+      city: leadCtx?.city ?? null,
+      zip: leadCtx?.zip ?? null,
+      permit_number: permit?.permit_number ?? null,
+      permit_scope: leadCtx?.permit_description ?? null,
+      days_ago: daysAgo,
+      trade: leadCtx?.trade ?? null,
+      permit_value: leadCtx?.permit_value ?? null,
+      contractor_name: profile?.full_name ?? "",
+      contractor_company: profile?.company_name ?? "",
+      contractor_phone: profile?.phone ?? null,
+    };
+
+    // `subject` carries the template name today (the email sender reads
+    // it as the Subject line), so it goes through the same renderer.
+    const rendered = renderTemplate(
+      { subject: template_name ?? null, body: message },
+      tokenCtx
+    );
+
     const { data: outreach, error: insertErr } = await supabase
       .from("outreach_queue")
       .insert({
@@ -162,8 +281,8 @@ export async function POST(request: NextRequest) {
         lead_id,
         channel,
         recipient,
-        subject: template_name ?? null,
-        body: message,
+        subject: rendered.subject || null,
+        body: rendered.body,
         scheduled_for: new Date().toISOString(),
         status: "queued",
       })

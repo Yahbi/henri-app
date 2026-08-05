@@ -14,6 +14,20 @@ export interface ScoringSignals {
 
   /* Value signals */
   permitValue: number | null;   // dollar value from permit
+  /**
+   * True when `permitValue` did NOT come off the permit — it is the
+   * value-forecast model's estimate, used because `estimated_value` was
+   * null (see `buildSignals`).
+   *
+   * 2026-08-05 fix (audit finding D): the forecast used to be merged into
+   * `permitValue` with no provenance at all, so the score breakdown
+   * asserted a concrete figure — "High-value permit ($250K)" — for a permit
+   * that has no value on file. That is a fabricated metric shown to a
+   * paying contractor and a direct violation of the truthfulness rule.
+   * Everything that renders a permit value must branch on this flag and say
+   * that the number is modeled.
+   */
+  permitValueIsModeled?: boolean;
   propertyValue: number | null; // assessed property value
   projectType: string | null;   // trade / permit type
 
@@ -198,13 +212,21 @@ function scoreValue(signals: ScoringSignals, factors: string[]): number {
   let score = 2; // baseline for permits with no value data
 
   const pv = signals.permitValue;
+  // Audit finding D: a modeled value must never be worded like a filed one.
+  // The factor string produced here is the human-readable evidence a
+  // contractor reads in the "Why this score" drawer, so "High-value permit
+  // ($250K)" on a permit with no `estimated_value` is a number we invented
+  // presented as a number the city published. Same points, different words.
+  const modeled = signals.permitValueIsModeled === true;
+  const modeledFactor = (v: number) =>
+    `Estimated value ~$${formatCompact(v)} (modeled from comparable permits — no value filed)`;
   if (pv != null && pv > 0) {
     if (pv >= 100_000) {
       score = 20;
-      factors.push(`High-value permit ($${formatCompact(pv)})`);
+      factors.push(modeled ? modeledFactor(pv) : `High-value permit ($${formatCompact(pv)})`);
     } else if (pv >= 50_000) {
       score = 16;
-      factors.push(`Substantial permit ($${formatCompact(pv)})`);
+      factors.push(modeled ? modeledFactor(pv) : `Substantial permit ($${formatCompact(pv)})`);
     } else if (pv >= 25_000) {
       score = 12;
     } else if (pv >= 10_000) {
@@ -760,14 +782,26 @@ export function buildSignals(params: {
   /* Permit value: prefer the actual estimated_value. When null, fall back
    * to the value-forecast prediction (Sprint 2 F2.2). Never overrides an
    * actual value. Returns null only when both inputs are null — the value
-   * scorer then assigns 0 to that signal (no fabricated value). */
+   * scorer then assigns 0 to that signal (no fabricated value).
+   *
+   * 2026-08-05 (audit finding D): the fallback is now flagged. The merge
+   * itself was the bug — downstream (scoreValue's factor strings, and
+   * signals.ts `detailFor`) had no way to tell a modeled figure from a
+   * filed one and so worded both identically. `permitValueIsModeled` is
+   * true only when the number came from the forecaster, i.e. when
+   * `estimated_value` is null AND `predicted_value` supplied a value. */
   const permitValueResolved =
     params.permit.estimated_value ?? params.permit.predicted_value ?? null;
+  const permitValueIsModeled =
+    params.permit.estimated_value == null &&
+    params.permit.predicted_value != null &&
+    permitValueResolved != null;
 
   return {
     permitAge,
     daysSinceCreated,
     permitValue: permitValueResolved,
+    permitValueIsModeled,
     propertyValue,
     projectType: trade,
     hasPhone: !!params.lead?.phone,

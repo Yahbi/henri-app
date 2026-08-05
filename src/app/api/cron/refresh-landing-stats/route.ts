@@ -46,7 +46,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
 import { logCronRun } from "@/lib/admin/cron-log";
-import { ALL_US_STATES } from "@/lib/stats/us-states";
+import { ALL_US_STATES, deriveActiveStates } from "@/lib/stats/us-states";
 import { fetchNonPermitSources, countLeadsExact, type NonPermitSource } from "@/lib/stats/landing";
 
 export const dynamic = "force-dynamic";
@@ -115,11 +115,38 @@ export async function GET(request: Request) {
         mapWithConcurrency(ALL_US_STATES, CONCURRENCY, async (state) => {
           let lastError = "";
           for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            const { count, error } = await supabase
+            const total = await supabase
               .from("permits")
               .select("*", { count: "exact", head: true })
               .eq("state", state);
-            if (!error) return [state, count ?? 0] as const;
+            // SECOND figure: rows that carry a ZIP.
+            //
+            // The raw count above is NOT a measure of what a contractor can
+            // buy. Territories are sold per ZIP and lead creation opens with
+            // an `if (!zip) continue` guard, so a permit with no ZIP can
+            // never enter anyone's territory. On 2026-08-05 that is 63.9% of
+            // the catalog (869,599 of 2,436,095 rows carry a ZIP), and the
+            // gap is not spread evenly — 10 of the 34 states the raw
+            // threshold certified as "covered" held under 500 ZIP-bearing
+            // rows. The marketing map was promising coverage that could not
+            // be sold. See `deriveActiveStates` for how the two are used.
+            //
+            // Sequential rather than Promise.all: each count is a PARALLEL
+            // index-only scan that claims a worker of its own, and the
+            // CONCURRENCY cap above is set at 4 precisely because the pool
+            // saturated at 12. Firing both at once would put 8 scans in
+            // flight and walk straight back toward that. Two ~89ms
+            // statements in series cost ~180ms; a saturated pool costs the
+            // whole refresh.
+            const zipped = total.error
+              ? null
+              : await supabase
+                  .from("permits")
+                  .select("*", { count: "exact", head: true })
+                  .eq("state", state)
+                  .not("zip", "is", null);
+            const error = total.error ?? zipped?.error ?? null;
+            if (!error) return [state, total.count ?? 0, zipped?.count ?? 0] as const;
             // Transient pool/worker contention surfaces here as an error
             // with an EMPTY message, so include the code to keep the
             // final failure diagnosable.
@@ -204,8 +231,12 @@ export async function GET(request: Request) {
     );
 
     const statePermits: Record<string, number> = {};
-    for (const [state, n] of stateCounts) {
+    // Parallel histogram counting only rows that carry a ZIP — the subset
+    // that can actually reach a territory and become a lead.
+    const statePermitsZipped: Record<string, number> = {};
+    for (const [state, n, zipped] of stateCounts) {
       if (n > 0) statePermits[state] = n;
+      if (zipped > 0) statePermitsZipped[state] = zipped;
     }
 
     // Attribute each junk feed's rows to the state the registry declares
@@ -226,12 +257,26 @@ export async function GET(request: Request) {
       const st = src.declaredState;
       if (st && statePermits[st] != null) {
         statePermits[st] = Math.max(0, statePermits[st] - n);
+        // The ZIP-bearing histogram gets the SAME subtraction. We only
+        // counted the junk feed's rows in total, not split by ZIP, and
+        // measuring that split would cost a second query per excluded
+        // source. Taking the whole figure off can over-subtract (a junk
+        // feed's rows are at most as many as its ZIP-bearing rows), which
+        // is the same imprecision the line above already accepts and it
+        // errs the same way: toward claiming LESS coverage than we hold,
+        // which is the side CLAUDE.md requires. Clamped at 0.
+        if (statePermitsZipped[st] != null) {
+          statePermitsZipped[st] = Math.max(0, statePermitsZipped[st] - n);
+        }
       } else {
         excludedUnattributed += n;
       }
     }
     for (const [st, n] of Object.entries(statePermits)) {
       if (n <= 0) delete statePermits[st];
+    }
+    for (const [st, n] of Object.entries(statePermitsZipped)) {
+      if (n <= 0) delete statePermitsZipped[st];
     }
 
     const permitsTotal = Math.max(
@@ -271,11 +316,22 @@ export async function GET(request: Request) {
     // `excluded_*` are observability only — the read path ignores unknown
     // keys. They exist so an operator can tell a shrinking headline caused
     // by a newly-classified junk feed apart from one caused by data loss.
+    // `state_permits_zipped` is written ALONGSIDE `state_permits`, never
+    // instead of it: the raw histogram still drives the map's volume
+    // shading and per-state tooltips (those really are permit counts),
+    // while the ZIP-bearing one answers the different question of which
+    // states hold anything sellable. Emitted only when non-empty, so an
+    // all-zero result is indistinguishable from a row written before this
+    // key existed and readers degrade to raw volume either way rather
+    // than concluding coverage collapsed to nothing.
     const payload = {
       permits_total: permitsTotal,
       leads_total: leadsRes.count ?? 0,
       zips_covered: zipsCovered,
       state_permits: statePermits,
+      ...(Object.keys(statePermitsZipped).length > 0
+        ? { state_permits_zipped: statePermitsZipped }
+        : {}),
       excluded_sources: nonPermitSources.length,
       excluded_rows: excludedRows,
       computed_at: new Date().toISOString(),
@@ -295,6 +351,14 @@ export async function GET(request: Request) {
       leads: payload.leads_total,
       zips: zipsCovered,
       states: Object.keys(statePermits).length,
+      // The number the marketing map is allowed to claim, computed through
+      // the same helper the read path uses so the cron log and the homepage
+      // can never disagree about what "covered" means. Logged next to the
+      // raw `states` count deliberately: the gap between the two IS the
+      // finding, and an operator watching it shrink is watching geocoding
+      // backfill turn unsellable rows into sellable territory.
+      states_covered: deriveActiveStates(statePermits, statePermitsZipped)
+        .length,
       excluded_sources: nonPermitSources.length,
       excluded_rows: excludedRows,
       duration_ms: durationMs,

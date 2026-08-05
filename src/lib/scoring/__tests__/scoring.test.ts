@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calculateScore, type ScoringSignals } from "../model";
+import { buildSignals, calculateScore, type ScoringSignals } from "../model";
 
 /** Helper to create a default signal set that can be selectively overridden */
 function makeSignals(overrides: Partial<ScoringSignals> = {}): ScoringSignals {
@@ -296,6 +296,54 @@ describe("value scoring", () => {
     }));
     expect(result.value).toBeLessThanOrEqual(20);
   });
+
+  /* Audit finding D (2026-08-05) — a value-forecast estimate used to be
+   * merged into `permitValue` with no provenance, so the factor string a
+   * contractor reads in the drawer asserted "High-value permit ($250K)" for
+   * a permit with no `estimated_value` on file. Same points, but the words
+   * have to say the number is modeled. */
+  describe("modeled (forecast) permit values", () => {
+    it("words a filed value as a permit value", () => {
+      const result = calculateScore(makeSignals({ permitValue: 250_000 }));
+      expect(result.factors).toContain("High-value permit ($250K)");
+    });
+
+    it("never words a modeled value like a filed one", () => {
+      const result = calculateScore(makeSignals({
+        permitValue: 250_000,
+        permitValueIsModeled: true,
+      }));
+      expect(result.factors).not.toContain("High-value permit ($250K)");
+      expect(
+        result.factors.some((f) => /modeled .* no value filed/i.test(f)),
+      ).toBe(true);
+      // The estimate is marked approximate, never stated as a fact.
+      expect(result.factors.some((f) => f.includes("~$250K"))).toBe(true);
+    });
+
+    it("marks the $50K-$100K tier as modeled too", () => {
+      const result = calculateScore(makeSignals({
+        permitValue: 60_000,
+        permitValueIsModeled: true,
+      }));
+      expect(result.factors).not.toContain("Substantial permit ($60K)");
+      expect(
+        result.factors.some((f) => /modeled .* no value filed/i.test(f)),
+      ).toBe(true);
+    });
+
+    it("scores a modeled value identically to a filed one", () => {
+      // Provenance changes the WORDS, not the maths — otherwise the flag
+      // would silently re-tune every score that depends on the forecaster.
+      const filed = calculateScore(makeSignals({ permitValue: 250_000 }));
+      const modeled = calculateScore(makeSignals({
+        permitValue: 250_000,
+        permitValueIsModeled: true,
+      }));
+      expect(modeled.value).toBe(filed.value);
+      expect(modeled.total).toBe(filed.total);
+    });
+  });
 });
 
 describe("contact scoring", () => {
@@ -379,5 +427,35 @@ describe("urgency tiers", () => {
     }));
     expect(result.urgency).toBe("cold");
     expect(result.total).toBeLessThan(25);
+  });
+});
+
+/* Audit finding D (2026-08-05) — `buildSignals` is where the forecast is
+ * merged into `permitValue`. The provenance flag has to be derived there,
+ * because that is the only place that still knows which of the two inputs
+ * the resolved number came from. */
+describe("buildSignals — permit-value provenance", () => {
+  it("does not flag a value that came off the permit", () => {
+    const s = buildSignals({
+      permit: { estimated_value: 80_000, predicted_value: 250_000 },
+    });
+    expect(s.permitValue).toBe(80_000);
+    expect(s.permitValueIsModeled).toBe(false);
+  });
+
+  it("flags the forecast when the permit has no value on file", () => {
+    const s = buildSignals({
+      permit: { estimated_value: null, predicted_value: 250_000 },
+    });
+    expect(s.permitValue).toBe(250_000);
+    expect(s.permitValueIsModeled).toBe(true);
+  });
+
+  it("does not flag when there is no value at all", () => {
+    const s = buildSignals({
+      permit: { estimated_value: null, predicted_value: null },
+    });
+    expect(s.permitValue).toBeNull();
+    expect(s.permitValueIsModeled).toBe(false);
   });
 });

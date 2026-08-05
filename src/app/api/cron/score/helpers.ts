@@ -36,10 +36,34 @@ export interface OwnerFields {
   first: string | null;
   last: string | null;
   full: string | null;
+  /** HOMEOWNER phone only. See the note on the `phone` key list below —
+   *  contractor / GC phone numbers are deliberately excluded. */
   phone: string | null;
   email: string | null;
   contractor: string | null;
 }
+
+/* ── Why the phone list has no contractor keys ───────────────────────────
+ * 2026-08-05 fix (audit finding C). `contractor_phone_number` and
+ * `contractor_phone_1` used to sit in the homeowner `phone` candidate list,
+ * added to lift phone fill (Orlando ships 18,804 of the former, Bozeman MT
+ * the latter). They are the wrong number. The value flows straight into
+ * `leads.phone`, which the lead drawer renders under the "Homeowner"
+ * heading and which /api/cron/follow-ups uses as the SMS destination for
+ * outreach written in the homeowner's voice — so Henri was texting a
+ * COMPETING CONTRACTOR a message addressed to a homeowner.
+ *
+ * That is wrong three ways at once: the score's contact_completeness signal
+ * counted a contact we cannot actually use, the contractor paying for the
+ * lead was shown a rival's number as their prospect, and the SMS went to a
+ * business line that never consented (TCPA).
+ *
+ * `leads` has no contractor_phone column, so the number is not re-homed —
+ * it simply stops being treated as the homeowner's. Nothing is lost: the
+ * raw value is still on `permits.raw_json` under its original key and is
+ * available verbatim to a future contractor-intel surface. The GC's NAME is
+ * still extracted below, into the separate `contractor` field, which is
+ * labelled as such everywhere it renders. */
 
 export function extractOwnerFields(
   raw: Record<string, unknown> | null | undefined,
@@ -65,10 +89,7 @@ export function extractOwnerFields(
     ]),
     phone: pickRawField(raw, [
       "owner_phone", "OwnerPhone", "OWNER_PHONE", "phone", "PHONE", "Phone",
-      // Same Orlando blind spot — 18,804 phones. Phone fill is the
-      // binding constraint on lead scores (top score is ~69 against a
-      // 75 "hot" threshold), so these keys matter more than most.
-      "contractor_phone_number", "contractor_phone_1", "owner_phone_number",
+      "owner_phone_number",
       "applicant_phone", "APPLICANT_PHONE",
     ]),
     email: pickRawField(raw, [

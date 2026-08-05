@@ -73,6 +73,16 @@ export function TerritoryMapPreview({
     }));
   }, [statePermits]);
 
+  // Deliberately NOT the same population as the "States covered" stat
+  // card below, and the two are expected to disagree on screen.
+  //
+  // `statePermits` is every state holding at least one permit (46 on
+  // 2026-08-05). `activeStatesLabel` counts only states we are willing to
+  // call covered, which since 2026-08-05 means states holding enough
+  // ZIP-BEARING permits to sell — territories are sold per ZIP and 63.9%
+  // of the catalog carries none. The copy below is worded "with permits
+  // in the catalog" precisely because it is the wider, weaker claim; do
+  // not "reconcile" the two numbers by swapping one for the other.
   const totalStates = Object.keys(statePermits ?? {}).length;
   const remaining = Math.max(0, totalStates - ranked.length);
 
