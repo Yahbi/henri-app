@@ -173,8 +173,38 @@ describe("normalizeFlatRecord", () => {
       junkSource,
       "socrata",
     );
-    expect(row!.latitude).toBeNull();
-    expect(row!.longitude).toBeNull();
+    // ABSENT, not null. This assertion used to be `toBeNull()`, which locked
+    // in a data-destroying bug: the upsert runs with merge-duplicates, so a
+    // supplied `latitude: null` becomes SET latitude = NULL and wipes
+    // coordinates a previous geocode pass had resolved. Omitting the key
+    // leaves the stored value untouched.
+    expect(Object.prototype.hasOwnProperty.call(row!, "latitude")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(row!, "longitude")).toBe(false);
+  });
+
+  it("omits zip entirely when this fetch could not resolve one", () => {
+    // Same hazard as the coordinates above, and the more expensive one:
+    // /api/cron/census-geocode backfills missing ZIPs, scrape re-runs hourly
+    // over the same sources, and an unconditional `zip: null` erased each
+    // backfilled ZIP on the next pass. Measured on production 2026-08-05,
+    // distinct permit ZIPs fell 18,040 -> 16,551 across two scrape runs while
+    // the geocoder was adding them. A permit with no ZIP cannot match a
+    // territory, so every erased ZIP is a lead that cannot be created.
+    const noZipSource: PermitSource = { ...LA_SOURCE, zipField: "nonexistent_column" };
+    const { row } = normalizeFlatRecord(
+      { ...base, zip_code: undefined, location_1: undefined, address: undefined },
+      noZipSource,
+      "socrata",
+    );
+    expect(Object.prototype.hasOwnProperty.call(row!, "zip")).toBe(false);
+  });
+
+  it("still writes zip and coordinates when this fetch DOES resolve them", () => {
+    // The omission above must be conditional, not a blanket removal.
+    const { row } = normalizeFlatRecord(base, LA_SOURCE, "socrata");
+    expect(row!.zip).toBe("90006");
+    expect(row!.latitude).toBeCloseTo(34.04407, 5);
+    expect(row!.longitude).toBeCloseTo(-118.29097, 5);
   });
 
   it("persists owner and contractor contact fields found in the record", () => {

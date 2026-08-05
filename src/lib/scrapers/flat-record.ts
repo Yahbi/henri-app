@@ -245,9 +245,29 @@ export function normalizeFlatRecord(
     status: normalizeStatus(rawStatus),
     description: record[source.descField] != null ? String(record[source.descField]) : null,
     address: rawAddress || null,
-    zip: resolvedZip,
-    latitude: geo?.lat ?? null,
-    longitude: geo?.lng ?? null,
+    // `zip`, `latitude` and `longitude` are DELIBERATELY ABSENT here and are
+    // added below only when this fetch actually produced a value.
+    //
+    // They used to be unconditional (`zip: resolvedZip`, `latitude:
+    // geo?.lat ?? null`). The upsert runs with merge-duplicates, i.e.
+    // ON CONFLICT DO UPDATE SET every supplied column, so a re-scrape whose
+    // mapping yielded no ZIP wrote `SET zip = NULL` over a ZIP that was
+    // already there — silently destroying it.
+    //
+    // That erased backfilled data on a schedule. /api/cron/census-geocode
+    // exists to resolve missing ZIPs from the Census geocoder, and scrape
+    // runs every hour over the same sources, so each geocoded ZIP survived
+    // only until its source was next scraped. Observed directly on
+    // production 2026-08-05: distinct permit ZIPs fell from 18,040 to 16,551
+    // across two scrape runs, while the geocoder was ADDING ZIPs. A net loss
+    // of 1,489 ZIPs, each one a permit that can no longer match a territory
+    // and therefore can no longer become a lead.
+    //
+    // This is exactly the reasoning already applied to the contact columns
+    // below — "a key that is absent is left untouched by ON CONFLICT DO
+    // UPDATE, so a sparse re-fetch can never blank a value an enrichment
+    // pass already won" — which was correct, and simply had not been applied
+    // to the three geo columns that an enrichment pass actually fills.
     issued_date: issuedDate,
     estimated_value: parseMoney(rawValue),
     // `scored_at` is DELIBERATELY ABSENT.
@@ -273,6 +293,14 @@ export function normalizeFlatRecord(
   // Only NON-NULL values are added to the payload: a key that is absent is
   // left untouched by ON CONFLICT DO UPDATE, so a sparse re-fetch can never
   // blank a value an enrichment pass already won.
+  // Geo columns: present only when this fetch resolved one. See the note in
+  // the row literal above — writing null here destroys geocoder backfill.
+  if (resolvedZip) row.zip = resolvedZip;
+  if (geo?.lat != null && geo?.lng != null) {
+    row.latitude = geo.lat;
+    row.longitude = geo.lng;
+  }
+
   const contact = extractContactWithProvenance(record);
   if (contact.owner_name) row.applicant_name = contact.owner_name;
   else if (contact.applicant_name) row.applicant_name = contact.applicant_name;
