@@ -55,20 +55,29 @@ export default function HomeownerDashboard() {
   // footgun; the consumer reintroduced it with a second unguarded flag.
   const { user, profile, loading: userLoading } = useUser();
   const [chatOpen, setChatOpen] = useState(false);
-  const [intakes, setIntakes] = useState<Intake[]>([]);
-  const [loading, setLoading] = useState(true);
+  /* `intakes` starts null, not [], so "not fetched yet" is distinguishable
+   * from "fetched and empty". That distinction is what lets `loading` be
+   * DERIVED below instead of stored, which is the actual fix for the
+   * cascading-render lint error this file used to trip: the effect had to
+   * call setLoading(false) synchronously in its body to stop the skeleton
+   * when auth resolved with no user. Derived state needs no such call. */
+  const [intakes, setIntakes] = useState<Intake[] | null>(null);
   // A dropped query error rendered "No projects yet — start your first
   // project" to a homeowner who has active projects. A load failure must
   // never be pixel-identical to genuine emptiness.
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("projects");
+  /* Derived, not stored. We are loading while auth is still resolving, or
+   * while a signed-in user's fetch has neither returned rows nor errored.
+   * Signed-out resolves to false with no setState anywhere, which is the
+   * case that previously needed the synchronous effect write. */
+  const loading = userLoading || (!!user && intakes === null && !loadError);
   // Prefills the intake chat when it's opened from a CTA that already
   // knows the trade (Cost Estimator / maintenance task).
   const [chatTrade, setChatTrade] = useState("");
 
   const fetchIntakes = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
     setLoadError(null);
     const supabase = createClient();
     const { data, error } = await supabase
@@ -77,23 +86,20 @@ export default function HomeownerDashboard() {
       .eq("contact_email", user.email)
       .order("created_at", { ascending: false });
     if (error) {
+      // Leaves `intakes` null; `loading` derives to false because
+      // loadError is set, so the alert branch renders rather than an
+      // endless skeleton.
       setLoadError(error.message || "Couldn't load your projects.");
-      setLoading(false);
       return;
     }
     setIntakes(data ?? []);
-    setLoading(false);
   }, [user]);
 
   useEffect(() => {
     let cancelled = false;
-    if (userLoading) return;
-    if (!user) {
-      // Auth resolved with no user — stop the skeleton instead of
-      // spinning forever.
-      setLoading(false);
-      return;
-    }
+    // No setState in this body. Signed-out is handled by `loading` deriving
+    // to false, which is what removed the cascading-render lint error.
+    if (userLoading || !user) return;
     void (async () => {
       await fetchIntakes();
       if (cancelled) return;
@@ -212,9 +218,9 @@ export default function HomeownerDashboard() {
                   Sign in
                 </Link>
               </div>
-            ) : intakes.length > 0 ? (
+            ) : (intakes?.length ?? 0) > 0 ? (
               <div className="space-y-3">
-                {intakes.map((intake) => {
+                {(intakes ?? []).map((intake) => {
                   const config = STATUS_CONFIG[intake.status] ?? STATUS_CONFIG.pending;
                   const Icon = config.icon;
                   const date = new Date(intake.created_at).toLocaleDateString("en-US", {

@@ -59,14 +59,12 @@ function BlastPageInner() {
   // Initialize selection
   useEffect(() => {
     // Initial lead selection after fetch settles; needs effect because won arrives async
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (won.length > 0 && !selectedLeadId) setSelectedLeadId(won[0].id);
   }, [won, selectedLeadId]);
 
   // Fetch dynamic home count estimate when lead or radius changes
   useEffect(() => {
     // Reset-on-dep-change plus async fetch; state drives loading / estimate UI
-    /* eslint-disable react-hooks/set-state-in-effect */
     if (!selectedLead) { setHomeCount(0); return; }
     const lat = (selectedLead as Lead & { latitude?: number }).latitude;
     const lng = (selectedLead as Lead & { longitude?: number }).longitude;
@@ -81,7 +79,6 @@ function BlastPageInner() {
       })
       .catch(() => setHomeCount(0))
       .finally(() => setEstimateLoading(false));
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedLead, radius]);
 
   const loadBlasts = useCallback(async () => {
@@ -97,7 +94,6 @@ function BlastPageInner() {
   }, [user]);
 
   // Load past blasts on mount + when user changes (data fetch, not derived state)
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadBlasts(); }, [loadBlasts]);
 
   async function handleSend() {
