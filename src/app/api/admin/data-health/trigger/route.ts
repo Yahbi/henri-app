@@ -75,6 +75,11 @@ const ALLOWED: ReadonlySet<string> = new Set([
   // NJ statewide (2026-08-04). Backfilling 2.7M rows needs many paged runs;
   // the admin button passes ?offset=N via `query` to walk history.
   "nj-statewide-permits",
+  // The multi-source scraper that drives permit_sources (socrata + arcgis).
+  // It was absent from the allow-list, so newly-registered feeds could not be
+  // exercised from the admin UI at all — the operator had to wait for a
+  // scheduled run to find out whether a field mapping was even correct.
+  "scrape",
 ]);
 
 interface TriggerBody {

@@ -3,6 +3,7 @@ import { scrapeSocrataSource } from "@/lib/scrapers/socrata";
 import { scrapeArcGISSource } from "@/lib/scrapers/arcgis";
 import {
   getActiveSources,
+  getSourcesByKeys,
   markSourceScraped,
   markSourceError,
 } from "@/lib/scrapers/sources-db";
@@ -38,9 +39,32 @@ async function handler(request: NextRequest): Promise<NextResponse> {
   let totalUpdated = 0;
   let totalErrors = 0;
 
-  // Load sources from DB first; fall back to hardcoded if DB is empty
-  const dbSources = await getActiveSources(50);
+  // Load sources from DB first; fall back to hardcoded if DB is empty.
+  //
+  // TARGETED MODE (?source_key=a,b,c) — added 2026-08-05.
+  // Without this there was no way to exercise a specific feed: the route only
+  // ever scraped whatever getActiveSources() happened to return, and that
+  // function splits each run 60/40 between proven producers and ~12k
+  // never-produced explorer stubs. A newly-registered high-value source could
+  // therefore sit unscraped for many runs, and a wrong field mapping was
+  // impossible to test — you registered it and hoped. Targeted mode makes the
+  // registry verifiable: register a source, scrape it by key, see the count.
+  const requestedKeys = (request.nextUrl.searchParams.get("source_key") ?? "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+
+  const dbSources = requestedKeys.length > 0
+    ? await getSourcesByKeys(requestedKeys)
+    : await getActiveSources(50);
   const useDbSources = dbSources.length > 0;
+
+  if (requestedKeys.length > 0 && dbSources.length === 0) {
+    return NextResponse.json(
+      { error: "no matching enabled sources", requested: requestedKeys },
+      { status: 404 },
+    );
+  }
 
   // Time budget (2026-06-10): high-volume sources (20k rows each) can push
   // a 50-source run past Vercel's 300s wall — the function then gets
