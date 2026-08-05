@@ -19,10 +19,6 @@ interface ContractorProfile {
   specialties: string[] | null;
   years_experience: number | null;
   portfolio_photos: string[] | null;
-  avg_rating: number | null;
-  review_count: number | null;
-  response_time_h: number | null;
-  jobs_completed: number | null;
   profile_public: boolean | null;
 }
 
@@ -136,10 +132,6 @@ async function getContractorData(id: string) {
       specialties,
       years_experience,
       portfolio_photos,
-      avg_rating,
-      review_count,
-      response_time_h,
-      jobs_completed,
       profile_public
     `
     )
@@ -249,8 +241,29 @@ export default async function ContractorProfilePage({
   const { profile, license, reviews, zips } = data;
 
   const displayName = profile.company_name || profile.full_name || "Contractor";
-  const avgRating = profile.avg_rating ?? 0;
-  const reviewCount = profile.review_count ?? reviews.length;
+  /* Derived from the REVIEWS THEMSELVES, not from profiles.avg_rating.
+   *
+   * `avg_rating` / `review_count` / `jobs_completed` / `response_time_h` are
+   * declared in 00016 and locked by 00117, but nothing in the codebase has
+   * ever written any of them — a repo-wide search finds 123 reads and zero
+   * writes. They are permanently NULL.
+   *
+   * The visible symptom was the opposite of the usual one: because every
+   * render site guards on `> 0` / `!= null`, the page did not show a FALSE
+   * rating, it showed NO rating — even for a contractor with real rows in
+   * `reviews`. The star distribution right below already computed itself
+   * from `reviews`, so the page was internally inconsistent: a filled-in
+   * histogram under a missing headline score.
+   *
+   * The reviews are the source of truth, so compute from them. */
+  const ratedReviews = reviews.filter(
+    (r): r is typeof r & { rating: number } => typeof r.rating === "number",
+  );
+  const avgRating =
+    ratedReviews.length > 0
+      ? ratedReviews.reduce((sum, r) => sum + r.rating, 0) / ratedReviews.length
+      : 0;
+  const reviewCount = reviews.length;
   const starDist = computeStarDistribution(reviews);
   const totalDistReviews = Object.values(starDist).reduce((a, b) => a + b, 0);
   const specialties = profile.specialties ?? [];
@@ -345,26 +358,20 @@ export default async function ContractorProfilePage({
               </p>
             </div>
           )}
-          {profile.jobs_completed != null && profile.jobs_completed > 0 && (
-            <div className="text-center">
-              <p className="text-2xl font-semibold text-primary">
-                {profile.jobs_completed}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Jobs Completed
-              </p>
-            </div>
-          )}
-          {profile.response_time_h != null && (
-            <div className="text-center">
-              <p className="text-2xl font-semibold text-primary">
-                {profile.response_time_h}h
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Avg. Response Time
-              </p>
-            </div>
-          )}
+          {/* "Jobs Completed" and "Avg. Response Time" were removed here.
+              Both read profiles.jobs_completed / response_time_h, which no
+              code path has ever written — 00016 declares them, 00117 locks
+              them, and a repo-wide search finds zero writes. They rendered
+              nothing in practice (the null guards saw to that), so this is
+              not a visible change; it removes two cells that could only ever
+              have shown a number if someone backfilled the column by hand,
+              at which point the page would have been asserting a track
+              record Henri cannot measure.
+
+              If these come back, they must be derived from real rows —
+              jobs from won leads, response time from actual message
+              timestamps — the way avgRating above is now derived from the
+              reviews table. */}
           {avgRating > 0 && (
             <div className="text-center">
               <p className="text-2xl font-semibold text-primary">

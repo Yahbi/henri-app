@@ -1,5 +1,30 @@
 @import "tailwindcss";
 
+/* Keep the class scanner out of docs/.
+ *
+ * Tailwind v4 auto-detects sources across the whole project (minus
+ * .gitignore'd paths) and treats .md as scannable, because class names do
+ * legitimately appear in documentation. Ours contain raw permit-API URLs
+ * with long percent-encoded query strings, and on 2026-08-05 one of them
+ * made the Rust candidate extractor emit:
+ *
+ *   CssSyntaxError: tailwindcss: src/app/globals.css:1:1:
+ *   Invalid code point 4525180
+ *
+ * 4,525,180 is past U+10FFFF, so that is the extractor mis-decoding a byte
+ * run, not a real character in the file — the file is valid UTF-8 (verified
+ * byte-by-byte). The error is reported against globals.css because that is
+ * where the scan is rooted, which makes it look like a CSS problem when
+ * nothing about the CSS is wrong. `pnpm build` failed outright; isolating
+ * it took a bisect of the working tree.
+ *
+ * No Tailwind class is ever authored in docs/, so scanning it buys nothing
+ * and costs a build. Every real source lives under src/.
+ */
+@source not "../../docs";
+@source not "../../scripts";
+@source not "../../supabase";
+
 /*
  * Henri App — CSS Token System
  * Three themes: light (default), dark, dusk
