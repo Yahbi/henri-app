@@ -1,24 +1,92 @@
-# Orlando, FL — Permit Applications, data.cityoforlando.net
-# Verified-live in Socrata catalog discovery (2026-05).
+# Orlando, FL — Permit Applications (Socrata ryhf-m453).
+#
+# ─── 2026-08-05: EVERY FIELD MAPPING IN THIS FILE WAS WRONG ───────────────
+# The previous map referenced columns that do not exist in the dataset.
+# Probing the live endpoint returns:
+#   No such column: applicationnumber
+# and the real schema (31 columns, fetched today) contains none of
+# `applicationnumber`, `applieddate`, `issueddate`, `address`, `zipcode`,
+# `worksummary`, `declaredvalue`, `applicantname`, `contractorname`,
+# `applicationtype` or `status`. Only `worktype` was correct.
+#
+# So the mapping was not "stale" — it was pointed at a schema that is not
+# this dataset's. That is the same class of defect as detroit-mi.yml serving
+# Virginia Beach: a config that looks configured, is marked verified, and
+# cannot return a usable row.
+#
+# ─── Why this one matters more than most ──────────────────────────────────
+# Measured live today:
+#   total rows                 1,105,918
+#   contractor_phone_number      817,118 filled = 73.9%
+#   distinct phone values         16,760
+#
+# 16,760 distinct values across 817k rows is the number that matters. It
+# rules out the failure mode that killed the Midland TX candidate, where a
+# column looked 97% "filled" but held one city staffer's number stamped
+# across 84,000 rows. This is genuine per-contractor phone data.
+#
+# Henri's phone fill is ~1% and that is the binding constraint on lead
+# quality — the scorer's contact_completeness signal is worth 15 of 100
+# points and scores 0 without it. A single correctly-mapped Florida feed
+# with 73.9% contractor-phone fill moves that more than any new ingest.
+#
+# NOTE the phone is the CONTRACTOR's, not the homeowner's. It is competitive
+# and cross-sell intel (who is already working this address), not a
+# homeowner outreach number, and must not be presented as one.
+#
+# ─── Verification standard ────────────────────────────────────────────────
+# Every field below was confirmed present on a live row fetched 2026-08-05,
+# not read from documentation. Socrata OMITS null keys from its JSON, so a
+# field missing from one sample row is not proof of absence — confirm with
+# $select=count(col) before removing anything from this map.
 
 loader: socrata
 name: ORLANDO-FL
 city: Orlando
 state: FL
+status: verified
+
 url: https://data.cityoforlando.net/resource/ryhf-m453.json
 limit: 100
-order_field: applieddate
+order_field: processed_date
 
+# Only the keys load_socrata.py's normalize() actually reads are listed.
+# Inventing keys the loader ignores is how the previous version of this file
+# looked configured while mapping nothing, so this map is deliberately
+# limited to what has a consumer. See the raw_json note below for the rest.
 fields:
-  permit_no:        applicationnumber
-  applied_date:     applieddate
-  issued_date:      issueddate
-  address:          address
-  zip:              zipcode
-  description:      worksummary
-  estimated_value:  declaredvalue
-  applicant:        applicantname
-  contractor:       contractorname
-  permit_type_desc: applicationtype
+  permit_no:        permit_number
+  issued_date:      issue_permit_date
+  address:          permit_address
+  description:      project_name
+  estimated_value:  estimated_cost
+  applicant:        property_owner_name
+  contractor:       contractor_name
+  permit_type_desc: application_type
   work_class:       worktype
-  status:           status
+  status:           application_status
+
+# NO `zip` MAPPING, deliberately. This dataset has no zipcode column — the
+# earlier map invented one. ZIP has to come from geocoding permit_address or
+# from the `location` object, and mapping a non-existent column would write
+# NULL zips, which is precisely what makes a permit invisible to territory
+# matching (see the 126,754 '[object Object]' Los Angeles rows for what that
+# costs). Better to leave it null and let the geocode-backfill cron fill it
+# than to pretend it is mapped.
+#
+# ─── The phone is in raw_json, not in a column ────────────────────────────
+# load_socrata.py's normalize() writes a FIXED shape and reads only the keys
+# above; there is no `contractor_phone`, `owner_name` or `parcel_id` field in
+# the permits table for it to target. It does store the entire upstream row
+# as `raw_json`, so the 73.9%-filled phone is captured on ingest and is
+# reachable today as:
+#
+#   raw_json->>'contractor_phone_number'   -- (239)908-7134
+#   raw_json->>'parcel_owner_name'         -- second owner surface
+#   raw_json->>'parcel_number'             -- parcel join key
+#   raw_json->>'processed_date'            -- application date
+#
+# Turning that into scoreable contact data needs a read-side extractor — the
+# same follow-up bozeman-mt.yml is waiting on. Until that ships, the value is
+# banked in raw_json rather than lost, but it does NOT yet raise the
+# contact_completeness score signal. Do not claim it does.
