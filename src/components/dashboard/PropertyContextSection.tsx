@@ -41,14 +41,20 @@ import type { LeadContextData } from "@/hooks/useLeadContext";
  *      roofing / siding / windows trades.
  *
  * Pure presentational component. State + fetch live in `useLeadContext`.
- * Renders nothing when data is null — silent fallback for the case
- * where the API errored, the views aren't applied yet, or the lead has
- * no derivable signals.
+ * Renders nothing when the lead genuinely has no derivable signals, but
+ * a FAILED fetch gets its own alert branch — silently vanishing made a
+ * dead request indistinguishable from an empty property.
  */
 
 interface Props {
   data: LeadContextData | null;
   isLoading: boolean;
+  /** `useLeadContext().error` — true when the context fetch failed.
+   *  Optional so a caller that hasn't wired it yet still compiles; the
+   *  section falls back to its old silent-null behaviour when omitted. */
+  error?: boolean;
+  /** `useLeadContext().refetch` — powers the retry in the alert branch. */
+  onRetry?: () => void;
 }
 
 function windowChip(window: "due" | "approaching" | "fresh"): {
@@ -93,7 +99,7 @@ function panelLabel(estimate: "likely-undersized" | "likely-modernized" | "unkno
   return null;
 }
 
-export function PropertyContextSection({ data, isLoading }: Props) {
+export function PropertyContextSection({ data, isLoading, error = false, onRetry }: Props) {
   // Hook declared at the top so it precedes every conditional early
   // return below — `react-hooks/rules-of-hooks` requires the same hook
   // call order on every render. `now` is captured once per mount and
@@ -114,6 +120,41 @@ export function PropertyContextSection({ data, isLoading }: Props) {
           </h3>
           <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
         </header>
+      </section>
+    );
+  }
+
+  // Distinct from the `!data` fallback below: that one means "this
+  // property has nothing worth showing", this one means "we never found
+  // out". Collapsing the two hid outages behind a plausible-looking
+  // empty drawer. Same split as PermitHistorySection's error branch.
+  if (error) {
+    return (
+      <section
+        className="rounded-lg border border-border bg-card/50 px-3 py-2.5"
+        aria-label="Property context"
+      >
+        <header className="flex items-center gap-1.5 mb-2">
+          <Home className="h-3 w-3 text-muted-foreground" />
+          <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Property context
+          </h3>
+        </header>
+        <div role="alert" className="flex items-center gap-2 text-[11px]">
+          <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
+          <span className="text-destructive">
+            Couldn&apos;t load property context.
+          </span>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="ml-auto text-[10px] font-medium text-primary underline underline-offset-2 hover:opacity-80"
+            >
+              Retry
+            </button>
+          )}
+        </div>
       </section>
     );
   }

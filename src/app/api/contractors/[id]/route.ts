@@ -19,7 +19,17 @@ export async function GET(
 
     const supabase = createAdminClient();
 
-    /* Fetch contractor profile */
+    /* Fetch contractor profile.
+     *
+     * `badge_licensed` / `badge_insured` / `badge_background` / `verified_at`
+     * used to be selected here and are deliberately gone: no code path in
+     * src/ writes any of them (migration 00117 locks them against every
+     * non-service-role session precisely because they were dead trust
+     * signals), so they are false/null for every contractor and publishing
+     * them asserts checks Henri never ran. The licence block below is
+     * derived from the roster cross-check instead — the one licensing
+     * signal Henri actually produces. Insurance and background checks have
+     * no field at all because Henri collects neither. */
     const { data: profile, error: profileErr } = await supabase
       .from("profiles")
       .select(
@@ -32,10 +42,6 @@ export async function GET(
         review_count,
         jobs_completed,
         response_time_h,
-        badge_licensed,
-        badge_insured,
-        badge_background,
-        verified_at,
         bio,
         specialties,
         years_experience,
@@ -55,6 +61,28 @@ export async function GET(
       );
     }
 
+    /* Licence trust block — a match against `state_license_rosters` recorded
+     * by /api/onboarding/verify-license. An expired licence is not a
+     * licence; a NULL expiry means the roster doesn't publish one, which is
+     * not the same as expired. Degrades to "no badge" on error rather than
+     * failing the whole profile fetch. */
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: license, error: licenseErr } = await supabase
+      .from("contractor_licenses")
+      .select("license_state, last_checked_at")
+      .eq("contractor_id", id)
+      .eq("verified", true)
+      .or(`expiry_date.is.null,expiry_date.gte.${today}`)
+      .order("last_checked_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (licenseErr) {
+      logger.warn("Contractor licence lookup failed; licence badge suppressed", {
+        error: licenseErr.message,
+      });
+    }
+
     /* Fetch their territory ZIPs */
     const { data: territories } = await supabase
       .from("territories")
@@ -64,8 +92,10 @@ export async function GET(
 
     const zips = (territories ?? []).map((t) => t.zip);
 
-    /* Fetch last 20 reviews */
-    const { data: reviews } = await supabase
+    /* Fetch last 20 reviews. `count: "exact"` runs against the full filtered
+     * set, not the page — `reviewList.length` was being reported as
+     * `total_reviews`, which silently capped the published total at 20. */
+    const { data: reviews, count: reviewCount } = await supabase
       .from("reviews")
       .select(
         `
@@ -76,7 +106,8 @@ export async function GET(
         reviewer_name,
         sentiment,
         created_at
-      `
+      `,
+        { count: "exact" }
       )
       .eq("contractor_id", id)
       .eq("status", "published")
@@ -85,13 +116,15 @@ export async function GET(
 
     const reviewList = reviews ?? [];
 
-    /* Compute review stats */
-    const totalReviews = reviewList.length;
+    /* Stats below are computed over the 20 most recent reviews only — that's
+     * what we fetched. `sample_size` is returned alongside so a caller can't
+     * mistake a 20-review average for the contractor's lifetime average. */
+    const sampleSize = reviewList.length;
     const avgRating =
-      totalReviews > 0
+      sampleSize > 0
         ? Math.round(
             (reviewList.reduce((sum, r) => sum + (r.rating ?? 0), 0) /
-              totalReviews) *
+              sampleSize) *
               10
           ) / 10
         : 0;
@@ -103,12 +136,18 @@ export async function GET(
     }
 
     return NextResponse.json({
-      contractor: profile,
+      contractor: {
+        ...profile,
+        license_verified: !!license,
+        license_state: license?.license_state ?? null,
+        license_verified_at: license?.last_checked_at ?? null,
+      },
       territories: zips,
       reviews: reviewList,
       stats: {
-        total_reviews: totalReviews,
+        total_reviews: reviewCount ?? sampleSize,
         avg_rating: avgRating,
+        avg_rating_sample_size: sampleSize,
         stars: starCounts,
       },
     });

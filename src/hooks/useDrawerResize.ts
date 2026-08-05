@@ -28,7 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *   <div role="separator"
  *        aria-valuenow={drawer.localHeight}
  *        aria-valuemax={drawer.parentMaxHeight}
- *        onMouseDown={drawer.onMouseDown}
+ *        onPointerDown={drawer.onPointerDown}
  *        onDoubleClick={drawer.onDoubleClick}
  *        onKeyDown={drawer.onKeyDown}
  *   />
@@ -61,8 +61,14 @@ export interface UseDrawerResizeResult {
   localHeight: number;
   /** Latest parent ceiling — feed to `aria-valuemax` on the separator. */
   parentMaxHeight: number;
-  /** Wire to `onMouseDown` of the separator. */
-  onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
+  /** Wire to `onPointerDown` of the separator. One code path serves
+   * mouse, touch and pen. */
+  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
+  /** @deprecated Alias of `onPointerDown`, kept so the existing
+   * `LeadDetailDrawer` call site (`onMouseDown={drawer.onMouseDown}`)
+   * keeps compiling while it migrates. There is no mouse-only path any
+   * more — this is the same function. Remove once callers are updated. */
+  onMouseDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   /** Wire to `onDoubleClick` of the separator — toggles expand/collapse. */
   onDoubleClick: () => void;
   /** Wire to `onKeyDown` of the separator — Arrow / Home / End / Enter. */
@@ -141,6 +147,10 @@ export function useDrawerResize({
   const startY = useRef(0);
   const startH = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Teardown for the in-flight drag, set on pointerdown and cleared when
+  // the gesture ends. Lets the unmount effect actually detach the
+  // document listeners instead of leaving them to no-op forever.
+  const dragCleanup = useRef<(() => void) | null>(null);
 
   // Local drag height — decoupled from parent state during active drag so
   // every pointer-move frame doesn't setState on the parent and force the
@@ -184,19 +194,24 @@ export function useDrawerResize({
     setLocalHeight(target);
   }, [height, minHeight]);
 
-  // Safety valve: when `resetTrigger` changes, force dragging.current back
-  // to false. Without this, if a previous drag was interrupted (browser
-  // lost pointer capture, script tab switched, etc.) the drawer would be
-  // stuck ignoring height-prop updates forever.
+  // Safety valve: when `resetTrigger` changes, abandon any in-flight drag.
+  // Without this, if a previous drag was interrupted (browser lost pointer
+  // capture, script tab switched, etc.) the drawer would be stuck ignoring
+  // height-prop updates forever. Running the full teardown rather than just
+  // flipping the flag also detaches the orphaned document listeners.
   useEffect(() => {
-    if (resetTrigger) dragging.current = false;
+    if (resetTrigger) {
+      dragCleanup.current?.();
+      dragging.current = false;
+    }
   }, [resetTrigger]);
 
   // Defensive unmount cleanup. If the drawer unmounts mid-drag (parent
   // sets activeRow=null while the user is dragging):
-  //   1. clear `dragging.current` so any straggler `mousemove`/`mouseup`
-  //      events still attached to `document` bail early via their
-  //      `if (!dragging.current) return` guard,
+  //   1. run the in-flight drag's teardown, which detaches the document
+  //      pointer listeners, releases pointer capture and clears
+  //      `dragging.current` (the `if (!dragging.current) return` guard in
+  //      each handler is the belt; this is the braces),
   //   2. reset the global body cursor + user-select that we set during
   //      drag so the page doesn't end up stuck with row-resize cursor.
   // Without this, the bug manifests as: drawer unmounts, document
@@ -204,6 +219,7 @@ export function useDrawerResize({
   // React logs a warning + the page is left with a weird cursor.
   useEffect(() => {
     return () => {
+      dragCleanup.current?.();
       dragging.current = false;
       if (typeof document !== "undefined") {
         document.body.style.cursor = "";
@@ -238,39 +254,76 @@ export function useDrawerResize({
     };
   }, [resetTrigger, maxHeightRatio, minHeight]);
 
-  /* ── Drag-to-resize: dead-simple mouse-event pattern ───────────────
+  /* ── Drag-to-resize: one pointer-event path for mouse, touch and pen ─
    *
-   *   1. mousedown on the handle  → record startY + startHeight, attach
-   *      document mousemove + mouseup, set the body cursor + user-select
-   *   2. mousemove (anywhere on the page) → compute delta, call
+   *   1. pointerdown on the handle → record startY + startHeight, capture
+   *      the pointer, attach document pointermove/up/cancel, set the body
+   *      cursor + user-select
+   *   2. pointermove (anywhere on the page) → compute delta, call
    *      setLocalHeight to redraw the drawer
-   *   3. mouseup (anywhere on the page) → commit the final height to the
-   *      parent (so it persists to localStorage), remove document
-   *      listeners, restore body styles
+   *   3. pointerup / pointercancel → commit the final height to the parent
+   *      (so it persists to localStorage), remove document listeners,
+   *      release capture, restore body styles
    *
    * Why this layout vs the prior implementations:
-   *   - setPointerCapture on the handle (pre-b083b02): broke when the
-   *     handle re-rendered mid-drag because aria-valuenow updated;
+   *   - setPointerCapture ALONE on the handle (pre-b083b02): broke when
+   *     the handle re-rendered mid-drag because aria-valuenow updated;
    *     browsers dropped capture inconsistently, fired phantom
    *     pointercancel events that snapped the drawer to MIN_HEIGHT.
    *   - Document listeners + onHeightChange inside a state-updater
    *     (b083b02): React fired the "Cannot update a component while
    *     rendering a different component" warning because setLocalHeight's
    *     updater function called onHeightChange (parent setState).
-   *   - Current: a closure-local `currentHeight` variable tracks the
-   *     latest height during the drag. We read it in mouseup and call
-   *     onHeightChange OUTSIDE of any state-updater, so React's
-   *     during-render check is happy. */
-  const onMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      e.preventDefault();
+   *   - Mouse-only document listeners (b083b02 → this commit): correct on
+   *     desktop, but the handle also renders a "Drag to resize" label and
+   *     carries `touch-none`, so on touch the affordance was visible and
+   *     inert. mousedown is never synthesised for a touch-drag.
+   *   - Current: pointer events, with BOTH mechanisms and the old failure
+   *     mode designed out. Document-level listeners stay the source of
+   *     truth (they keep firing even if the browser drops capture on a
+   *     re-render), capture is best-effort on top so a finger sliding off
+   *     the 14px handle doesn't hand the stroke to the scroller, and
+   *     pointercancel commits the height in flight instead of resetting —
+   *     which is what made the original capture attempt snap to MIN.
+   *     A closure-local `currentHeight` tracks the latest height so the
+   *     commit happens OUTSIDE any state-updater, keeping React's
+   *     during-render check happy. */
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      // Primary button only. Touch contact and pen tip both report 0;
+      // right/middle-click (2/1) must not start a resize.
+      if (e.button !== 0) return;
+
+      // Deliberately NO preventDefault() here. Canceling pointerdown
+      // suppresses the compatibility mouse events on pointer types that
+      // don't hover, which would silently kill the handle's
+      // double-click-to-toggle affordance and its click-to-focus. The two
+      // things the old mousedown preventDefault() bought us are already
+      // covered by CSS: `select-none` + the body user-select toggle below
+      // stop text selection, and `touch-none` on the handle stops the
+      // browser claiming a touch-drag as a scroll.
+      const handle = e.currentTarget;
+      const { pointerId } = e;
+
       dragging.current = true;
       startY.current = e.clientY;
       startH.current = localHeight;
       let currentHeight = localHeight;
 
-      const onMove = (ev: MouseEvent) => {
-        if (!dragging.current) return;
+      // Best-effort: throws InvalidPointerId if the pointer already ended
+      // between dispatch and here (Safari does this). The document
+      // listeners below carry the drag either way, so a failure is
+      // survivable — don't let it abort the gesture.
+      try {
+        handle.setPointerCapture(pointerId);
+      } catch {
+        /* capture unavailable — document listeners still drive the drag */
+      }
+
+      // Ignore other simultaneous pointers (second finger, palm) so a
+      // multi-touch gesture can't fight the active drag.
+      const onMove = (ev: PointerEvent) => {
+        if (!dragging.current || ev.pointerId !== pointerId) return;
         const maxH = resolveMaxHeight(containerRef, minHeight, maxHeightRatio);
         const delta = startY.current - ev.clientY;
         const next = Math.min(maxH, Math.max(minHeight, startH.current + delta));
@@ -278,20 +331,42 @@ export function useDrawerResize({
         setLocalHeight(next);
       };
 
-      const onUp = () => {
-        if (!dragging.current) return;
+      // Tears down every side effect the gesture installed. Safe to call
+      // twice and safe to call from the unmount effect.
+      const endDrag = () => {
         dragging.current = false;
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        document.removeEventListener("pointercancel", onUp);
+        dragCleanup.current = null;
+        try {
+          if (handle.hasPointerCapture(pointerId)) {
+            handle.releasePointerCapture(pointerId);
+          }
+        } catch {
+          /* pointer already gone — nothing to release */
+        }
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
+      };
+
+      function onUp(ev: PointerEvent) {
+        if (!dragging.current || ev.pointerId !== pointerId) return;
+        endDrag();
         // Commit OUTSIDE of any state-updater — straight call to the
         // parent's onHeightChange (which writes to localStorage).
         onHeightChange(Math.max(minHeight, currentHeight));
-      };
+      }
 
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
+      // Handed to the unmount effect so a drawer that disappears mid-drag
+      // doesn't strand these listeners on `document` for the session.
+      dragCleanup.current = endDrag;
+
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+      // Treated identically to pointerup: the height the user dragged to
+      // is what they meant, even if the OS stole the gesture.
+      document.addEventListener("pointercancel", onUp);
       document.body.style.cursor = "row-resize";
       document.body.style.userSelect = "none";
     },
@@ -348,7 +423,9 @@ export function useDrawerResize({
     containerRef,
     localHeight,
     parentMaxHeight,
-    onMouseDown,
+    onPointerDown,
+    // Deprecated alias — same function, see UseDrawerResizeResult.
+    onMouseDown: onPointerDown,
     onDoubleClick,
     onKeyDown,
     minHeight,

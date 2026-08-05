@@ -14,30 +14,30 @@ import {
   CardFooter,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils/cn";
+import { PLAN_TIERS, planFeatures, type PlanSlug } from "@/lib/plans/tiers";
 
-interface Plan {
-  name: string;
-  price: string;
-  period: string;
-  description: string;
-  features: string[];
+/* The tier facts — price, ZIP allowance, feature bullets — live in
+ * src/lib/plans/tiers.ts. They used to be declared here AND in
+ * src/app/(dashboard)/settings/billing/page.tsx, and the two copies had
+ * drifted, so the page a contractor bought from and the page they manage
+ * billing on advertised different products. Only the marketing chrome
+ * (CTA wording, button treatment, the Founder seat-cap banner) is local. */
+interface PlanChrome {
   cta: string;
   ctaHref: string;
-  popular?: boolean;
+  ctaVariant: "primary" | "glow" | "outline";
   badge?: string;
-  ctaVariant?: "primary" | "glow" | "outline";
   /** Scarcity banner — when present, renders as a warm-gold stripe
    *  across the top of the card. Reserved for the Founder plan where
    *  the 100-slot cap is a load-bearing part of the offer. */
   scarcity?: { remaining: number; total: number };
 }
 
-const plans: Plan[] = [
-  {
-    name: "Founder",
-    price: "$149",
-    period: "/mo",
-    description: "Beta pricing. Locked forever for early supporters.",
+const PLAN_CHROME: Record<PlanSlug, PlanChrome> = {
+  founder: {
+    cta: "Claim founder spot",
+    ctaHref: "/signup?role=contractor&plan=founder",
+    ctaVariant: "outline",
     /* `badge` retained as a fallback for scan-readers + the scarcity
      * banner below it; primary emphasis is the banner. Keep the copy
      * in sync if the count updates. */
@@ -48,90 +48,23 @@ const plans: Plan[] = [
     // (it's never a "lower" number than reality, so we never overclaim
     // urgency during the first paint).
     scarcity: { remaining: 100, total: 100 },
-    // 2026-04-30 truthfulness pass on plan feature lists:
-    //   - "Full owner contact data" / "Full contact enrichment" -> "Best-
-    //     effort owner contact enrichment". Live DB shows 39% of leads
-    //     have owner_name, ~1% have phone, 0% have email today; calling
-    //     it "full" was overclaiming. Coverage varies by jurisdiction.
-    //   - "Storm Center alerts" / "Storm alerts & permit surge" -> "Storm
-    //     Center dashboard". The /dashboard/storm page is real, but no
-    //     code actually pushes a storm alert (no SMS / push notification
-    //     fires from the storm-events cron — it just ingests data). And
-    //     "permit surge" had zero implementation in the codebase.
-    //   - "Priority lead routing" -> dropped (no implementation; lead
-    //     routing today is just contractor-territory scoping, same on
-    //     every plan).
-    //   - "Team seats (up to 10)" -> dropped (no team / multi-user code
-    //     exists in the repo — no team_seat / team_member / invite
-    //     surface).
-    features: [
-      "3 ZIP territories",
-      "AI-scored permit leads",
-      "Best-effort owner contact enrichment",
-      "Email & SMS outreach (compose & send)",
-      "Price locked forever",
-    ],
-    cta: "Claim founder spot",
-    ctaHref: "/signup?role=contractor&plan=founder",
-    ctaVariant: "outline",
   },
-  {
-    name: "Starter",
-    price: "$749",
-    period: "/mo",
-    description: "For contractors ready to own their territory.",
-    features: [
-      "5 ZIP territories",
-      "AI-scored permit leads",
-      "Best-effort owner contact enrichment",
-      "Email & SMS outreach (compose & send)",
-      "Storm Center dashboard",
-    ],
+  starter: {
     cta: "Start free trial",
     ctaHref: "/signup?role=contractor&plan=starter",
     ctaVariant: "primary",
   },
-  {
-    name: "Pro",
-    price: "$1,499",
-    period: "/mo",
-    description: "Full platform access for serious contractors.",
-    // 2026-08-04 truthfulness pass: "Daily license verification (compliance)"
-    // removed. It was sold as a paid plan feature but nothing enforces it —
-    // `src/lib/license/verify.ts` makes no HTTP call to any licensing board,
-    // and no lead-delivery path gates on license status. The compliance
-    // dashboard itself is real (`/dashboard/compliance`), so the bullet now
-    // names the surface that actually ships. Restore the verification bullet
-    // only after enforcement lands.
-    features: [
-      "12 ZIP territories",
-      "Everything in Starter",
-      "Compliance dashboard",
-      "Storm Center dashboard",
-      "Priority email support",
-    ],
+  pro: {
     cta: "Start free trial",
     ctaHref: "/signup?role=contractor&plan=pro",
-    popular: true,
     ctaVariant: "glow",
   },
-  {
-    name: "Enterprise",
-    price: "$2,555",
-    period: "/mo",
-    description: "Maximum coverage for large operations.",
-    features: [
-      "20 ZIP territories",
-      "Everything in Pro",
-      "Dedicated account manager",
-      "Custom onboarding",
-      "Priority email support",
-    ],
+  enterprise: {
     cta: "Start free trial",
     ctaHref: "/signup?role=contractor&plan=enterprise",
     ctaVariant: "outline",
   },
-];
+};
 
 export function PricingSection() {
   // Live Founder-seat count. Fetches /api/founder-seats once on mount
@@ -163,13 +96,6 @@ export function PricingSection() {
     };
   }, []);
 
-  // Inject the live count into the Founder plan's scarcity field.
-  const plansWithLiveScarcity = plans.map((p) =>
-    p.scarcity && founderSeats
-      ? { ...p, scarcity: founderSeats }
-      : p,
-  );
-
   return (
     <section id="pricing" className="bg-background py-24 lg:py-32">
       <div className="mx-auto max-w-7xl px-6">
@@ -185,9 +111,16 @@ export function PricingSection() {
 
         {/* Pricing cards */}
         <div className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {plansWithLiveScarcity.map((plan) => (
+          {PLAN_TIERS.map((plan) => {
+            const chrome = PLAN_CHROME[plan.slug];
+            // Live seat count overrides the conservative placeholder once
+            // /api/founder-seats resolves.
+            const scarcity = chrome.scarcity
+              ? founderSeats ?? chrome.scarcity
+              : undefined;
+            return (
             <Card
-              key={plan.name}
+              key={plan.slug}
               variant="default"
               className={cn(
                 "flex flex-col overflow-hidden",
@@ -196,8 +129,7 @@ export function PricingSection() {
                 // 16.2.3 parser bug. Same pixel output (the token is
                 // defined as `0 0 30px hsl(var(--primary) / 0.15)`).
                 plan.popular && "ring-2 ring-primary shadow-glow-primary",
-                plan.scarcity &&
-                  "ring-1 ring-warm/40"
+                scarcity && "ring-1 ring-warm/40"
               )}
             >
               {/* Scarcity banner — warm-gold stripe with live-style count.
@@ -206,7 +138,7 @@ export function PricingSection() {
                * urgency its own visual lane without drowning out "Most
                * Popular" on Pro. Only renders for plans that actually
                * have a slot cap (Founder today). */}
-              {plan.scarcity && (
+              {scarcity && (
                 <div className="flex items-center justify-between gap-2 bg-warm/10 border-b border-warm/35 px-4 py-2 text-[11px] font-semibold text-warm">
                   {/* 2026-08-04: before /api/founder-seats resolves, the
                     * placeholder rendered the literal "Only 100 of 100 spots
@@ -216,8 +148,8 @@ export function PricingSection() {
                   <span className="inline-flex items-center gap-1.5">
                     <Flame className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                     {founderSeats
-                      ? `Only ${plan.scarcity.remaining} of ${plan.scarcity.total} spots left`
-                      : `Limited to ${plan.scarcity.total} Founder seats`}
+                      ? `Only ${scarcity.remaining} of ${scarcity.total} spots left`
+                      : `Limited to ${scarcity.total} Founder seats`}
                   </span>
                   <span className="text-[10px] font-normal text-warm/80 tracking-wide uppercase">
                     Price locked forever
@@ -235,9 +167,9 @@ export function PricingSection() {
                  * Founder (without the count, which now lives in the
                  * banner above). Keeps the badge slot available for
                  * other plans in the future (e.g. "Reservation only"). */}
-                {plan.badge && (
+                {chrome.badge && (
                   <Badge variant="warning" className="w-fit text-xs">
-                    {plan.badge}
+                    {chrome.badge}
                   </Badge>
                 )}
                 <CardDescription>{plan.description}</CardDescription>
@@ -245,14 +177,14 @@ export function PricingSection() {
                   <span className="text-4xl font-extrabold text-foreground">
                     {plan.price}
                   </span>
-                  <span className="text-sm text-muted-foreground">{plan.period}</span>
+                  <span className="text-sm text-muted-foreground">{plan.interval}</span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">24-hour free trial</p>
               </CardHeader>
 
               <CardContent className="flex-1">
                 <ul className="space-y-3">
-                  {plan.features.map((feature) => (
+                  {planFeatures(plan).map((feature) => (
                     <li
                       key={feature}
                       className="flex items-center gap-3 text-sm"
@@ -265,16 +197,13 @@ export function PricingSection() {
               </CardContent>
 
               <CardFooter>
-                <Button
-                  variant={plan.ctaVariant ?? "primary"}
-                  className="w-full"
-                  asChild
-                >
-                  <Link href={plan.ctaHref}>{plan.cta}</Link>
+                <Button variant={chrome.ctaVariant} className="w-full" asChild>
+                  <Link href={chrome.ctaHref}>{chrome.cta}</Link>
                 </Button>
               </CardFooter>
             </Card>
-          ))}
+            );
+          })}
         </div>
       </div>
     </section>

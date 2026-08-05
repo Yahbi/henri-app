@@ -3,27 +3,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { logger } from "@/lib/logger";
 
-export interface ContractorSearchResult {
-  id: string;
-  company_name: string;
-  full_name: string | null;
-  trade: string | null;
-  phone: string | null;
-  avg_rating: number | null;
-  total_reviews: number;
-  total_jobs_won: number;
-  zip: string;
-  verified: boolean;
-  /* Optional enrichment fields — present only when the search API has
-   * them for a given contractor. Typed as optional so the card can read
-   * them directly instead of casting through `unknown`. */
-  response_time_h?: number | null;
-  license_state?: string | null;
-  insured?: boolean | null;
-  background_checked?: boolean | null;
-  years_experience?: number | null;
-  specialties?: string[] | null;
-}
+/* The row shape is owned by the route that produces it. This module used to
+ * re-declare it, and the two copies drifted: the local copy named the fields
+ * `total_reviews` / `total_jobs_won` / `verified` while the route has always
+ * returned `review_count` / `jobs_completed`, so every consumer read
+ * `undefined` and rendered zeros. `import type` is erased at compile time, so
+ * nothing from the route module reaches the client bundle. */
+import type { ContractorSearchResult } from "@/app/api/contractors/search/route";
+
+export type { ContractorSearchResult };
 
 interface UseContractorSearchReturn {
   contractors: ContractorSearchResult[];
@@ -48,9 +36,13 @@ export function useContractorSearch(
 
   const fetchContractors = useCallback(
     async (searchZip: string, searchTrade?: string, searchSort?: string) => {
-      /* Require at least a partial ZIP to search */
-      if (!searchZip || searchZip.length < 3) {
+      /* The route rejects anything but a complete 5-digit ZIP (isZip5), so a
+       * 3- or 4-character prefix was a guaranteed 400 that surfaced as
+       * "Failed to search contractors" mid-typing. Wait for the full ZIP. */
+      const trimmedZip = searchZip.trim();
+      if (!/^\d{5}$/.test(trimmedZip)) {
         setContractors([]);
+        setError(null);
         setIsLoading(false);
         return;
       }
@@ -60,7 +52,7 @@ export function useContractorSearch(
       setError(null);
 
       try {
-        const params = new URLSearchParams({ zip: searchZip });
+        const params = new URLSearchParams({ zip: trimmedZip });
         if (searchTrade) params.set("trade", searchTrade);
         if (searchSort) params.set("sort", searchSort);
 

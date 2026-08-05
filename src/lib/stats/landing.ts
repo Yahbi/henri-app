@@ -15,6 +15,16 @@
  * the live count says 1,414,624 we display "1.4M+". If it says
  * 1,499,999 we still display "1.4M+". Only at 1,500,000 do we tick
  * to "1.5M+".
+ *
+ * WHAT COUNTS AS A PERMIT
+ * Rounding down is not enough if the counted SET is wrong. `permits`
+ * also holds rows pulled from endpoints that turned out not to be permit
+ * datasets at all — business licences, building footprints, sewer
+ * records — which entered through mis-mapped auto-discovered sources.
+ * `permit_sources.dataset_kind` is the registry's classification; rows
+ * from anything explicitly classified as non-permit are subtracted by
+ * the refresh cron before the number is cached. See
+ * `fetchNonPermitSources` below and /api/cron/refresh-landing-stats.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -76,9 +86,23 @@ export interface LandingStats {
  * the cached HTML reflects real numbers. This branch keeps `pnpm build`
  * green when secrets aren't available.
  */
-// 2026-06-10: bumped 1.4M → 1.5M after the clean count (junk-state rows
-// excluded) crossed 1,553,689 — keep this at the last verified floor.
-const FALLBACK_PERMITS = 1_500_000;
+// History of this floor:
+//   2026-06-10  1.4M -> 1.5M, after a "clean" count reached 1,553,689.
+//   2026-08-04  1.5M -> 1.4M. That 1,553,689 subtracted the state='US'/''
+//               /NULL loader artifacts but NOT rows ingested from feeds
+//               that are not permit datasets at all (business licences,
+//               building footprints, sewer records — see
+//               `fetchNonPermitSources` below). Their volume has never
+//               been measured, so 1.5M is only 2,191 rows clear of the
+//               last independently-audited permit count (1,497,809 on
+//               2026-05-13) and cannot survive ANY contamination. A floor
+//               that can't be defended isn't a floor. 1.4M can.
+//
+// Only raise this from a MEASURED count that already excludes non-permit
+// sources — i.e. read `permits_total` out of a landing_stats row written
+// by /api/cron/refresh-landing-stats after that route learned to subtract
+// them, not from a raw `SELECT count(*) FROM permits`.
+const FALLBACK_PERMITS = 1_400_000;
 const FALLBACK_LEADS = 260_000;
 const FALLBACK_COVERED_STATES: ReadonlyArray<UsState> = [
   "AL", "AZ", "CA", "CT", "DC", "FL", "GA", "HI", "ID", "IL",
@@ -131,6 +155,82 @@ function buildFallback(): LandingStats {
 }
 
 const VALID_STATES = new Set<string>(ALL_US_STATES);
+
+type SupabaseAdminClient = ReturnType<typeof createAdminClient>;
+
+/**
+ * `permit_sources.dataset_kind` value that marks a feed as real
+ * construction permits.
+ *
+ * Anything the registry has EXPLICITLY classified as something else
+ * (business licences, building footprints, sewer records — endpoints that
+ * entered the catalog through mis-mapped auto-discovery) produces rows in
+ * `permits` that are not permits. Counting them in the headline breaks the
+ * truthfulness rule.
+ *
+ * NULL is deliberately not excluded: it means "not yet classified", and
+ * treating unclassified as junk would erase most of the catalog.
+ */
+const PERMIT_DATASET_KIND = "permit";
+
+export interface NonPermitSource {
+  /** The value rows from this feed carry in `permits.source_city`. */
+  sourceCity: string;
+  /** Registry-declared state, uppercased — null when it isn't a real
+   *  2-letter code (older rows carry 'US' or a blank). */
+  declaredState: UsState | null;
+}
+
+/**
+ * Feeds the registry has explicitly classified as NOT permit datasets.
+ *
+ * GRACEFUL DEGRADE (CLAUDE.md "feature-flags before migrations"): when the
+ * `dataset_kind` column does not exist yet, PostgREST answers 42703 and we
+ * return an empty list — i.e. "nothing is known to be junk", which is the
+ * exact behaviour this codebase had before the column shipped. The read
+ * path must never throw on a marketing page.
+ *
+ * KNOWN IMPRECISION, deliberately biased toward under-claiming:
+ * `permits.source_city` is stamped from the source's city (falling back to
+ * jurisdiction — see `sources-db.ts`), and several cities carry more than
+ * one feed. When a city has both a permit feed and a non-permit feed under
+ * the same name, excluding by `source_city` drops the permit rows too. That
+ * loses real coverage, but it can only ever make the published number
+ * SMALLER, which is the side of the line CLAUDE.md requires. The durable
+ * fix is to stamp a source-unique key on `permits` at ingest time so the
+ * exclusion can be per-source instead of per-city.
+ */
+export async function fetchNonPermitSources(
+  supabase: SupabaseAdminClient,
+): Promise<NonPermitSource[]> {
+  const { data, error } = await supabase
+    .from("permit_sources")
+    .select("city, jurisdiction, state, dataset_kind")
+    .neq("dataset_kind", PERMIT_DATASET_KIND);
+
+  if (error) {
+    console.warn(
+      "[landing-stats] dataset_kind unavailable — no source is treated as junk:",
+      error.message,
+    );
+    return [];
+  }
+
+  const bySourceCity = new Map<string, NonPermitSource>();
+  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    const sourceCity =
+      String(row.city ?? "").trim() || String(row.jurisdiction ?? "").trim();
+    if (!sourceCity) continue;
+    const declared = String(row.state ?? "").trim().toUpperCase();
+    bySourceCity.set(sourceCity, {
+      sourceCity,
+      declaredState: VALID_STATES.has(declared)
+        ? (declared as UsState)
+        : null,
+    });
+  }
+  return [...bySourceCity.values()];
+}
 
 interface CoveragePayload {
   permits_total?: unknown;
@@ -260,6 +360,7 @@ export async function getLandingStats(): Promise<LandingStats> {
   let leadsResult: { count: number | null };
   let junkStateCount = 0;
   let junkNullCount = 0;
+  let nonPermitSources: NonPermitSource[] = [];
   try {
     const results = await withTimeout(
       Promise.all([
@@ -283,6 +384,9 @@ export async function getLandingStats(): Promise<LandingStats> {
           .from("permits")
           .select("*", { count: "exact", head: true })
           .is("state", null),
+        // Cheap registry read (12k rows, no join) — tells us whether the
+        // whole-table count above is knowingly inflated. See the gate below.
+        fetchNonPermitSources(supabase),
       ]),
       STATS_FETCH_TIMEOUT_MS,
       "getLandingStats counts",
@@ -291,10 +395,27 @@ export async function getLandingStats(): Promise<LandingStats> {
     leadsResult = { count: results[1].count };
     junkStateCount = results[2].count ?? 0;
     junkNullCount = results[3].count ?? 0;
+    nonPermitSources = results[4];
   } catch (err) {
     console.warn(
       "[landing-stats] count fetch failed, using fallback:",
       err instanceof Error ? err.message : String(err),
+    );
+    return buildFallback();
+  }
+
+  // Truthfulness gate for the degraded path. This branch can only produce a
+  // whole-table count, and a whole-table count includes every row from feeds
+  // the registry has classified as non-permit datasets. Subtracting them
+  // needs one count per excluded source; that fan-out belongs in
+  // /api/cron/refresh-landing-stats (60s budget, runs once an hour), not in
+  // a request path capped at 6s. Rather than publish a total we KNOW
+  // overclaims, publish the verified floor — which is the whole point of
+  // having one.
+  if (nonPermitSources.length > 0) {
+    console.warn(
+      "[landing-stats] %d non-permit source(s) in the registry and no coverage cache row — the live count would overclaim; using verified fallback floor",
+      nonPermitSources.length,
     );
     return buildFallback();
   }
@@ -307,8 +428,9 @@ export async function getLandingStats(): Promise<LandingStats> {
   // Truthfulness + resilience guard: the count query can SUCCEED (no
   // throw, so the catch above never fires) yet return null/0 — e.g. the
   // DB is mid-restore, the planner estimate is unavailable, or a
-  // transient empty read. We KNOW the catalog is well over 1.5M, so we
-  // must never render a "0.0M+" understatement on the marketing pages.
+  // transient empty read. The catalog is comfortably above the fallback
+  // floor, so we must never render a "0.0M+" understatement on the
+  // marketing pages.
   // Treat any null/zero/implausibly-low live count as a failed read and
   // use the hand-verified honest floor instead of the broken live value.
   if (permitsResult.count == null || cleanPermits < FALLBACK_PERMITS / 2) {

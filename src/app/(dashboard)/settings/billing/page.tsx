@@ -4,94 +4,21 @@ import { useState } from "react";
 import { Check, CreditCard, ExternalLink, Zap } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useUser } from "@/hooks/useUser";
+import {
+  PLAN_TIERS,
+  findPlanTier,
+  planFeatures,
+  type PlanTier,
+} from "@/lib/plans/tiers";
 
-interface PlanTier {
-  slug: string;
-  name: string;
-  price: string;
-  priceNum: number;
-  interval: string;
-  description: string;
-  features: string[];
-  territories: number;
-  highlighted?: boolean;
-}
-
-const PLANS: PlanTier[] = [
-  {
-    slug: "founder",
-    name: "Founder",
-    price: "$149",
-    priceNum: 149,
-    interval: "/mo",
-    description: "Beta pricing. Locked forever for early supporters.",
-    features: [
-      "3 ZIP territories",
-      "AI-scored permit leads",
-      "Best-effort owner contact enrichment",
-      "Email & SMS outreach (compose & send)",
-      "Price locked forever",
-    ],
-    territories: 3,
-  },
-  {
-    slug: "starter",
-    name: "Starter",
-    price: "$749",
-    priceNum: 749,
-    interval: "/mo",
-    description: "For contractors ready to own their territory.",
-    features: [
-      "5 ZIP territories",
-      "AI-scored permit leads",
-      "Best-effort owner contact enrichment",
-      "Email & SMS outreach (compose & send)",
-      "Storm Center dashboard",
-    ],
-    territories: 5,
-  },
-  {
-    slug: "pro",
-    name: "Pro",
-    price: "$1,499",
-    priceNum: 1499,
-    interval: "/mo",
-    description: "Full platform access for serious contractors.",
-    features: [
-      "12 ZIP territories",
-      "Everything in Starter",
-      // "Daily license verification (compliance)" removed 2026-08-04.
-      // src/lib/license/verify.ts never calls a licensing board — every
-      // path returns "pending" — and nothing gates lead delivery on
-      // license status, so the claim was unbacked. The real, provable
-      // check (signup cross-check against the public state roster)
-      // applies to every plan and isn't a Pro differentiator.
-      "Storm Center dashboard",
-      "Priority email support",
-    ],
-    territories: 12,
-    highlighted: true,
-  },
-  {
-    slug: "enterprise",
-    name: "Enterprise",
-    price: "$2,555",
-    priceNum: 2555,
-    interval: "/mo",
-    description: "Maximum coverage for large operations.",
-    features: [
-      "20 ZIP territories",
-      "Everything in Pro",
-      "Dedicated account manager",
-      "Custom onboarding",
-      "Priority email support",
-    ],
-    territories: 20,
-  },
-];
+/* The tier lineup used to be declared inline here AND in
+ * src/components/landing/PricingSection.tsx. The two lists drifted (Pro
+ * carried "Compliance dashboard" on the marketing page and not here), so a
+ * contractor saw a different product depending on which page they were on.
+ * Both surfaces now read src/lib/plans/tiers.ts. */
 
 export default function BillingPage() {
-  const { profile } = useUser();
+  const { profile, refreshProfile } = useUser();
   const [managingBilling, setManagingBilling] = useState(false);
   const [upgradingTo, setUpgradingTo] = useState<string | null>(null);
   const [confirmPlan, setConfirmPlan] = useState<PlanTier | null>(null);
@@ -103,20 +30,18 @@ export default function BillingPage() {
   // A cancelled / unpaid / never-subscribed contractor carries
   // plan = "free" (written by the Stripe webhook on cancel + unpaid, by
   // handleSubscriptionDeleted, by the billing-sync cron, and as the
-  // profiles column DEFAULT). "free" is not in PLANS, so the old
-  // `?? PLANS[0]` fallback silently rendered "Founder $149/mo · 3 ZIP
-  // territories" as their CURRENT plan — a false billing statement to a
-  // user whose real entitlement is zip_cap 0 (lib/territory/plan-caps.ts).
-  // Track subscribed-ness explicitly instead of defaulting to a paid tier.
-  const rawPlanSlug = profile?.plan ?? null;
-  const isSubscribed =
-    !!rawPlanSlug && rawPlanSlug !== "free" && PLANS.some((p) => p.slug === rawPlanSlug);
-  const currentPlanSlug = isSubscribed ? (rawPlanSlug as string) : "";
-  // Used only for price comparisons on the cards. When unsubscribed the
-  // baseline is $0 so every card reads "Subscribe", never "Downgrade".
-  const currentPlan =
-    PLANS.find((p) => p.slug === currentPlanSlug) ??
-    ({ slug: "", name: "No plan", price: "$0", priceNum: 0, interval: "/mo", description: "", features: [], territories: 0 } as PlanTier);
+  // profiles column DEFAULT). findPlanTier returns undefined for "free",
+  // null, and anything unrecognised, so subscribed-ness is the presence of
+  // a tier — never a defaulted one. The old `?? PLANS[0]` fallback rendered
+  // "Founder $149/mo · 3 ZIP territories" as their CURRENT plan, a false
+  // billing statement to a user whose real entitlement is zip_cap 0
+  // (lib/territory/plan-caps.ts).
+  const currentTier = findPlanTier(profile?.plan);
+  const isSubscribed = !!currentTier;
+  const currentPlanSlug = currentTier?.slug ?? "";
+  // Baseline for the Upgrade/Downgrade labels. Unsubscribed means $0, so
+  // every card reads "Subscribe" and never "Downgrade".
+  const currentPriceNum = currentTier?.priceNum ?? 0;
 
   async function openBillingPortal() {
     setManagingBilling(true);
@@ -134,7 +59,7 @@ export default function BillingPage() {
     setConfirmPlan(null);
     setUpgradingTo(plan.slug);
 
-    const isDowngrade = plan.priceNum < currentPlan.priceNum;
+    const isDowngrade = plan.priceNum < currentPriceNum;
     const isSamePlan = plan.slug === currentPlanSlug;
 
     // Downgrades: per CLAUDE.md policy, "territory changes: next billing
@@ -190,10 +115,21 @@ export default function BillingPage() {
           body: JSON.stringify({ plan: plan.slug }),
         });
         if (!res.ok) throw new Error();
+        // `synced: false` means Stripe moved but the profile row write
+        // failed, so the ZIP allowance still reads the old tier until the
+        // subscription webhook reconciles. Don't promise territories that
+        // aren't unlocked yet.
+        const j = (await res.json()) as { synced?: boolean };
         setBanner({
           tone: "success",
-          text: `Upgraded to ${plan.name}. Your new territories are available immediately.`,
+          text:
+            j.synced === false
+              ? `Upgraded to ${plan.name}. Your new territory allowance appears in a few moments.`
+              : `Upgraded to ${plan.name}. Your new territories are available immediately.`,
         });
+        // Pull the new plan onto the page so the Active ribbon and the
+        // Upgrade/Downgrade labels reflect the change without a reload.
+        await refreshProfile();
         setUpgradingTo(null);
         return;
       } catch {
@@ -284,14 +220,14 @@ export default function BillingPage() {
                 {isSubscribed ? "Current Plan" : "No active subscription"}
               </p>
             </div>
-            {isSubscribed ? (
+            {currentTier ? (
               <>
                 <p className="text-2xl font-bold text-foreground">
-                  {currentPlan.name}{" "}
-                  <span className="text-sm font-normal text-muted-foreground">{currentPlan.price}/mo</span>
+                  {currentTier.name}{" "}
+                  <span className="text-sm font-normal text-muted-foreground">{currentTier.price}/mo</span>
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {currentPlan.territories} ZIP territories · AI-scored leads · Best-effort owner contact enrichment
+                  {currentTier.territories} ZIP territories · AI-scored leads · Best-effort owner contact enrichment
                 </p>
               </>
             ) : (
@@ -319,7 +255,7 @@ export default function BillingPage() {
       <div>
         <h2 className="text-base font-semibold text-foreground mb-4">Compare Plans</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {PLANS.map((plan) => {
+          {PLAN_TIERS.map((plan) => {
             const isCurrent = plan.slug === currentPlanSlug;
             const isUpgrading = upgradingTo === plan.slug;
             return (
@@ -339,14 +275,14 @@ export default function BillingPage() {
                    * rather than "featured offer". */
                   isCurrent
                     ? "border-emerald-500/40 ring-2 ring-emerald-500/20 bg-emerald-500/[0.03]"
-                    : plan.highlighted
+                    : plan.popular
                       ? "border-primary ring-2 ring-primary/30 shadow-lg"
                       : "border-border"
                 )}
               >
                 {/* Popular ribbon — only when NOT also the current plan
                  * (avoids a ribbon pile-up if the user is on Pro). */}
-                {plan.highlighted && !isCurrent && (
+                {plan.popular && !isCurrent && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                     <span className="inline-flex items-center gap-1 bg-cta text-cta-foreground px-2.5 py-0.5 rounded-full text-[11px] font-semibold shadow">
                       <Zap className="h-2.5 w-2.5" />
@@ -376,7 +312,7 @@ export default function BillingPage() {
                 </div>
 
                 <ul className="space-y-2 flex-1 mb-5">
-                  {plan.features.map((f) => (
+                  {planFeatures(plan).map((f) => (
                     <li key={f} className="flex items-start gap-1.5 text-xs text-foreground">
                       <Check className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
                       {f}
@@ -406,7 +342,7 @@ export default function BillingPage() {
                     disabled={!!upgradingTo}
                     className={cn(
                       "w-full py-2 text-sm font-medium rounded-lg transition-opacity disabled:opacity-50",
-                      plan.highlighted
+                      plan.popular
                         ? "bg-cta text-cta-foreground hover:opacity-90"
                         : "border border-border hover:bg-accent"
                     )}
@@ -418,7 +354,7 @@ export default function BillingPage() {
                         // doesn't hold — with no subscription every card
                         // is a purchase.
                         ? "Subscribe"
-                        : plan.priceNum > currentPlan.priceNum
+                        : plan.priceNum > currentPriceNum
                           ? "Upgrade"
                           : "Downgrade"}
                   </button>
@@ -445,12 +381,12 @@ export default function BillingPage() {
             <h3 className="text-base font-semibold text-foreground">
               {!isSubscribed
                 ? `Subscribe to ${confirmPlan.name}?`
-                : `${confirmPlan.priceNum > currentPlan.priceNum ? "Upgrade" : "Downgrade"} to ${confirmPlan.name}?`}
+                : `${confirmPlan.priceNum > currentPriceNum ? "Upgrade" : "Downgrade"} to ${confirmPlan.name}?`}
             </h3>
             <p className="text-sm text-muted-foreground">
               {!isSubscribed
                 ? "You'll be redirected to Stripe to start your subscription. A card is required; the 24-hour free trial applies to your first subscription. No refunds on digital products."
-                : confirmPlan.priceNum > currentPlan.priceNum
+                : confirmPlan.priceNum > currentPriceNum
                   ? "Your plan changes immediately and your new territory allowance is available right away. Stripe prorates the difference on your existing subscription."
                   : "Your downgrade will take effect at the end of your current billing cycle. No refunds are issued; you keep full access until then."}
             </p>

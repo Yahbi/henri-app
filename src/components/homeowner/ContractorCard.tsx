@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle, Shield, Clock, Star, Loader2 } from "lucide-react";
+import { CheckCircle, Shield, Star, Loader2 } from "lucide-react";
 import { useContractorSearch, type ContractorSearchResult } from "@/hooks/useContractorSearch";
 import { useQuotes } from "@/hooks/useQuotes";
 import { FocusTrap } from "@/components/ui/focus-trap";
@@ -18,11 +18,12 @@ interface ContractorProfile {
   // that's identical on every contractor.
   responseTime: string | null;
   completedProjects: number;
+  // Licence fields mirror the API's trust block. There is no `insured` or
+  // `backgroundChecked` here on purpose: Henri collects neither signal, so
+  // any value the card could show would be an assertion it can't back.
   licensedState: string | null;
   licenseVerified: boolean;
   lastVerified: string | null;
-  insured: boolean | null;
-  backgroundChecked: boolean | null;
   yearsInBusiness: number | null;
   specialties: string[];
 }
@@ -37,14 +38,17 @@ function StarDisplay({ rating }: { rating: number }) {
   );
 }
 
-/* ─── Verification Badge ─── */
-function VerifiedBadge({ label, verified }: { label: string; verified: boolean }) {
+/* ─── Licence Badge ───
+ * Rendered only when the state-roster cross-check actually matched. There is
+ * deliberately no "pending" variant: a greyed-out badge sitting under a
+ * contractor's name still reads as a Henri-issued credential, and for a
+ * contractor whose licence never matched a roster there is nothing to
+ * credential. Absence is the honest state. */
+function LicensedBadge({ state }: { state: string | null }) {
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-      verified ? "bg-green-500/10 text-green-400" : "bg-zinc-500/10 text-muted-foreground"
-    }`}>
-      {verified ? <CheckCircle className="h-2.5 w-2.5" /> : <Clock className="h-2.5 w-2.5" />}
-      {label}
+    <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-400">
+      <CheckCircle className="h-2.5 w-2.5" />
+      {state ? `Licensed (${state})` : "Licensed"}
     </span>
   );
 }
@@ -223,28 +227,23 @@ function ContractorProfileCard({ contractor, onRequestQuote }: {
         </div>
       </div>
 
-      {/* Verification badges — only render a claim if the API confirmed it.
-       * Previously we showed Insured/Background Checked as unverified for
-       * every contractor because the defaults were hardcoded false; now
-       * we omit the row entirely when null. */}
-      <div className="flex flex-wrap gap-1.5">
-        <VerifiedBadge
-          label={contractor.licensedState ? `Licensed (${contractor.licensedState})` : "Licensed"}
-          verified={contractor.licenseVerified}
-        />
-        {contractor.insured !== null && (
-          <VerifiedBadge label="Insured" verified={contractor.insured} />
-        )}
-        {contractor.backgroundChecked !== null && (
-          <VerifiedBadge label="Background Checked" verified={contractor.backgroundChecked} />
-        )}
-        {contractor.licenseVerified && contractor.lastVerified && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-            <Shield className="h-2.5 w-2.5" />
-            Verified {contractor.lastVerified}
-          </span>
-        )}
-      </div>
+      {/* Trust row — one claim, and only when the roster match is real.
+       * The Insured / Background Checked badges that used to sit here were
+       * driven by `profiles.badge_insured` / `badge_background`, columns no
+       * code path has ever written (migration 00117 locked them for exactly
+       * that reason). Henri runs neither check, so the badges are gone
+       * rather than wired up. */}
+      {contractor.licenseVerified && (
+        <div className="flex flex-wrap gap-1.5">
+          <LicensedBadge state={contractor.licensedState} />
+          {contractor.lastVerified && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+              <Shield className="h-2.5 w-2.5" />
+              Roster-checked {contractor.lastVerified}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Specialties */}
       {contractor.specialties.length > 0 && (
@@ -269,67 +268,42 @@ function ContractorProfileCard({ contractor, onRequestQuote }: {
 }
 
 /* ─── Map API response to component shape ─── */
+
+/** "Mar 2026", or null when the timestamp is absent or unparseable. */
+function formatVerifiedMonth(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
 /**
- * GET /api/contractors/search selects `review_count`, `jobs_completed`,
- * `badge_licensed`, `badge_insured`, `badge_background` and `verified_at`,
- * but `ContractorSearchResult` declares `total_reviews`, `total_jobs_won`,
- * `verified`, `insured` and `background_checked`. Every one of those reads
- * was therefore `undefined`, so every card rendered 0 reviews, 0 jobs and
- * an unverified "Licensed" badge no matter what the profile held.
+ * `ContractorSearchResult` is now imported from the route that produces it
+ * (via the hook's re-export), so the field names here are checked against the
+ * real payload at compile time. The previous version of this function read
+ * every field twice — once under the hook's stale name, once under the
+ * route's actual name — because the two had drifted and nothing caught it.
  *
- * Read the payload defensively under both names until the hook's interface
- * is reconciled with the route (flagged in the audit report — the hook and
- * the route are outside this component's ownership).
+ * Fields the API can't supply stay null; the card omits those rows rather
+ * than rendering a hardcoded default identical on every contractor.
  */
-type RawContractor = ContractorSearchResult & Record<string, unknown>;
-
-function num(v: unknown): number | null {
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
-}
-function bool(v: unknown): boolean | null {
-  return typeof v === "boolean" ? v : null;
-}
-
-function mapApiContractor(input: ContractorSearchResult): ContractorProfile {
-  // Only stamp fields that come from the API. Previously we hardcoded
-  // responseTime: "< 24 hrs", licensedState: "CA", insured: false,
-  // backgroundChecked: false, yearsInBusiness: 0, specialties: [] —
-  // these rendered identically on every contractor and were a
-  // truthfulness bug on /homeowner → Find Contractors. The card
-  // component already handles nullable fields (omits rows when missing).
-  const c = input as RawContractor;
-  const verifiedAt = typeof c.verified_at === "string" ? c.verified_at : null;
-  const licenseVerified = bool(c.badge_licensed) ?? c.verified ?? false;
+function mapApiContractor(c: ContractorSearchResult): ContractorProfile {
   return {
     id: c.id,
     name: c.company_name ?? c.full_name ?? "Contractor",
     trade: c.trade ?? "General",
-    rating: num(c.avg_rating) ?? 0,
-    reviewCount: num(c.review_count) ?? num(c.total_reviews) ?? 0,
+    rating: c.avg_rating ?? 0,
+    reviewCount: c.review_count ?? 0,
     responseTime:
       typeof c.response_time_h === "number"
         ? `~${Math.round(c.response_time_h)}h`
         : null,
-    completedProjects: num(c.jobs_completed) ?? num(c.total_jobs_won) ?? 0,
-    licensedState: c.license_state ?? null,
-    licenseVerified,
-    lastVerified: verifiedAt
-      ? new Date(verifiedAt).toLocaleDateString("en-US", {
-          month: "short",
-          year: "numeric",
-        })
-      : null,
-    // `badge_insured` / `badge_background` default to false in the schema
-    // and are never written by any code path, so they carry no
-    // information. Treat "false" as unknown and omit the badge rather
-    // than displaying an unverified insurance claim to a homeowner.
-    insured: bool(c.badge_insured) === true ? true : (bool(c.insured) === true ? true : null),
-    backgroundChecked:
-      bool(c.badge_background) === true
-        ? true
-        : (bool(c.background_checked) === true ? true : null),
-    yearsInBusiness: num(c.years_experience),
-    specialties: Array.isArray(c.specialties) ? (c.specialties as string[]) : [],
+    completedProjects: c.jobs_completed ?? 0,
+    licensedState: c.license_state,
+    licenseVerified: c.license_verified,
+    lastVerified: formatVerifiedMonth(c.license_verified_at),
+    yearsInBusiness: c.years_experience,
+    specialties: c.specialties ?? [],
   };
 }
 

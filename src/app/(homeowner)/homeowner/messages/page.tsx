@@ -155,14 +155,16 @@ function HomeownerMessagesPage() {
         return;
       }
 
-      // A 200 here is NOT proof the message was stored. The API appends
-      // to `leads.notes` through the user-scoped Supabase client, and
-      // `leads` has a contractor-only RLS policy — a homeowner's UPDATE
-      // matches zero rows, which PostgREST reports as success with no
-      // error. Without this check the UI cleared the input and showed a
-      // sent-looking thread while nothing had been written, and the
-      // message vanished on the next refresh. Verify against the
-      // refetched thread and tell the truth when it isn't there.
+      // Confirm the message is actually in the refetched thread before
+      // clearing the draft. The send now goes through the
+      // `append_homeowner_message` RPC, which raises when it writes no row
+      // — so a 200 is far stronger evidence than it used to be (the old
+      // direct UPDATE was filtered to zero rows by the contractor-scoped
+      // RLS policy and reported as success, leaving the UI showing a
+      // sent-looking message that vanished on the next refresh). The check
+      // stays because this refetch happens either way, making it a free
+      // end-to-end assertion: it also catches the write landing on a row
+      // the homeowner cannot read back. Tell the truth when it isn't there.
       const next = await refresh();
       const landed =
         next === null ||

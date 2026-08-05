@@ -17,28 +17,51 @@ import { cn } from "@/lib/utils/cn";
  *
  * The ARIA contract is `role="separator"` with `aria-valuenow/min/max` so
  * screen readers announce position; pair with `useDrawerResize.onKeyDown`
- * for the Arrow/Home/End/Enter handlers.
+ * for the Arrow/Home/End/Enter handlers. Up/Down (not Left/Right) are the
+ * correct keys here: APG's window-splitter pattern binds the axis the
+ * splitter MOVES along, and a horizontal separator moves vertically.
+ *
+ * Drag runs on pointer events, so the always-visible "Drag to resize"
+ * label is honest on touch and pen too — it used to be mouse-only while
+ * `touch-none` advertised a gesture nothing listened for. `touch-none` is
+ * load-bearing for that: without it the browser claims a touch-drag as a
+ * scroll and fires pointercancel before the first move lands.
  */
 
-interface DrawerResizeHandleProps {
+type StartDrag = (e: React.PointerEvent<HTMLDivElement>) => void;
+
+interface DrawerResizeHandleBaseProps {
   localHeight: number;
   parentMaxHeight: number;
   minHeight: number;
-  onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
   onDoubleClick: () => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   ariaLabel?: string;
 }
 
+/* The drag starter is required, but `LeadDetailDrawer` still passes it as
+ * `onMouseDown` (see the deprecated alias on `UseDrawerResizeResult`). The
+ * union makes "exactly one of the two" a compile error rather than a
+ * comment — a handle rendered with neither would look draggable and do
+ * nothing, which is the same class of lie this pass is here to remove. */
+type DrawerResizeHandleProps = DrawerResizeHandleBaseProps &
+  (
+    | { onPointerDown: StartDrag; onMouseDown?: never }
+    /** @deprecated pass `onPointerDown` instead. */
+    | { onMouseDown: StartDrag; onPointerDown?: never }
+  );
+
 export function DrawerResizeHandle({
   localHeight,
   parentMaxHeight,
   minHeight,
+  onPointerDown,
   onMouseDown,
   onDoubleClick,
   onKeyDown,
-  ariaLabel = "Resize lead detail panel — drag, or use arrow keys",
+  ariaLabel = "Resize lead detail panel — drag, or use up and down arrow keys",
 }: DrawerResizeHandleProps) {
+  const startDrag = onPointerDown ?? onMouseDown;
   return (
     <div
       role="separator"
@@ -47,11 +70,14 @@ export function DrawerResizeHandle({
       aria-valuenow={localHeight}
       aria-valuemin={minHeight}
       aria-valuemax={parentMaxHeight}
+      // Raw px reads as a bare number; spell out the unit so the
+      // announcement is "420 pixels" rather than "420".
+      aria-valuetext={`${localHeight} pixels`}
       tabIndex={0}
-      onMouseDown={onMouseDown}
+      onPointerDown={startDrag}
       onDoubleClick={onDoubleClick}
       onKeyDown={onKeyDown}
-      title="Drag to resize · double-click to toggle · arrow keys also work"
+      title="Drag to resize · double-click to toggle · up/down arrows also work"
       className={cn(
         "group flex justify-center items-center gap-2 py-3 cursor-row-resize select-none shrink-0 touch-none",
         "bg-bg-subtle/30 border-b border-border/40",

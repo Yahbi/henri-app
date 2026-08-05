@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe/client";
 import { logApiError } from "@/lib/log";
 import { ChangePlanBodySchema, parseBody } from "@/lib/schemas/api";
@@ -74,6 +75,10 @@ export async function POST(req: NextRequest) {
     }
 
     const stripe = getStripe();
+    /* Constructed BEFORE any Stripe call on purpose: createAdminClient()
+     * throws when SUPABASE_SERVICE_ROLE_KEY is missing, and failing there is
+     * far better than failing after the subscription has already moved. */
+    const admin = createAdminClient();
 
     // Find the active subscription for this customer.
     const subs = await stripe.subscriptions.list({
@@ -154,17 +159,34 @@ export async function POST(req: NextRequest) {
         ],
       });
 
-      await supabase
+      /* Service-role, same reasoning as the upgrade write below. These two
+       * columns are not locked by 00117 today, but that migration's own
+       * notes say to lock them the moment anything reads them for
+       * entitlement — at which point a user-session write would start
+       * failing silently exactly like the `plan` write did. */
+      const { error: pendingWriteError } = await admin
         .from("profiles")
         .update({
           pending_plan: plan,
           pending_plan_effective_at: new Date(periodEndUnix * 1000).toISOString(),
         })
         .eq("id", user.id);
+      if (pendingWriteError) {
+        // PostgrestError isn't an Error instance, so logApiError would log
+        // message:"unknown" — pass the text through `extra`.
+        logApiError("billing.changePlan.pendingPlanWrite", pendingWriteError, {
+          plan,
+          detail: pendingWriteError.message,
+        });
+      }
       return NextResponse.json({
         scheduled: true,
         effective: new Date(periodEndUnix * 1000).toISOString(),
         plan,
+        // The Stripe schedule is what actually defers the downgrade; these
+        // two columns are display-only, so a failed write is reported, not
+        // fatal.
+        synced: !pendingWriteError,
       });
     }
 
@@ -173,8 +195,39 @@ export async function POST(req: NextRequest) {
       items: [{ id: firstItem.id, price: PLAN_PRICES[plan] }],
       proration_behavior: "create_prorations",
     });
-    await supabase.from("profiles").update({ plan }).eq("id", user.id);
-    return NextResponse.json({ upgraded: true, plan });
+
+    /* Service-role write, and the error is checked.
+     *
+     * 2026-08-04: this was `await supabase.from("profiles").update({ plan })`
+     * on the USER'S session with no error destructure. Migration 00117 added
+     * a BEFORE UPDATE guard that raises 42501 when a session rewrites `plan`
+     * while `stripe_subscription_id` is set — i.e. on every upgrade this
+     * route handles. The write therefore always failed, the failure was
+     * invisible, and the route 200'd while the contractor's ZIP cap stayed
+     * on the old tier until the customer.subscription.updated webhook landed
+     * (00117's own header documents this as a known follow-up). 00117 exempts
+     * service_role, so the admin client makes the entitlement correct on the
+     * response instead of seconds later.
+     *
+     * On failure we still return 200: Stripe has already moved the
+     * subscription, so reporting "upgrade failed" would be false and would
+     * invite a retry loop. `synced: false` lets the client soften its
+     * confirmation copy, and logApiError surfaces it to Sentry. */
+    const { error: planWriteError } = await admin
+      .from("profiles")
+      .update({ plan })
+      .eq("id", user.id);
+    if (planWriteError) {
+      logApiError("billing.changePlan.planWrite", planWriteError, {
+        plan,
+        detail: planWriteError.message,
+      });
+    }
+    return NextResponse.json({
+      upgraded: true,
+      plan,
+      synced: !planWriteError,
+    });
   } catch (error) {
     logApiError("billing.changePlan", error);
     return NextResponse.json(

@@ -166,6 +166,17 @@ function TemplateCard({ tpl }: { tpl: typeof outreachTemplates[0] }) {
 }
 
 /* ─── Page ─── */
+/* NO PLAN GATE HERE — deliberate, and the pricing copy now matches.
+ *
+ * Storm Center used to be advertised as a Starter-and-above feature on
+ * /pricing and in Settings → Billing while this route was reachable on every
+ * tier, including Founder. The contradiction was resolved on the copy side
+ * (2026-08-04): "Storm Center dashboard" moved into SHARED_FEATURES in
+ * src/lib/plans/tiers.ts because no dashboard tab in the product is
+ * plan-gated — the only plan gate that exists anywhere is Enterprise
+ * all-trade visibility in src/lib/auth/trade-gating.ts. If you ever DO gate
+ * this page, move the bullet back out of SHARED_FEATURES in the same commit
+ * so the price list and the code keep agreeing. */
 export default function StormPage() {
   // Persisted via localStorage so the toggle survives page reloads.
   // Long-term this should promote to profiles.storm_mode_enabled and

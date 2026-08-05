@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { TrendingUp, TrendingDown, Minus, Award } from "lucide-react";
+import { Award } from "lucide-react";
 import { useLeads } from "@/hooks/useLeads";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -22,51 +22,31 @@ const tiers: TierConfig[] = [
   { name: "Bronze", color: "text-orange-400", bgColor: "bg-orange-500/10", minScore: 0 },
 ];
 
-/* ─── Peer averages ───
- * Null until we have a real /api/analytics/peer-averages endpoint that
- * aggregates across all contractors in the same trade + ZIP cohort.
- * Prior code shipped with `{ responseTimeH: 4.2, closeRate: 22, reviewScore: 4.5 }`
- * — literal values that rendered as "peer average" labels on every
- * dashboard even though we'd never computed them. Consumers should
- * hide the comparison column when null. */
-const peerAvg: { responseTimeH: number; closeRate: number; reviewScore: number } | null = null;
-
-/* ─── Metric comparison ─── */
-function MetricRow({ label, yours, peer, unit, lowerIsBetter = false }: {
-  label: string;
-  yours: number;
-  peer: number;
-  unit: string;
-  lowerIsBetter?: boolean;
-}) {
-  const diff = yours - peer;
-  const better = lowerIsBetter ? diff < 0 : diff > 0;
-  const neutral = Math.abs(diff) < 0.5;
-
-  return (
-    <div className="flex items-center justify-between py-2">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <div className="flex items-center gap-3">
-        <span className="text-sm font-medium text-foreground">
-          {yours.toFixed(unit === "h" ? 1 : 0)}{unit}
-        </span>
-        {neutral ? (
-          <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
-            <Minus className="h-3 w-3" /> Same
-          </span>
-        ) : better ? (
-          <span className="inline-flex items-center gap-0.5 text-[10px] text-green-400">
-            <TrendingUp className="h-3 w-3" /> Above avg
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-0.5 text-[10px] text-red-400">
-            <TrendingDown className="h-3 w-3" /> Below avg
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
+/* ─── Peer averages: deliberately absent, not "temporarily off" ───
+ *
+ * An earlier pass replaced the hardcoded `{ responseTimeH: 4.2,
+ * closeRate: 22, reviewScore: 4.5 }` with `const peerAvg = null` but kept
+ * the `peerAvg ? <MetricRow …/> : …` subtree behind it. Since the
+ * constant was a literal `null`, that whole branch — plus the ~35-line
+ * MetricRow component and its Above/Below-avg thresholds — could never
+ * execute. Deleted here rather than left rotting behind a permanently
+ * false condition, matching how MetricGrid retired "Industry avg $180+"
+ * and KanbanBoard retired DEFAULT_WIN_PROBS.
+ *
+ * Restoring peer comparison needs all three of these to exist first —
+ * none of them do today (there is no /api/analytics/peer-averages route,
+ * no cohort aggregate table, and no cron computing one):
+ *   1. A server-computed cohort aggregate keyed on trade + ZIP prefix,
+ *      carrying its own sample size. Not a literal in this file.
+ *   2. A minimum-n floor before anything renders, so a 2-contractor
+ *      cohort can neither pose as an industry benchmark nor let one
+ *      contractor back out the other's numbers.
+ *   3. A hook that reports loading / error / cohort-too-small as
+ *      distinct states, the way useLeads does below — so a silent
+ *      failure can't read as "you're average".
+ *
+ * Until then this widget shows the contractor's own numbers and says so.
+ * Do NOT reintroduce a placeholder average to make the UI look complete. */
 
 /* ─── Component ─── */
 export function BenchmarkWidget() {
@@ -132,40 +112,21 @@ export function BenchmarkWidget() {
         </div>
       ) : myStats ? (
         <>
-          <div className="divide-y divide-border">
-            {/* Peer column is only rendered when we have a real peer-
-             * average dataset (currently always null — endpoint TBD). */}
-            {peerAvg ? (
-              <>
-                <MetricRow
-                  label="Response Time"
-                  yours={myStats.avgResponseH ?? 0}
-                  peer={peerAvg.responseTimeH}
-                  unit="h"
-                  lowerIsBetter
-                />
-                <MetricRow
-                  label="Close Rate"
-                  yours={myStats.closeRate}
-                  peer={peerAvg.closeRate}
-                  unit="%"
-                />
-              </>
-            ) : (
-              <div className="py-4 text-xs text-muted-foreground">
-                <p>
-                  <span className="uppercase tracking-wider text-[9px] text-muted-foreground/60 mr-1.5">
-                    Your stats
-                  </span>
-                  Response {myStats.avgResponseH != null ? `${Math.round(myStats.avgResponseH)}h` : "—"}
-                  {" · "}Close rate {myStats.closeRate.toFixed(0)}%
-                </p>
-                <p className="mt-1 text-[10px] opacity-70">
-                  Peer comparison activates once we have enough contractors
-                  in your trade + ZIP cohort to publish an anonymized benchmark.
-                </p>
-              </div>
-            )}
+          {/* The contractor's OWN numbers — the only figures in this
+              widget we can source. See the peer-average note at the top
+              of the file for what a comparison column would require. */}
+          <div className="py-4 text-xs text-muted-foreground">
+            <p>
+              <span className="uppercase tracking-wider text-[9px] text-muted-foreground/60 mr-1.5">
+                Your stats
+              </span>
+              Response {myStats.avgResponseH != null ? `${Math.round(myStats.avgResponseH)}h` : "—"}
+              {" · "}Close rate {myStats.closeRate.toFixed(0)}%
+            </p>
+            <p className="mt-1 text-[10px] opacity-70">
+              Peer comparison activates once we have enough contractors
+              in your trade + ZIP cohort to publish an anonymized benchmark.
+            </p>
           </div>
 
           {/* Next tier progress */}

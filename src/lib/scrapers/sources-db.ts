@@ -25,6 +25,87 @@ import {
 } from "./types";
 import { readCursor, writeCursor } from "./cursor";
 
+type SupabaseAdmin = ReturnType<typeof createAdminClient>;
+
+/**
+ * `permit_sources.dataset_kind` — see migration 00122.
+ *
+ * 'permit' means "a sample payload passed the non-permit screen", NOT
+ * "a human confirmed this is a permit feed". Keep the two apart: the whole
+ * point of the column is that the classification is EVIDENCE, and overstating
+ * it would make the registry lie in the other direction.
+ */
+export type DatasetKind = "unknown" | "permit" | "non_permit";
+export const NON_PERMIT_KIND: DatasetKind = "non_permit";
+
+/**
+ * Tri-state cache for "does this DB have migration 00122 applied?".
+ *
+ * `null` = untested. Per CLAUDE.md's feature-flag rule every new column ships
+ * with a graceful-degrade read path, and adding an unknown column to a SELECT
+ * or a filter breaks the WHOLE query — so the first query that touches
+ * `dataset_kind` optimistically includes it, and on SQLSTATE 42703 flips this
+ * flag and retries without. One wasted round trip per process, ever.
+ */
+let datasetKindColumnSupported: boolean | null = null;
+
+export function datasetKindSupported(): boolean | null {
+  return datasetKindColumnSupported;
+}
+
+export function setDatasetKindSupported(value: boolean): void {
+  if (datasetKindColumnSupported !== value) {
+    logger.info("sources-db.dataset_kind_support", { supported: value });
+  }
+  datasetKindColumnSupported = value;
+}
+
+/** Test seam — the cache is module state, so suites must be able to clear it. */
+export function __resetDatasetKindSupport(): void {
+  datasetKindColumnSupported = null;
+}
+
+/**
+ * True when a PostgREST error means "that column does not exist".
+ *
+ * Postgres raises 42703 (undefined_column); PostgREST forwards the code, but
+ * older versions surfaced only the message, hence the belt-and-braces text
+ * match. Pure + exported for unit tests.
+ */
+export function isUndefinedColumnError(
+  error: { code?: string | null; message?: string | null } | null | undefined,
+): boolean {
+  if (!error) return false;
+  if (error.code === "42703") return true;
+  const message = (error.message ?? "").toLowerCase();
+  return message.includes("column") && message.includes("does not exist");
+}
+
+interface QueryResponse<T> {
+  data: T[] | null;
+  error: { code?: string | null; message: string } | null;
+}
+
+/**
+ * Run a query that filters on `dataset_kind`, falling back to the unfiltered
+ * form when the column is absent.
+ *
+ * The callback takes the flag rather than a pre-built query so the retry can
+ * rebuild from scratch — a PostgREST builder is single-use.
+ */
+async function withDatasetKindFallback<T>(
+  run: (useDatasetKind: boolean) => PromiseLike<QueryResponse<T>>,
+): Promise<QueryResponse<T>> {
+  const attempt = datasetKindColumnSupported !== false;
+  const res = await run(attempt);
+  if (attempt && res.error && isUndefinedColumnError(res.error)) {
+    setDatasetKindSupported(false);
+    return run(false);
+  }
+  if (attempt && !res.error) setDatasetKindSupported(true);
+  return res;
+}
+
 export interface DBPermitSource extends PermitSource {
   source_key: string;
   /**
@@ -115,6 +196,34 @@ function toDBPermitSource(row: SourceRow): DBPermitSource {
   };
 }
 
+/**
+ * Lane A: proven producers (last_count > 0), highest priority + oldest first.
+ * Lane B: never-produced explorers (NULL or 0 last_count).
+ *
+ * `useDatasetKind` adds the registry-level exclusion of sources a probe has
+ * already proved are NOT permit feeds. Without it those rows keep scraping
+ * business-licence / utility rows into `permits` until the 10-strike
+ * auto-disable happens to catch them — ten wasted runs each, and ten runs of
+ * inflated permit counts.
+ */
+function lane(
+  supabase: SupabaseAdmin,
+  opts: { producers: boolean; limit: number; useDatasetKind: boolean },
+) {
+  let q = supabase
+    .from("permit_sources")
+    .select(SOURCE_COLUMNS)
+    .eq("enabled", true);
+  q = opts.producers
+    ? q.gt("last_count", 0)
+    : q.or("last_count.is.null,last_count.eq.0");
+  if (opts.useDatasetKind) q = q.neq("dataset_kind", NON_PERMIT_KIND);
+  return q
+    .order("priority", { ascending: false })
+    .order("last_scraped_at", { ascending: true, nullsFirst: true })
+    .limit(opts.limit) as unknown as PromiseLike<QueryResponse<SourceRow>>;
+}
+
 export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
   const supabase = createAdminClient();
 
@@ -125,24 +234,12 @@ export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
   // feeds) always scrape before the long tail, then last_scraped_at
   // rotates within each priority band.
   const [producersRes, explorersRes] = await Promise.all([
-    // Lane A: proven producers, highest priority + oldest-scraped first.
-    supabase
-      .from("permit_sources")
-      .select(SOURCE_COLUMNS)
-      .eq("enabled", true)
-      .gt("last_count", 0)
-      .order("priority", { ascending: false })
-      .order("last_scraped_at", { ascending: true, nullsFirst: true })
-      .limit(producerSlots),
-    // Lane B: never-produced explorers (NULL or 0 last_count).
-    supabase
-      .from("permit_sources")
-      .select(SOURCE_COLUMNS)
-      .eq("enabled", true)
-      .or("last_count.is.null,last_count.eq.0")
-      .order("priority", { ascending: false })
-      .order("last_scraped_at", { ascending: true, nullsFirst: true })
-      .limit(limit),
+    withDatasetKindFallback((useDatasetKind) =>
+      lane(supabase, { producers: true, limit: producerSlots, useDatasetKind }),
+    ),
+    withDatasetKindFallback((useDatasetKind) =>
+      lane(supabase, { producers: false, limit, useDatasetKind }),
+    ),
   ]);
 
   if (producersRes.error && explorersRes.error) {
@@ -163,13 +260,13 @@ export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
   }
 
   const producers = producersRes.data ?? [];
-  const seen = new Set(producers.map((r) => r.source_key));
+  const seen = new Set(producers.map((r) => String(r.source_key ?? "")));
   const data = [
     ...producers,
-    ...(explorersRes.data ?? []).filter((r) => !seen.has(r.source_key)),
+    ...(explorersRes.data ?? []).filter((r) => !seen.has(String(r.source_key ?? ""))),
   ].slice(0, limit);
 
-  return (data ?? []).map((row) => toDBPermitSource(row as SourceRow));
+  return data.map((row) => toDBPermitSource(row));
 }
 
 /**
@@ -322,8 +419,15 @@ export async function recordSourceRun(
     const update: Record<string, unknown> = {
       last_scraped_at: now.toISOString(),
       error_count: newCount,
-      enabled: newCount < MAX_CONSECUTIVE_ERRORS,
     };
+    // `enabled` is written on ONE path only: the strike limit. The previous
+    // form was `enabled: newCount < MAX_CONSECUTIVE_ERRORS`, which writes
+    // `true` for strikes 1-9 — so recording a FAILURE against an already
+    // disabled source RESURRECTED it. That reaches two live paths: a source
+    // the operator disabled by hand, and (since the activation probe gate)
+    // a source we deliberately refused to enable. A failure must never be
+    // able to turn a source on.
+    if (newCount >= MAX_CONSECUTIVE_ERRORS) update.enabled = false;
 
     // BLOCKER 2: a wrong field mapping used to be indistinguishable from an
     // empty city. Persist enough for an operator to repair it without
@@ -359,6 +463,109 @@ export async function recordSourceRun(
     }
   } catch (err) {
     logger.warn("scrape.record_run_failed", {
+      source_key: sourceKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Enable sources whose activation probe found permit-shaped data.
+ *
+ * Bulk single statement — an activation run enables up to 50 rows and the
+ * instance this runs against is not always healthy enough for 50 round trips.
+ *
+ * Returns the number of rows the update targeted (0 on failure), so the caller
+ * never reports an activation that did not happen.
+ */
+export async function activateProbedSources(sourceKeys: string[]): Promise<number> {
+  if (sourceKeys.length === 0) return 0;
+  const supabase = createAdminClient();
+  const checkedAt = new Date().toISOString();
+
+  const res = await withDatasetKindFallback<never>((useDatasetKind) => {
+    const patch: Record<string, unknown> = { enabled: true };
+    if (useDatasetKind) {
+      patch.dataset_kind = "permit" satisfies DatasetKind;
+      patch.dataset_kind_reason = null;
+      patch.dataset_kind_checked_at = checkedAt;
+    }
+    return supabase
+      .from("permit_sources")
+      .update(patch)
+      .in("source_key", sourceKeys) as unknown as PromiseLike<QueryResponse<never>>;
+  });
+
+  if (res.error) {
+    logger.error("sources-db.activate_failed", {
+      error: res.error.message,
+      count: sourceKeys.length,
+    });
+    return 0;
+  }
+  return sourceKeys.length;
+}
+
+/**
+ * Record that a source is NOT a permit feed, and keep it disabled.
+ *
+ * Writes the evidence twice on purpose:
+ *   - `dataset_kind` + `dataset_kind_reason` so the decision is queryable and
+ *     is never re-derived by another heuristic pass;
+ *   - the standard `[henri:scrape-diagnostic]` block in `notes`, which is
+ *     where an operator already looks and which survives a DB without
+ *     migration 00122 applied.
+ *
+ * `enabled: false` is written explicitly rather than assumed: the row is
+ * already disabled today, but stating it makes the refusal durable against a
+ * concurrent activation run.
+ *
+ * Never throws — a bookkeeping failure must not abort the cron.
+ */
+export async function rejectProbedSource(
+  sourceKey: string,
+  params: { reason: string; observedKeys?: string[]; notes?: string | null },
+): Promise<void> {
+  const supabase = createAdminClient();
+  const now = new Date();
+  const diagnostic = withDiagnostic(
+    params.notes ?? null,
+    buildMappingDiagnostic({
+      outcome: "unsupported",
+      fetched: 1,
+      mapped: 0,
+      usable: 0,
+      observedKeys: params.observedKeys ?? [],
+      configured: { activation_probe: "arcgis" },
+      detail: params.reason,
+      at: now,
+    }),
+  );
+
+  try {
+    const res = await withDatasetKindFallback<never>((useDatasetKind) => {
+      const patch: Record<string, unknown> = {
+        enabled: false,
+        notes: diagnostic,
+      };
+      if (useDatasetKind) {
+        patch.dataset_kind = NON_PERMIT_KIND;
+        patch.dataset_kind_reason = params.reason;
+        patch.dataset_kind_checked_at = now.toISOString();
+      }
+      return supabase
+        .from("permit_sources")
+        .update(patch)
+        .eq("source_key", sourceKey) as unknown as PromiseLike<QueryResponse<never>>;
+    });
+    if (res.error) {
+      logger.warn("sources-db.reject_probe_failed", {
+        source_key: sourceKey,
+        error: res.error.message,
+      });
+    }
+  } catch (err) {
+    logger.warn("sources-db.reject_probe_failed", {
       source_key: sourceKey,
       error: err instanceof Error ? err.message : String(err),
     });

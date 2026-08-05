@@ -13,8 +13,11 @@ import { HomeownerMessageBodySchema, parseBody } from "@/lib/schemas/api";
  *
  * GET  → list every lead derived from an intake this homeowner submitted,
  *        with the lead's notes and matched contractor display info.
- * POST → append `[in]:` line to the given lead's notes. Access is gated to
- *        the homeowner who owns the intake that produced that lead.
+ * POST → append `[in]:` line to the given lead's notes, via the
+ *        `append_homeowner_message` RPC (migration 00121). Homeowners hold
+ *        no UPDATE lane on `public.leads` — a direct write is filtered to
+ *        zero rows and reported as success — so the RPC is the only path
+ *        that actually lands, and it re-checks ownership itself.
  */
 
 type HomeownerThread = {
@@ -156,7 +159,18 @@ export async function POST(request: NextRequest) {
     if (parsed.response) return parsed.response;
     const body = parsed.data;
 
+    // Zod's min(1) admits a whitespace-only body, which the RPC then rejects.
+    // Catch it here so it reads as the client error it is rather than a 500.
+    const message = body.message.trim();
+    if (!message) {
+      return NextResponse.json({ error: "Message is empty" }, { status: 400 });
+    }
+
     // Access gate — the homeowner must own an intake that matched this lead.
+    // The RPC re-runs this same predicate as its own guard (it is SECURITY
+    // DEFINER, so its check is the one that actually enforces access). This
+    // read stays so an unauthorised send answers 403 instead of a generic
+    // 500 from the raised exception.
     const { data: intake } = await supabase
       .from("homeowner_intakes")
       .select("id")
@@ -168,29 +182,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Read existing notes, append a new inbound line, write back.
-    const { data: lead, error: leadErr } = await supabase
-      .from("leads")
-      .select("notes")
-      .eq("id", body.lead_id)
-      .single();
+    /* The append runs entirely inside `append_homeowner_message` (00121).
+     * Doing it here as SELECT-notes → build-line → UPDATE could not work:
+     * `leads` has no homeowner UPDATE policy, so the write matched zero
+     * rows and PostgREST returned success with no error — the send looked
+     * fine and nothing was stored. The RPC also builds the line itself, so
+     * a contractor message written between our read and our write can no
+     * longer be clobbered, and it raises when the UPDATE touches no row
+     * rather than returning quietly. Any error here is therefore a real
+     * failure and is reported as one. */
+    const { error: rpcErr } = await supabase.rpc("append_homeowner_message", {
+      p_lead_id: body.lead_id,
+      p_body: message,
+    });
 
-    if (leadErr || !lead) {
-      logApiError("homeowner.messages.post.readLead", leadErr);
-      return NextResponse.json({ error: "Lead not found" }, { status: 404 });
-    }
-
-    const timestamp = new Date().toISOString();
-    const newLine = `${timestamp} [in]: ${body.message.trim()}`;
-    const nextNotes = lead.notes ? `${lead.notes}\n${newLine}` : newLine;
-
-    const { error: updateErr } = await supabase
-      .from("leads")
-      .update({ notes: nextNotes, updated_at: timestamp })
-      .eq("id", body.lead_id);
-
-    if (updateErr) {
-      logApiError("homeowner.messages.post.update", updateErr);
+    if (rpcErr) {
+      logApiError("homeowner.messages.post.rpc", rpcErr);
+      // A missing function (migration 00121 unapplied) surfaces here too —
+      // as a failure, which is the truth, not a silent success.
       return NextResponse.json({ error: "Send failed" }, { status: 500 });
     }
 

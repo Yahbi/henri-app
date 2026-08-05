@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DerivedEnrichments } from "@/lib/enrichment/derived";
 
 export interface LeadContextStorm {
@@ -82,17 +82,30 @@ export interface LeadContextData {
  *
  * Cancellation-safe (refs prevent setState on unmounted components).
  * Dedupes by lead `id` so rapid drawer swaps don't refetch the same
- * lead twice. On error or 404, returns null context — the drawer
- * silently renders without the new section, never blocks.
+ * lead twice. Any non-ok status or transport failure resolves to
+ * `data: null` AND `error: true` — same split usePermitHistory uses, so
+ * the consumer can distinguish "no signals for this property" from
+ * "the request died".
  */
 export function useLeadContext(leadId: string | null | undefined) {
   const [data, setData] = useState<LeadContextData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const lastId = useRef<string | null>(null);
 
+  // A failed fetch used to set `data: null`, which PropertyContextSection
+  // renders exactly like "this property has no derivable signals" — the
+  // contractor could not tell a dead request from an empty one. Mirrors
+  // the `error` flag usePermitHistory carries for the same reason.
+  const [error, setError] = useState(false);
+
+  // Bumped by refetch() so the effect re-runs for the SAME leadId; the
+  // `lastId` dedupe guard alone would swallow a manual retry.
+  const [reloadToken, setReloadToken] = useState(0);
+
   useEffect(() => {
     if (!leadId) {
       setData(null);
+      setError(false);
       lastId.current = null;
       return;
     }
@@ -101,12 +114,17 @@ export function useLeadContext(leadId: string | null | undefined) {
     let cancelled = false;
     (async () => {
       setIsLoading(true);
+      setError(false);
       try {
         const res = await fetch(
           `/api/leads/${encodeURIComponent(leadId)}/context`,
         );
         if (!res.ok) {
-          if (!cancelled) setData(null);
+          // Clearing `lastId` rather than stamping it keeps the failure
+          // retryable: without this, swapping to another lead and back
+          // would hit the dedupe guard and strand the drawer on a stale
+          // error state forever.
+          if (!cancelled) { setData(null); setError(true); lastId.current = null; }
           return;
         }
         const body = (await res.json()) as LeadContextData;
@@ -115,7 +133,7 @@ export function useLeadContext(leadId: string | null | undefined) {
           setData(body);
         }
       } catch {
-        if (!cancelled) setData(null);
+        if (!cancelled) { setData(null); setError(true); lastId.current = null; }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -123,7 +141,12 @@ export function useLeadContext(leadId: string | null | undefined) {
     return () => {
       cancelled = true;
     };
-  }, [leadId]);
+  }, [leadId, reloadToken]);
 
-  return { data, isLoading };
+  const refetch = useCallback(() => {
+    lastId.current = null;
+    setReloadToken((t) => t + 1);
+  }, []);
+
+  return { data, isLoading, error, refetch };
 }

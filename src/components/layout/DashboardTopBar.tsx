@@ -32,6 +32,7 @@ import { useUser } from "@/hooks/useUser";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { findPlanTier } from "@/lib/plans/tiers";
 
 // Tab order groups tabs by the verb the contractor is doing:
 //   lead work       → Leads · Pipeline · Delivery (pick → move → close)
@@ -179,6 +180,7 @@ function TerritoryPill() {
 
 /**
  * Displays the contractor's plan name + a status indicator:
+ *   – "No active subscription" when the account isn't on a paid tier
  *   – "Trial ends in Xh" if in the 24-hour free trial
  *   – a red dot if the license expired (leads paused per CLAUDE.md)
  *   - "Licensed" otherwise
@@ -192,7 +194,43 @@ function BillingStatePill() {
   const [mountNow] = useState(() => Date.now());
   if (!profile) return null;
 
-  const planLabel = PLAN_LABELS[profile.plan ?? "founder"] ?? "Founder";
+  /* Naming a paid tier requires TWO facts to line up, because each one
+   * alone lies in a different direction:
+   *
+   *   stripe_subscription_id — written only by checkout.session.completed,
+   *     so it is the honest "a subscription exists" signal. `plan` alone
+   *     isn't: the onboarding plan picker writes it from the browser BEFORE
+   *     checkout (src/app/onboarding/plan/page.tsx), so someone who
+   *     abandoned payment carries plan="pro".
+   *
+   *   plan resolves to a real tier — the cancel / unpaid webhook paths
+   *     write plan="free" WITHOUT clearing the subscription pointer
+   *     (src/app/api/webhooks/stripe/route.ts), so the pointer alone keeps
+   *     naming a tier long after the contractor stopped paying.
+   *
+   * The previous `PLAN_LABELS[profile.plan ?? "founder"] ?? "Founder"` had
+   * neither guard and rendered "Founder · Licensed" to cancelled and
+   * never-subscribed accounts — telling a non-paying user they hold a
+   * $149/mo plan. Mirrors the explicit "No active subscription" state on
+   * /settings/billing. */
+  const tier = profile.stripe_subscription_id
+    ? findPlanTier(profile.plan)
+    : undefined;
+
+  if (!tier) {
+    return (
+      <Link
+        href="/settings/billing"
+        className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-colors bg-warning/10 text-warning border-warning/30"
+        aria-label="No active subscription. Choose a plan."
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+        <span>No active subscription</span>
+      </Link>
+    );
+  }
+
+  const planLabel = tier.name;
 
   // Trial countdown — Stripe-created subscriptions with trial_period_days=1
   // put `profile.trial_ends_at` on the row (webhook writes it).
@@ -239,12 +277,10 @@ function BillingStatePill() {
   );
 }
 
-const PLAN_LABELS: Record<string, string> = {
-  founder: "Founder",
-  starter: "Starter",
-  pro: "Pro",
-  enterprise: "Enterprise",
-};
+/* PLAN_LABELS removed 2026-08-04 — it was a fourth copy of the tier names
+ * and, worse, the pill defaulted through it to "Founder". Names now come
+ * from src/lib/plans/tiers.ts via findPlanTier, which returns undefined
+ * rather than a default for unsubscribed accounts. */
 
 export function DashboardTopBar() {
   const pathname = usePathname();

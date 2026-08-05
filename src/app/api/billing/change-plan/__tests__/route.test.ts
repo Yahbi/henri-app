@@ -39,6 +39,25 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
+/* ── Service-role client mock ────────────────────────────────────────────
+ * The route writes `plan` / `pending_plan` with the admin client: migration
+ * 00117 installed a BEFORE UPDATE guard that raises 42501 when the user's
+ * own session rewrites `plan` while a subscription is active, and
+ * service_role is exempt. Mocked separately from the server client so the
+ * assertions can tell the two writers apart — and so the real
+ * createAdminClient (which throws without SUPABASE_SERVICE_ROLE_KEY) never
+ * runs here. */
+const mockAdminUpdate = vi.fn();
+const mockAdminEq = vi.fn();
+const mockAdminFrom = vi.fn(() => ({ update: mockAdminUpdate }));
+
+mockAdminUpdate.mockReturnValue({ eq: mockAdminEq });
+mockAdminEq.mockResolvedValue({ error: null });
+
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({ from: mockAdminFrom }),
+}));
+
 vi.mock("@/lib/log", () => ({ logApiError: vi.fn() }));
 
 /* ── Stripe mock ────────────────────────────────────────────────────────── */
@@ -123,6 +142,11 @@ beforeEach(() => {
     phases: [{ start_date: FUTURE_PERIOD_END - 30 * 24 * 3600 }],
   });
   mockSchedulesUpdate.mockResolvedValue({});
+
+  // Re-seeded because individual tests use mockResolvedValueOnce to force a
+  // failed profile write; clearAllMocks doesn't unwind a spent "once".
+  mockAdminUpdate.mockReturnValue({ eq: mockAdminEq });
+  mockAdminEq.mockResolvedValue({ error: null });
 });
 
 /* ── Tests ─────────────────────────────────────────────────────────────── */
@@ -160,10 +184,12 @@ describe("Billing change-plan (P0-9)", () => {
       scheduled?: boolean;
       effective?: string;
       plan?: string;
+      synced?: boolean;
     };
     expect(body.scheduled).toBe(true);
     expect(body.plan).toBe("founder");
     expect(body.effective).toBeTypeOf("string");
+    expect(body.synced).toBe(true);
 
     /* A downgrade must NOT touch the live subscription. The previous
      * implementation called subscriptions.update() with
@@ -200,13 +226,15 @@ describe("Billing change-plan (P0-9)", () => {
       proration_behavior: "none",
     });
 
-    // Profile gets pending_plan set (not plan — that flips at next cycle via webhook)
-    expect(mockUpdate).toHaveBeenCalledWith(
+    // Profile gets pending_plan set (not plan — that flips at next cycle via
+    // webhook), and the write goes through the service-role client.
+    expect(mockAdminUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         pending_plan: "founder",
         pending_plan_effective_at: expect.any(String) as unknown,
       }),
     );
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it("UPGRADE founder→pro applies immediately with prorations", async () => {
@@ -220,16 +248,51 @@ describe("Billing change-plan (P0-9)", () => {
     });
     const res = await POST(makeRequest({ plan: "pro" }));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { upgraded?: boolean; plan?: string };
+    const body = (await res.json()) as {
+      upgraded?: boolean;
+      plan?: string;
+      synced?: boolean;
+    };
     expect(body.upgraded).toBe(true);
     expect(body.plan).toBe("pro");
+    expect(body.synced).toBe(true);
 
     // Stripe call uses proration_behavior:"create_prorations"
     const updateArgs = mockSubscriptionsUpdate.mock.calls[0][1] as Record<string, unknown>;
     expect(updateArgs.proration_behavior).toBe("create_prorations");
 
-    // Profile.plan flips immediately
-    expect(mockUpdate).toHaveBeenCalledWith({ plan: "pro" });
+    /* Profile.plan flips immediately, via the SERVICE-ROLE client. Doing it
+     * on the user's session hits the 00117 BEFORE UPDATE guard (42501) — the
+     * write silently failed and the ZIP cap stayed on the old tier until the
+     * Stripe webhook caught up. */
+    expect(mockAdminUpdate).toHaveBeenCalledWith({ plan: "pro" });
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still 200s with synced:false when the profile write fails", async () => {
+    mockSingle.mockResolvedValue({
+      data: {
+        role: "contractor",
+        stripe_customer_id: "cus_abc",
+        plan: "founder",
+      },
+      error: null,
+    });
+    // e.g. a future column guard, or a service-role outage.
+    mockAdminEq.mockResolvedValueOnce({
+      error: { message: "permission denied", code: "42501" },
+    });
+
+    const res = await POST(makeRequest({ plan: "pro" }));
+
+    /* Stripe has already moved the subscription, so reporting failure would
+     * be false and would invite a retry loop. The caller learns the profile
+     * row is briefly stale from `synced`, and the webhook reconciles it. */
+    expect(mockSubscriptionsUpdate).toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { upgraded?: boolean; synced?: boolean };
+    expect(body.upgraded).toBe(true);
+    expect(body.synced).toBe(false);
   });
 
   it("rejects when no active subscription exists on the customer", async () => {
