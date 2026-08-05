@@ -74,11 +74,24 @@ export const maxDuration = 300;
  *  every 20 minutes (~72k/day), so a larger number here would only build a
  *  backlog in front of it. */
 const MAX_PER_RUN = 5_000;
-/** Ids per UPDATE round-trip. Keeps each statement far under the 8s
- *  PostgREST statement_timeout even when the table is under write load. */
-const CHUNK = 500;
+/** Ids per UPDATE round-trip.
+ *
+ *  Two independent ceilings, and the smaller one binds. The 8s PostgREST
+ *  statement_timeout is the obvious one, but `.in()` values are sent in the
+ *  QUERY STRING, so 500 UUIDs would be ~19KB of URL against a ~8KB limit and
+ *  would 414 before Postgres ever saw the statement. 200 keeps both safe. */
+const CHUNK = 200;
 /** Candidate scan page size. */
 const SCAN_PAGE = 1_000;
+/**
+ * UUIDs per PostgREST `.in()` filter.
+ *
+ * `.in()` values travel in the QUERY STRING, so this is bounded by URL
+ * length, not by row count. 200 UUIDs is ~7.6KB of ids — comfortably inside
+ * the ~8KB ceiling with room for the rest of the URL. The same limit applies
+ * to the UPDATE below, so CHUNK is deliberately smaller still.
+ */
+const IN_CHUNK = 200;
 /** Leave headroom under maxDuration so the summary always gets written. */
 const DEADLINE_MS = 260_000;
 
@@ -144,17 +157,34 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         // Which of these already have a lead? Those must not be touched —
         // re-queuing them would create a duplicate assignment under the next
         // contractor in the round-robin.
-        const { data: existing, error: leadErr } = await supabase
-          .from("leads")
-          .select("permit_id")
-          .in("permit_id", ids);
+        //
+        // Chunked at IN_CHUNK because PostgREST puts `.in()` values in the
+        // QUERY STRING. A full SCAN_PAGE of UUIDs is 1,000 x ~38 chars ~= 38KB
+        // of URL, far past the ~8KB ceiling, and the failure mode is a 414
+        // rather than anything that looks like a data problem. Getting this
+        // wrong would be silent in the worst way: `existing` comes back empty,
+        // every permit looks like an orphan, and the route re-queues permits
+        // that already have leads — manufacturing exactly the duplicate
+        // assignments the wedge contract forbids.
+        const withLead = new Set<string>();
+        let lookupFailed = false;
+        for (let i = 0; i < ids.length; i += IN_CHUNK) {
+          const idChunk = ids.slice(i, i + IN_CHUNK);
+          const { data: existing, error: leadErr } = await supabase
+            .from("leads")
+            .select("permit_id")
+            .in("permit_id", idChunk);
 
-        if (leadErr) {
-          logger.warn("territory-backfill.lead_lookup_failed", { zip, error: leadErr.message });
-          break;
+          if (leadErr) {
+            logger.warn("territory-backfill.lead_lookup_failed", { zip, error: leadErr.message });
+            lookupFailed = true;
+            break;
+          }
+          for (const l of existing ?? []) withLead.add(l.permit_id as string);
         }
-
-        const withLead = new Set((existing ?? []).map((l) => l.permit_id as string));
+        // Never re-queue on a partial lookup — an incomplete `withLead` set
+        // reads as "these permits have no leads" and would duplicate them.
+        if (lookupFailed) break;
         const orphans = ids.filter((id) => !withLead.has(id));
 
         if (orphans.length === 0) {
