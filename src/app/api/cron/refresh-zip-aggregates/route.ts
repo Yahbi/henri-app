@@ -59,7 +59,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         hint:
           "If `refresh_zip_pre_intent_aggregates()` fails because the matview was converted to a regular table, run `node scripts/_populate-zip-aggregates-volume.mjs` from the operator host instead.",
       });
-      await logCronRun("api/cron/refresh-zip-aggregates", startedAt, {
+      await logCronRun("refresh-zip-aggregates", startedAt, {
         status: "error",
         trigger: detectTrigger(request),
         error: rpcErr.message,
@@ -80,7 +80,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       duration_ms: Date.now() - startedAt,
     });
 
-    await logCronRun("api/cron/refresh-zip-aggregates", startedAt, {
+    await logCronRun("refresh-zip-aggregates", startedAt, {
       status: "ok",
       trigger: detectTrigger(request),
       pulled: count ?? null,
@@ -91,7 +91,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error("refresh-zip-aggregates.fatal", { error: msg });
-    await logCronRun("api/cron/refresh-zip-aggregates", startedAt, {
+    await logCronRun("refresh-zip-aggregates", startedAt, {
       status: "error",
       trigger: detectTrigger(request),
       error: msg,

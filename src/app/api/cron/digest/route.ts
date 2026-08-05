@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Resend } from "resend";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -135,8 +136,22 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Captured AFTER the auth check on purpose: an unauthorized request is
+  // not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
+  const t0 = Date.now();
+
   if (!process.env.RESEND_API_KEY) {
-    return NextResponse.json({ skipped: true, reason: "Resend not configured" });
+    const skippedResult = { skipped: true, reason: "Resend not configured" };
+    // Log the skip. Without a row here catchup sees "never ran" forever and
+    // re-fires this cron on every pass — a duplicate-send machine the moment
+    // Resend IS configured.
+    await logCronRun("digest", t0, {
+      status: "ok",
+      summary: { ...skippedResult, note: "skipped — RESEND_API_KEY not set" },
+      trigger: detectTrigger(request),
+    });
+    return NextResponse.json(skippedResult);
   }
 
   const supabase = createAdminClient();
@@ -144,6 +159,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
   let sent = 0;
   let skipped = 0;
+  let contractorsConsidered = 0;
 
   try {
     /* Fetch all onboarded contractors */
@@ -155,11 +171,18 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
     if (cError) {
       logger.error("Failed to fetch contractors", { error: String(cError) });
+      await logCronRun("digest", t0, {
+        status: "error",
+        error: cError.message,
+        trigger: detectTrigger(request),
+      });
       return NextResponse.json(
         { error: "Failed to fetch contractors" },
         { status: 500 }
       );
     }
+
+    contractorsConsidered = (contractors ?? []).length;
 
     const twentyFourHoursAgo = new Date(
       Date.now() - 24 * 60 * 60 * 1000
@@ -279,14 +302,29 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    return NextResponse.json({
+    const result = {
       success: true,
       sent,
       skipped,
       timestamp: new Date().toISOString(),
+    };
+    await logCronRun("digest", t0, {
+      // pulled = onboarded contractors considered for a digest.
+      // inserted = digest emails actually accepted by Resend.
+      pulled: contractorsConsidered,
+      inserted: sent,
+      summary: result,
+      trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (error) {
     logger.error("Digest cron error", { error: String(error) });
+    await logCronRun("digest", t0, {
+      status: "error",
+      error: String(error),
+      summary: { sent, skipped },
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: "Cron job failed" }, { status: 500 });
   }
 }

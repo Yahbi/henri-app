@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -25,6 +26,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Captured AFTER the auth check on purpose: an unauthorized request is
+  // not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
   const startedAt = Date.now();
   const supabase = createAdminClient();
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 86_400_000).toISOString();
@@ -38,6 +42,11 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       logger.warn("cron-runs-cleanup.delete_failed", { error: error.message });
+      await logCronRun("cron-runs-cleanup", startedAt, {
+        status: "error",
+        error: error.message,
+        trigger: detectTrigger(request),
+      });
       return NextResponse.json(
         { error: "delete failed", detail: error.message },
         { status: 500 },
@@ -49,15 +58,29 @@ export async function GET(request: NextRequest) {
       deleted: count ?? 0,
       retention_days: RETENTION_DAYS,
     });
-    return NextResponse.json({
+    const result = {
       ok: true,
       duration_ms: Date.now() - startedAt,
       deleted: count ?? 0,
       retention_days: RETENTION_DAYS,
       cutoff,
+    };
+    // This route deletes rows; it neither pulls upstream nor inserts. Both
+    // counters are omitted rather than repurposed — the delete count lives
+    // in `summary.deleted`. (The audit row is written after the DELETE, so
+    // it can never delete its own log entry.)
+    await logCronRun("cron-runs-cleanup", startedAt, {
+      summary: result,
+      trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (err) {
     logger.error("cron-runs-cleanup.error", { error: String(err) });
+    await logCronRun("cron-runs-cleanup", startedAt, {
+      status: "error",
+      error: String(err),
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json(
       { error: "cron-runs-cleanup failed", detail: String(err) },
       { status: 500 },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -76,6 +77,10 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Captured AFTER the auth check on purpose: an unauthorized request is
+  // not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
+  const t0 = Date.now();
   const supabase = createAdminClient();
 
   try {
@@ -99,6 +104,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     if (cError) {
       const detail = cError.message;
       logger.error("engagement.contractors-fetch-failed", { error: detail, code: cError.code });
+      await logCronRun("engagement", t0, {
+        status: "error",
+        error: detail,
+        trigger: detectTrigger(request),
+      });
       return NextResponse.json(
         { error: "Failed to fetch contractors", detail, code: cError.code },
         { status: 500 }
@@ -251,16 +261,30 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         ? Math.round(totalScoreSum / contractorsScored)
         : 0;
 
-    return NextResponse.json({
+    const result = {
       success: true,
       contractorsScored,
       avgScore,
       churnCritical,
       churnHigh,
       timestamp: new Date().toISOString(),
+    };
+    await logCronRun("engagement", t0, {
+      // pulled = onboarded contractors read out of `profiles`.
+      // inserted = rows upserted into engagement_scores.
+      pulled: contractors.length,
+      inserted: contractorsScored,
+      summary: result,
+      trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (error) {
     logger.error("Engagement cron error", { error: String(error) });
+    await logCronRun("engagement", t0, {
+      status: "error",
+      error: String(error),
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: "Cron job failed" }, { status: 500 });
   }
 }

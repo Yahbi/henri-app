@@ -12,6 +12,7 @@ import { PERMIT_SOURCES } from "@/lib/permits/sources";
 import { fetchPermits, type NormalizedPermit } from "@/lib/permits/fetcher";
 import { extractContactWithProvenance } from "@/lib/ingest/extract-contact";
 import { normalizeStatus } from "@/lib/scrapers/normalizer";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // 5 min — enough for 25 sources
@@ -70,16 +71,35 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = createAdminClient();
-  const results: SourceResult[] = [];
-  let totalInserted = 0;
-
   // Audit priority #8 (2026-04-28): inline 280s deadline. The per-source
   // loop runs ~25 sources sequentially and each can take 5-15s on slow
   // jurisdictions. Without this check Vercel kills at 300s mid-source
   // and we lose the ones that were halfway through. Now we exit cleanly
   // and the response includes the partial results.
+  //
+  // t0 is captured AFTER the auth check on purpose: an unauthorized request
+  // is not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
   const t0 = Date.now();
+  try {
+    return await run(request, t0);
+  } catch (err) {
+    // The route has never caught here — rethrow so Next's own error handling
+    // (and the resulting 500) is unchanged. The catch exists purely so the
+    // run leaves an audit row behind instead of looking "never ran".
+    await logCronRun("permits", t0, {
+      status: "error",
+      error: String(err),
+      trigger: detectTrigger(request),
+    });
+    throw err;
+  }
+}
+
+async function run(request: NextRequest, t0: number): Promise<NextResponse> {
+  const supabase = createAdminClient();
+  const results: SourceResult[] = [];
+  let totalInserted = 0;
   const deadlineMs = t0 + 280_000;
 
   for (const source of PERMIT_SOURCES) {
@@ -281,12 +301,21 @@ export async function GET(request: NextRequest) {
     await sleep(500);
   }
 
-  return NextResponse.json({
+  const result = {
     success: true,
     processed_at: new Date().toISOString(),
     sources: results,
     total_inserted: totalInserted,
     total_fetched: results.reduce((sum, r) => sum + r.fetched, 0),
     total_skipped: results.reduce((sum, r) => sum + r.skipped, 0),
+  };
+  await logCronRun("permits", t0, {
+    // pulled = permit records fetched from upstream across all sources.
+    // inserted = new permit rows written (dedup + upsert applied).
+    pulled: result.total_fetched,
+    inserted: result.total_inserted,
+    summary: result,
+    trigger: detectTrigger(request),
   });
+  return NextResponse.json(result);
 }

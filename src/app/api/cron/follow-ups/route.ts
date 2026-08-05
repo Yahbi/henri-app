@@ -6,6 +6,7 @@ import {
   getTemplatesForTrigger,
 } from "@/lib/sequences";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -23,6 +24,10 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Captured AFTER the auth check on purpose: an unauthorized request is
+  // not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
+  const t0 = Date.now();
   const supabase = createAdminClient();
 
   let outreachProcessed = 0;
@@ -106,6 +111,12 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
     if (queueError) {
       logger.error("Failed to fetch outreach queue", { error: String(queueError) });
+      await logCronRun("follow-ups", t0, {
+        status: "error",
+        error: queueError.message,
+        summary: { newSequencesStarted },
+        trigger: detectTrigger(request),
+      });
       return NextResponse.json(
         { error: "Failed to fetch outreach queue" },
         { status: 500 }
@@ -219,7 +230,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    return NextResponse.json({
+    const result = {
       success: true,
       sequences: {
         processed: sequenceStats.processed,
@@ -234,9 +245,31 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         failed: outreachFailed,
       },
       timestamp: new Date().toISOString(),
+    };
+    await logCronRun("follow-ups", t0, {
+      // pulled = queued outreach items this worker actually claimed.
+      // inserted = items successfully delivered (SMS/email accepted).
+      pulled: outreachProcessed,
+      inserted: outreachSent,
+      summary: result,
+      trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (error) {
     logger.error("Follow-ups cron error", { error: String(error) });
+    await logCronRun("follow-ups", t0, {
+      status: "error",
+      error: String(error),
+      summary: {
+        newSequencesStarted,
+        outreach: {
+          processed: outreachProcessed,
+          sent: outreachSent,
+          failed: outreachFailed,
+        },
+      },
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: "Cron job failed" }, { status: 500 });
   }
 }

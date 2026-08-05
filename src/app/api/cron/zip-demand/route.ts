@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -63,6 +64,10 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Captured AFTER the auth check on purpose: an unauthorized request is
+  // not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
+  const t0 = Date.now();
   const supabase = createAdminClient();
 
   try {
@@ -130,6 +135,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         hint: permitError.hint,
         code: permitError.code,
       });
+      await logCronRun("zip-demand", t0, {
+        status: "error",
+        error: permitError.message,
+        trigger: detectTrigger(request),
+      });
       return NextResponse.json(
         {
           error: "Failed to fetch permits",
@@ -144,13 +154,22 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     }
 
     if (!recentPermits || recentPermits.length === 0) {
-      return NextResponse.json({
+      const emptyResult = {
         success: true,
         zipsScored: 0,
         avgDemandScore: 0,
         hottestZip: null,
         timestamp: new Date().toISOString(),
+      };
+      // Still a real run — no permits in the 30-day window is a valid
+      // outcome, and logging it keeps catchup from re-firing forever.
+      await logCronRun("zip-demand", t0, {
+        pulled: 0,
+        inserted: 0,
+        summary: emptyResult,
+        trigger: detectTrigger(request),
       });
+      return NextResponse.json(emptyResult);
     }
 
     /* Group permits by ZIP */
@@ -322,15 +341,29 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     const avgDemandScore =
       zipsScored > 0 ? Math.round(totalDemand / zipsScored) : 0;
 
-    return NextResponse.json({
+    const result = {
       success: true,
       zipsScored,
       avgDemandScore,
       hottestZip,
       timestamp: new Date().toISOString(),
+    };
+    await logCronRun("zip-demand", t0, {
+      // pulled = permit rows read out of the 30-day window.
+      // inserted = ZIP rows upserted into zip_demand_scores (== zipsScored).
+      pulled: recentPermits.length,
+      inserted: zipsScored,
+      summary: result,
+      trigger: detectTrigger(request),
     });
+    return NextResponse.json(result);
   } catch (error) {
     logger.error("ZIP demand cron error", { error: String(error) });
+    await logCronRun("zip-demand", t0, {
+      status: "error",
+      error: String(error),
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: "Cron job failed" }, { status: 500 });
   }
 }

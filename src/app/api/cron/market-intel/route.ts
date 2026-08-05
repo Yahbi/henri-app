@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 /**
  * /api/cron/market-intel — nightly refresh of `market_intel_zip`.
@@ -26,6 +27,9 @@ async function handler(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Captured AFTER the auth check on purpose: an unauthorized request is
+  // not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
   const started = Date.now();
   const supabase = createAdminClient();
 
@@ -36,12 +40,20 @@ async function handler(request: NextRequest) {
       const zipsRefreshed = Array.isArray(rpc.data) && rpc.data[0]?.zips_refreshed != null
         ? Number(rpc.data[0].zips_refreshed)
         : 0;
-      return NextResponse.json({
+      const result = {
         ok: true,
         zips_refreshed: zipsRefreshed,
         via: "sql_function",
         elapsed_ms: Date.now() - started,
+      };
+      // inserted = ZIP rows refreshed. No upstream fetch on this path, so
+      // `pulled` is omitted rather than duplicated from `inserted`.
+      await logCronRun("market-intel", started, {
+        inserted: zipsRefreshed,
+        summary: result,
+        trigger: detectTrigger(request),
       });
+      return NextResponse.json(result);
     }
 
     // 2) Fallback — aggregate in JS when the function is missing OR
@@ -55,25 +67,35 @@ async function handler(request: NextRequest) {
       logger.warn("market-intel: refresh_market_intel_zip() missing, falling back to JS aggregation");
       try {
         const zipsRefreshed = await refreshInJS(supabase);
-        return NextResponse.json({
+        const result = {
           ok: true,
           zips_refreshed: zipsRefreshed,
           via: "js_fallback",
           elapsed_ms: Date.now() - started,
+        };
+        await logCronRun("market-intel", started, {
+          inserted: zipsRefreshed,
+          summary: result,
+          trigger: detectTrigger(request),
         });
+        return NextResponse.json(result);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "unknown";
         // Table missing too — full migration 00034 is pending.
         if (/Could not find the table.*market_intel_zip/i.test(msg)) {
-          return NextResponse.json(
-            {
-              ok: false,
-              migrationPending: true,
-              message:
-                "Apply migration 00034_market_intel_zip.sql (both the table + refresh_market_intel_zip function need to land).",
-            },
-            { status: 503 },
-          );
+          const pending = {
+            ok: false,
+            migrationPending: true,
+            message:
+              "Apply migration 00034_market_intel_zip.sql (both the table + refresh_market_intel_zip function need to land).",
+          };
+          await logCronRun("market-intel", started, {
+            status: "error",
+            error: "migration 00034 pending (table + function missing)",
+            summary: pending,
+            trigger: detectTrigger(request),
+          });
+          return NextResponse.json(pending, { status: 503 });
         }
         throw err;
       }
@@ -83,15 +105,28 @@ async function handler(request: NextRequest) {
     // — surface migrationPending so the UI can render its clear
     // "apply 00034" banner rather than a generic 500.
     if (/Could not find the table.*market_intel_zip/i.test(rpc.error.message)) {
-      return NextResponse.json(
-        { ok: false, migrationPending: true, message: "Apply migration 00034 (table missing)" },
-        { status: 503 },
-      );
+      const pending = {
+        ok: false,
+        migrationPending: true,
+        message: "Apply migration 00034 (table missing)",
+      };
+      await logCronRun("market-intel", started, {
+        status: "error",
+        error: "migration 00034 pending (table missing)",
+        summary: pending,
+        trigger: detectTrigger(request),
+      });
+      return NextResponse.json(pending, { status: 503 });
     }
     throw new Error(rpc.error.message);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown";
     logger.error("market-intel cron failed", { message: msg });
+    await logCronRun("market-intel", started, {
+      status: "error",
+      error: msg,
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

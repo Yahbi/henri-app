@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 import {
   aggregateBuckets,
   bucketsToPredictions,
@@ -58,8 +59,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = createAdminClient();
+  // t0 is captured AFTER the auth check on purpose: an unauthorized request
+  // is not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
   const t0 = Date.now();
+  try {
+    return await run(request, t0);
+  } catch (err) {
+    // The route has never caught here — rethrow so Next's own error handling
+    // (and the resulting 500) is unchanged. The catch exists purely so the
+    // run leaves an audit row behind instead of looking "never ran".
+    await logCronRun("predictive-refresh", t0, {
+      status: "error",
+      error: String(err),
+      trigger: detectTrigger(request),
+    });
+    throw err;
+  }
+}
+
+async function run(request: NextRequest, t0: number): Promise<NextResponse> {
+  const supabase = createAdminClient();
   const deadline = t0 + 280_000;
 
   let cascadeUpserts = 0;
@@ -323,5 +343,20 @@ export async function GET(request: NextRequest) {
     errors,
   };
   logger.info("predictive-refresh complete", summary);
-  return NextResponse.json({ success: errors.length === 0, summary });
+  const result = { success: errors.length === 0, summary };
+  await logCronRun("predictive-refresh", t0, {
+    // No single "pulled" count is meaningful here — the route reads three
+    // unrelated corpora (address history, leads, permits), so passing one of
+    // them as `pulled` would misrepresent the run. Left null on purpose.
+    // inserted = rows upserted across cascade + storm + anomaly caches.
+    inserted: cascadeUpserts + stormUpserts + anomalyUpserts,
+    summary: result,
+    trigger: detectTrigger(request),
+    // The route returns HTTP 200 with `success:false` when a step failed.
+    // Mirror that honestly rather than reporting a green tick over a
+    // half-completed refresh.
+    status: errors.length > 0 ? "partial" : "ok",
+    error: errors.length > 0 ? errors.join(" | ") : null,
+  });
+  return NextResponse.json(result);
 }

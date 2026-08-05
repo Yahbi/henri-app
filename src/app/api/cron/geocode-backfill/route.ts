@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 
 export const runtime = "nodejs";
 // 5 min budget; Nominatim rate-limit means we can only do ~250 rows per run
@@ -68,65 +69,94 @@ export async function GET(request: NextRequest) {
   // 250 rows / 1.1s per request ≈ 275s, under our 300s budget. Leaves ~25s
   // for Supabase round-trips and cleanup.
   const BATCH = 250;
+  // Captured AFTER the auth check on purpose: an unauthorized request is
+  // not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
   const t0 = Date.now();
 
-  const { data: rows, error } = await supabase
-    .from("permits")
-    .select("id, address, zip, state")
-    .is("latitude", null)
-    .not("address", "is", null)
-    .limit(BATCH);
+  try {
+    const { data: rows, error } = await supabase
+      .from("permits")
+      .select("id, address, zip, state")
+      .is("latitude", null)
+      .not("address", "is", null)
+      .limit(BATCH);
 
-  if (error) {
-    logger.error("Geocode backfill scan error", { error: error.message });
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  let filled = 0;
-  let missed = 0;
-  let cascadedLeads = 0;
-
-  for (const r of rows ?? []) {
-    const hit = await geocodeOne(
-      r.address as string,
-      r.zip as string | null,
-      r.state as string | null,
-    );
-    if (hit) {
-      const { error: upErr } = await supabase
-        .from("permits")
-        .update({ latitude: hit.lat, longitude: hit.lng })
-        .eq("id", r.id);
-      if (!upErr) {
-        filled++;
-        // Cascade to any existing leads for this permit so the dashboard
-        // map picks them up on the next fetch.
-        const { data: updated, error: leadErr } = await supabase
-          .from("leads")
-          .update({ latitude: hit.lat, longitude: hit.lng })
-          .eq("permit_id", r.id)
-          .select("id");
-        if (!leadErr && updated) cascadedLeads += updated.length;
-      }
-    } else {
-      missed++;
+    if (error) {
+      logger.error("Geocode backfill scan error", { error: error.message });
+      await logCronRun("geocode-backfill", t0, {
+        status: "error",
+        error: error.message,
+        trigger: detectTrigger(request),
+      });
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Nominatim policy: ≥1 second between requests from one IP.
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    let filled = 0;
+    let missed = 0;
+    let cascadedLeads = 0;
 
-    // Safety valve: bail early if we're approaching the function timeout.
-    if (Date.now() - t0 > 280_000) break;
+    for (const r of rows ?? []) {
+      const hit = await geocodeOne(
+        r.address as string,
+        r.zip as string | null,
+        r.state as string | null,
+      );
+      if (hit) {
+        const { error: upErr } = await supabase
+          .from("permits")
+          .update({ latitude: hit.lat, longitude: hit.lng })
+          .eq("id", r.id);
+        if (!upErr) {
+          filled++;
+          // Cascade to any existing leads for this permit so the dashboard
+          // map picks them up on the next fetch.
+          const { data: updated, error: leadErr } = await supabase
+            .from("leads")
+            .update({ latitude: hit.lat, longitude: hit.lng })
+            .eq("permit_id", r.id)
+            .select("id");
+          if (!leadErr && updated) cascadedLeads += updated.length;
+        }
+      } else {
+        missed++;
+      }
+
+      // Nominatim policy: ≥1 second between requests from one IP.
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+
+      // Safety valve: bail early if we're approaching the function timeout.
+      if (Date.now() - t0 > 280_000) break;
+    }
+
+    const result = {
+      success: true,
+      summary: {
+        scanned: rows?.length ?? 0,
+        filled,
+        missed,
+        cascadedLeads,
+        elapsedMs: Date.now() - t0,
+      },
+    };
+    await logCronRun("geocode-backfill", t0, {
+      // pulled = un-geocoded permits scanned this run.
+      // inserted = permits that got real coordinates written back.
+      pulled: rows?.length ?? 0,
+      inserted: filled,
+      summary: result,
+      trigger: detectTrigger(request),
+    });
+    return NextResponse.json(result);
+  } catch (err) {
+    // The route has never caught here — rethrow so Next's own error
+    // handling (and the resulting 500) is unchanged. The catch exists
+    // purely so the run leaves an audit row behind.
+    await logCronRun("geocode-backfill", t0, {
+      status: "error",
+      error: String(err),
+      trigger: detectTrigger(request),
+    });
+    throw err;
   }
-
-  return NextResponse.json({
-    success: true,
-    summary: {
-      scanned: rows?.length ?? 0,
-      filled,
-      missed,
-      cascadedLeads,
-      elapsedMs: Date.now() - t0,
-    },
-  });
 }

@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
+import { logCronRun, detectTrigger } from "@/lib/admin/cron-log";
 import {
   generateWeeklyBriefing,
   type WeeklyBriefingInput,
@@ -44,8 +45,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = createAdminClient();
+  // t0 is captured AFTER the auth check on purpose: an unauthorized request
+  // is not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
   const t0 = Date.now();
+  try {
+    return await run(request, t0);
+  } catch (err) {
+    // The route has never caught here — rethrow so Next's own error handling
+    // (and the resulting 500) is unchanged. The catch exists purely so the
+    // run leaves an audit row behind instead of looking "never ran".
+    await logCronRun("weekly-briefing", t0, {
+      status: "error",
+      error: String(err),
+      trigger: detectTrigger(request),
+    });
+    throw err;
+  }
+}
+
+async function run(request: NextRequest, t0: number): Promise<NextResponse> {
+  const supabase = createAdminClient();
   const deadline = t0 + 280_000;
   const periodStart = isoWeekStart(new Date());
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -67,6 +87,11 @@ export async function GET(request: NextRequest) {
     .limit(1000);
   if (cErr) {
     logger.error("weekly-briefing: profiles fetch failed", { error: cErr.message });
+    await logCronRun("weekly-briefing", t0, {
+      status: "error",
+      error: cErr.message,
+      trigger: detectTrigger(request),
+    });
     return NextResponse.json({ error: "Profiles fetch failed" }, { status: 500 });
   }
 
@@ -250,5 +275,19 @@ export async function GET(request: NextRequest) {
     errors: errors.slice(0, 20), // Cap to avoid log bloat
   };
   logger.info("weekly-briefing complete", summary);
-  return NextResponse.json({ success: errors_count === 0, summary });
+  const result = { success: errors_count === 0, summary };
+  await logCronRun("weekly-briefing", t0, {
+    // pulled = contractors considered this run.
+    // inserted = weekly_briefings rows written (skips + failures excluded).
+    pulled: contractorIds.length,
+    inserted,
+    summary: result,
+    trigger: detectTrigger(request),
+    // The route returns HTTP 200 with `success:false` when some contractors
+    // failed. Mirror that honestly rather than reporting a green tick over a
+    // partially-generated batch.
+    status: errors_count > 0 ? "partial" : "ok",
+    error: errors_count > 0 ? errors.slice(0, 20).join(" | ") : null,
+  });
+  return NextResponse.json(result);
 }

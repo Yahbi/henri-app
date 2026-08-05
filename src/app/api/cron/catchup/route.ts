@@ -57,16 +57,19 @@ export const maxDuration = 300;
 //   digest, weekly-digest — SEND EMAIL and have no send-dedupe of their own.
 //                           Catchup's only dedupe is the cron_runs cadence
 //                           check, so a logging failure between "email sent"
-//                           and "run logged" would re-send. Needs a real
-//                           per-recipient sent-marker first.
-//   follow-ups, review-requests, blast-worker
-//                         — also send, but do carry their own dedupe. They
-//                           are safe to add ONCE they log to cron_runs;
-//                           until then catchup cannot see them and would
-//                           re-fire every pass. Add after that lands.
-//   license-check, engagement, permits, weekly-briefing
-//                         — no email, but same cron_runs blindness. Add once
-//                           they log.
+//                           and "run logged" would re-send. That is not
+//                           hypothetical on this instance: the database has
+//                           been unreachable several times today, and
+//                           logCronRun is best-effort by design and swallows
+//                           its own failures. Needs a per-recipient
+//                           sent-marker before it can be enrolled.
+//   permits               — SUPERSEDED. It is the previous-generation
+//                           ingester, walking the hardcoded 25-entry
+//                           PERMIT_SOURCES array; `scrape` walks the
+//                           DB-driven permit_sources registry (~12k rows)
+//                           and is already tracked above. Running both
+//                           writes the same table twice for no new coverage.
+//                           Delete it once `scrape` has a few clean runs.
 const CADENCE_H: Record<string, number> = {
   // permit ingest — the core pipeline
   scrape: 12,
@@ -95,6 +98,17 @@ const CADENCE_H: Record<string, number> = {
   // Retention. cron_runs grows unbounded otherwise, and it is the table
   // catchup itself reads on every pass.
   "cron-runs-cleanup": 168,
+  // Contractor-facing work. Each of these DOES have side effects, which is
+  // why they were originally excluded — but "excluded from catchup" turned
+  // out to mean "never runs at all", which is worse than running on a
+  // cadence. Each one below carries its OWN send/dedupe guard in addition to
+  // catchup's cron_runs cadence check, so a double-fire cannot double-send.
+  "follow-ups": 24,
+  "review-requests": 24,
+  "blast-worker": 24,
+  engagement: 24,
+  "license-check": 24,
+  "weekly-briefing": 168,
   // daily sidecar ingest
   "openfema-ia": 24,
   "openfema-nfip": 24,

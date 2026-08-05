@@ -139,7 +139,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
     if (contractorZips.size === 0) {
       logger.info("synthesize-pre-intent.no_contractors");
-      await logCronRun("api/cron/synthesize-pre-intent", startedAt, {
+      await logCronRun("synthesize-pre-intent", startedAt, {
         status: "ok",
         trigger: detectTrigger(request),
         inserted: summary.leads_inserted,
@@ -333,7 +333,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
       });
     }
 
-    await logCronRun("api/cron/synthesize-pre-intent", startedAt, {
+    await logCronRun("synthesize-pre-intent", startedAt, {
       status: "ok",
       trigger: detectTrigger(request),
       inserted: summary.leads_inserted,
@@ -345,7 +345,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     logger.error("synthesize-pre-intent.fatal", {
       error: err instanceof Error ? err.message : String(err),
     });
-    await logCronRun("api/cron/synthesize-pre-intent", startedAt, {
+    await logCronRun("synthesize-pre-intent", startedAt, {
       status: "error",
       trigger: detectTrigger(request),
       summary,

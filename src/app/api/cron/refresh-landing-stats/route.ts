@@ -286,7 +286,7 @@ export async function GET(request: Request) {
       duration_ms: durationMs,
     };
 
-    await logCronRun("/api/cron/refresh-landing-stats", startedAt, {
+    await logCronRun("refresh-landing-stats", startedAt, {
       status: "ok",
       pulled: permitsTotal,
       inserted: 1,
@@ -297,7 +297,7 @@ export async function GET(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error("refresh-landing-stats.failed", { error: message });
-    await logCronRun("/api/cron/refresh-landing-stats", startedAt, {
+    await logCronRun("refresh-landing-stats", startedAt, {
       status: "error",
       error: message,
     });
