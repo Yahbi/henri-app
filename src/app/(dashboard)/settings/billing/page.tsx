@@ -414,15 +414,24 @@ export default function BillingPage() {
        * fees" claim; this footer reminds contractors of the cancel
        * policy at the moment lock-in anxiety actually bites.
        *
-       * Policy (mirrors Stripe `cancel_at_period_end: true` semantics):
-       *   1. Cancel anytime from this page.
-       *   2. Account stays active through the end of the current
-       *      billing cycle. No partial-cycle deletion.
-       *   3. After the cycle ends, the subscription terminates — no
-       *      next charge, no auto-renewal — and account data is
-       *      removed from active systems prior to what would have
-       *      been the next billing date.
-       *   4. No refunds (digital product per Terms).
+       * 2026-08-06 truthfulness pass. Two claims here described code that
+       * does not exist:
+       *
+       *   • "Cancel anytime from this page." There is no in-app cancel
+       *     endpoint — the only cancellation path in the repo is the Stripe
+       *     billing portal, opened by the Manage Billing button above via
+       *     POST /api/billing/portal. Restated to name that path.
+       *   • "account data is removed from active systems prior to the next
+       *     billing date." No deletion code exists anywhere in the repo, and
+       *     the webhook that handles cancellation explicitly does not delete
+       *     data (it sets plan = "free", clears the subscription pointer and
+       *     releases territories). Removed rather than reworded into a
+       *     softer version of the same false promise. Both are
+       *     Terms-adjacent, so they must not overstate.
+       *
+       * What IS true and stays: cancelling in the portal ends the
+       * subscription at the period boundary (Stripe's own
+       * cancel_at_period_end behaviour), no refunds, and JSON export.
        *
        * The earlier "Export your leads as JSON" line was removed
        * 2026-04-27 because the export route did not exist; restored
@@ -432,9 +441,10 @@ export default function BillingPage() {
       <div className="mt-10 border-t border-border pt-6 text-sm text-muted-foreground space-y-1.5">
         <p className="text-foreground font-medium">No lock-in, ever.</p>
         <p>
-          Cancel anytime from this page. Your account stays active through the
-          end of your current billing cycle &mdash; no further charges occur after
-          cancellation, and no auto-renewal kicks in.
+          Cancel anytime &mdash; use <span className="text-foreground">Manage Billing</span>{" "}
+          above to open the Stripe billing portal and cancel there. Your account
+          stays active through the end of your current billing cycle, and no
+          further charges occur after cancellation.
         </p>
         <p>
           Flat monthly pricing. No per-lead fees, no annual contracts, no
@@ -452,8 +462,9 @@ export default function BillingPage() {
           .
         </p>
         <p>
-          After cancellation, your account data is removed from active systems
-          prior to the next billing date. No refunds for digital products (per our Terms).
+          After cancellation your plan reverts to free and your ZIP territories
+          are released so other contractors can claim them. No refunds for
+          digital products (per our Terms).
         </p>
       </div>
     </div>

@@ -7,8 +7,16 @@
  * stage — with the chip, reasons, and action buttons in place. Mirrors
  * the exact JSX used in src/components/dashboard/LeadDetailDrawer.tsx.
  *
- * NEVER deploys to production: the route lives under /dev/* which proxy.ts
- * rejects on Vercel. Local-only viewer.
+ * Not reachable in production: src/middleware.ts returns a bare 404 for
+ * `/dev` and any `/dev/*` path when NODE_ENV === "production", before any
+ * rendering happens. Local dev is unaffected — the same branch calls
+ * NextResponse.next().
+ *
+ * This comment used to cite `proxy.ts` as the guard. There is no src/proxy.ts
+ * in this repo and nothing had replaced it, so for a period this page served
+ * HTTP 200 on meethenri.com with `robots: index, follow`. Middleware is the
+ * real mechanism now; if that branch is ever removed, this page is public
+ * again.
  */
 import { IntentChip, IntentChipReasonsList } from "@/components/dashboard/IntentChip";
 

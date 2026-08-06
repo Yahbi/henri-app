@@ -73,7 +73,11 @@ describe("env validation", () => {
   });
 
   describe("getEnv in production", () => {
-    it("throws when required env var is missing", async () => {
+    /* getEnv() returns getters, so validation happens on PROPERTY ACCESS,
+     * not on the call. That is the fix for the production crash: reading
+     * `appUrl` must not require Twilio. These tests therefore assert on the
+     * access, not on getEnv() itself. */
+    it("throws when a required env var is read and is missing", async () => {
       // `@types/node` ≥ 20 makes `process.env.NODE_ENV` read-only in TS —
       // assigning to it produces TS2540. vitest's `vi.stubEnv()` uses
       // Object.defineProperty under the hood, which the TS types accept
@@ -81,10 +85,32 @@ describe("env validation", () => {
       // also auto-resets between tests when afterEach triggers the
       // restore path (we reassign process.env anyway, so no extra cleanup).
       vi.stubEnv("NODE_ENV", "production");
-      // Clear all env vars that getEnv() needs
       delete process.env.NEXT_PUBLIC_SUPABASE_URL;
       const { getEnv } = await import("../env");
-      expect(() => getEnv()).toThrow("Required environment variable missing");
+      expect(() => getEnv().supabaseUrl).toThrow("Required environment variable missing");
+    });
+
+    it("does not throw for unset optional integrations (Twilio/Resend/OpenAI/Mapbox)", async () => {
+      /* Regression pin: Twilio is unprovisioned in production. When these
+       * were `requireEnv`, merely calling getEnv() threw there and took
+       * every Stripe path down with it. */
+      vi.stubEnv("NODE_ENV", "production");
+      process.env.NEXT_PUBLIC_APP_URL = "https://meethenri.com";
+      delete process.env.TWILIO_ACCOUNT_SID;
+      delete process.env.TWILIO_AUTH_TOKEN;
+      delete process.env.TWILIO_FROM_NUMBER;
+      delete process.env.RESEND_API_KEY;
+      delete process.env.OPENAI_API_KEY;
+      delete process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+
+      const { getEnv } = await import("../env");
+      const env = getEnv();
+      expect(env.twilioAccountSid).toBe("");
+      expect(env.resendApiKey).toBe("");
+      expect(env.openaiApiKey).toBe("");
+      expect(env.mapboxPublicToken).toBe("");
+      // Reading a required var next to them still works.
+      expect(env.appUrl).toBe("https://meethenri.com");
     });
 
     it("throws when CRON_SECRET is an insecure default", async () => {
@@ -109,7 +135,7 @@ describe("env validation", () => {
       process.env.CRON_SECRET = "dev_cron_secret_change_in_production";
 
       const { getEnv } = await import("../env");
-      expect(() => getEnv()).toThrow("insecure default");
+      expect(() => getEnv().cronSecret).toThrow("insecure default");
     });
   });
 

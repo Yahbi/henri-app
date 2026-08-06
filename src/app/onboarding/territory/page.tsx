@@ -15,7 +15,10 @@ import { PLAN_ZIP_LIMITS } from "@/lib/plans/constants";
  * Sourced from the shared constant so this page can't drift from
  * pricing / settings / the claim_territory cap (migration 00088).
  * The local copy that used to live here duplicated all four tiers.
- * `free` isn't a paid tier and has no constant — 1 ZIP locally. */
+ * The shared constant caps `free` at 0 (an unpaid account owns no
+ * territory); this step keeps a local 1 so the picker renders a single
+ * selectable slot while the contractor is mid-checkout. The server is the
+ * authority either way — /api/territories 402s without a subscription. */
 const PLAN_LIMITS: Record<string, number> = {
   ...PLAN_ZIP_LIMITS,
   free: 1,
@@ -534,16 +537,17 @@ export default function TerritoryPage() {
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               Choose up to <span className="font-semibold text-primary">{maxZips} ZIP codes</span> in your service area.
-              {/* Copy corrected 2026-08-04. This read "Each ZIP is exclusive
-                  to one contractor per trade", which the backend does not
-                  implement: get_zip_availability / claim_territory expose
-                  slots_total = 3 per ZIP and never consider trade at all
-                  (supabase/migrations/00008_ziplock_rpc.sql). Exclusivity in
-                  Henri is enforced per PERMIT (the wedge lock), not per ZIP.
-                  Restated to what the code actually guarantees — the
-                  product question of which model is intended is flagged in
-                  the audit report, not decided here. */}
-              {" "}Each ZIP has a limited number of contractor slots, and every
+              {/* Restored 2026-08-06, and now backed by code.
+                  This claim was stripped on 2026-08-04 because the backend
+                  did not implement it: claim_territory allocated 3 slots per
+                  ZIP and never read `trade`. Migration 00135 changed the
+                  backend to match the promise — territories.trade is frozen
+                  at claim time and a partial unique index on (zip, trade)
+                  WHERE status='active' enforces it, with claim_territory
+                  raising `zip_taken_for_trade` before the index is reached.
+                  00137 made get_zip_availability answer per trade too, so
+                  what this sentence says is what the claim will do. */}
+              {" "}Each ZIP is exclusive to one contractor per trade — and every
               permit inside it is locked to one contractor at a time.
             </p>
           </div>

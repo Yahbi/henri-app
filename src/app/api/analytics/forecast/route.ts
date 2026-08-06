@@ -2,14 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireContractor } from "@/lib/auth/requireContractor";
 import { logger } from "@/lib/logger";
+import { PLAN_TIERS, findPlanTier } from "@/lib/plans/tiers";
 
-/* Plan prices in dollars per month (source of truth: CLAUDE.md) */
-const PLAN_PRICES: Record<string, number> = {
-  founder: 149,
-  starter: 749,
-  pro: 1499,
-  enterprise: 2555,
-};
+/* Plan price in dollars per month. Sourced from the tier table
+ * (src/lib/plans/tiers.ts) rather than a local copy — this route held the
+ * fourth independent copy of the four prices, and the forecast it returns is
+ * rendered on the same page as the client-computed Cost-per-Win, so a drift
+ * between the two copies would show a contractor two different subscription
+ * costs on one screen.
+ *
+ * Unrecognised / unsubscribed plans fall back to Starter, preserving the
+ * previous behaviour of this route. */
+const FALLBACK_TIER = PLAN_TIERS.find((t) => t.slug === "starter")!;
 
 /* Win probability weights by lead status. `new` is deliberately 0 so it
  * does NOT count toward Pipeline Value — "new" is where every scored
@@ -71,7 +75,9 @@ export async function GET(_request: NextRequest) {
       .eq("id", user.id)
       .single();
 
-    const planPrice = PLAN_PRICES[(profile?.plan as string) ?? "starter"] ?? 749;
+    const planPrice =
+      findPlanTier(profile?.plan as string | null | undefined)?.priceNum ??
+      FALLBACK_TIER.priceNum;
 
     /* Fetch all leads for this contractor */
     const { data: leads, error: leadsError } = await supabase

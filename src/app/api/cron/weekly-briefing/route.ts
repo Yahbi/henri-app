@@ -76,6 +76,48 @@ async function run(request: NextRequest, t0: number): Promise<NextResponse> {
   let errors_count = 0;
   const errors: string[] = [];
 
+  /* ── Step 0: is the LLM even reachable? ────────────────────────────────
+   *
+   * Every briefing goes through `runAgent`, which returns errorCode
+   * "llm_error" when `ANTHROPIC_API_KEY` is unset — the same code it returns
+   * for a genuine Anthropic outage. That is what the live `llm_error` in
+   * cron_runs was: not a transient API problem but an unprovisioned key,
+   * reported once per contractor with the actual reason ("ANTHROPIC_API_KEY
+   * not set") discarded because only `errorCode` was recorded.
+   *
+   * Checking the key here costs nothing and separates the two cases. An
+   * unset key is a provisioning fact, so the run says so once and stops,
+   * rather than manufacturing one identical failure per contractor and
+   * spending the 280s budget on aggregate queries whose results cannot be
+   * used. It is `partial`, not `ok` — no briefing was written.
+   */
+  if (!process.env.ANTHROPIC_API_KEY) {
+    const reason =
+      "ANTHROPIC_API_KEY not set — no briefings generated. Set it in the Vercel env to enable this cron.";
+    logger.warn("weekly-briefing: skipped, LLM unconfigured");
+    await logCronRun("weekly-briefing", t0, {
+      status: "partial",
+      pulled: 0,
+      inserted: 0,
+      error: reason,
+      summary: { skipped: "llm_unconfigured", period_start: periodStart },
+      trigger: detectTrigger(request),
+    });
+    return NextResponse.json({ success: false, skipped: "llm_unconfigured", reason });
+  }
+
+  /* Consecutive LLM failures before the run gives up.
+   *
+   * With a key present, an "llm_error" is an Anthropic-side problem — rate
+   * limit, overload, revoked key — and it applies to every remaining
+   * contractor equally. Grinding through the rest produces N copies of one
+   * fact and burns the token budget's worth of aggregate queries for
+   * nothing. Three in a row is enough to call it systemic. Per-contractor
+   * failures of any OTHER kind do not trip this and never stop the run. */
+  const MAX_CONSECUTIVE_LLM_ERRORS = 3;
+  let consecutiveLlmErrors = 0;
+  let llmAborted = false;
+
   /* ── Step 1: Pull active contractors. "Active" = has at least one lead
    * in the last 30 days, OR a profiles.role='contractor' marker. We use
    * the role check as the primary filter and let the briefing itself say
@@ -231,9 +273,29 @@ async function run(request: NextRequest, t0: number): Promise<NextResponse> {
       const result = await generateWeeklyBriefing(supabase, input);
       if (!result.ok || !result.output) {
         errors_count++;
-        errors.push(`${contractorId.slice(0, 8)}: ${result.errorCode ?? "no_output"}`);
+        // Record errorMessage as well as errorCode. "llm_error" alone cannot
+        // distinguish an unset key from a 429 from a 529, which is precisely
+        // the ambiguity that made the live failure unreadable.
+        const detail = result.errorMessage
+          ? `${result.errorCode ?? "no_output"}: ${result.errorMessage}`
+          : (result.errorCode ?? "no_output");
+        errors.push(`${contractorId.slice(0, 8)}: ${detail}`);
+        if (result.errorCode === "llm_error") {
+          consecutiveLlmErrors++;
+          if (consecutiveLlmErrors >= MAX_CONSECUTIVE_LLM_ERRORS) {
+            llmAborted = true;
+            logger.warn("weekly-briefing: aborting, LLM failing systemically", {
+              consecutive: consecutiveLlmErrors,
+              lastError: result.errorMessage,
+            });
+            break;
+          }
+        } else {
+          consecutiveLlmErrors = 0;
+        }
         continue;
       }
+      consecutiveLlmErrors = 0;
 
       const { error: insErr } = await supabase
         .from("weekly_briefings")
@@ -273,6 +335,8 @@ async function run(request: NextRequest, t0: number): Promise<NextResponse> {
     skipped_quiet,
     errors_count,
     errors: errors.slice(0, 20), // Cap to avoid log bloat
+    /** True when the run stopped early because the LLM kept failing. */
+    llm_aborted: llmAborted,
   };
   logger.info("weekly-briefing complete", summary);
   const result = { success: errors_count === 0, summary };

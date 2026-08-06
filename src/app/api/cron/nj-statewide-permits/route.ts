@@ -197,11 +197,31 @@ async function arcgisQueryPost(
   return res.json();
 }
 
-/** Resolve PAMS_PIN -> { address, city } via the statewide parcel layer. */
+/**
+ * Resolve PAMS_PIN -> { address, city, zip } via the statewide parcel layer.
+ *
+ * ZIP_CODE was added to this lookup on 2026-08-06 and it is the single
+ * highest-value field in the file. The DCA permit feed has 42 columns and not
+ * one of them is a ZIP (verified against the live endpoint), so every NJ
+ * permit was being written with `zip = NULL` — and a permit with no ZIP can
+ * never become a lead, because api/cron/score drops it. NJ held 2.7M permits
+ * upstream and **122 rows with a ZIP** in Henri.
+ *
+ * The parcel layer already had it: ZIP_CODE is populated on 3,072,910 of
+ * 3,478,727 parcels (88.3%), and this function was already querying that
+ * exact layer for PROP_LOC. One extra name in `outFields` costs no additional
+ * request — it was simply never asked for.
+ *
+ * ZIP5 is byte-identical on the same 3,072,910 rows; ZIP_CODE is used because
+ * it is the layer's documented primary.
+ */
 async function lookupAddresses(
   pins: string[],
-): Promise<Map<string, { address: string; city: string | null }>> {
-  const out = new Map<string, { address: string; city: string | null }>();
+): Promise<Map<string, { address: string; city: string | null; zip: string | null }>> {
+  const out = new Map<
+    string,
+    { address: string; city: string | null; zip: string | null }
+  >();
   for (let i = 0; i < pins.length; i += PARCEL_CHUNK) {
     const chunk = pins.slice(i, i + PARCEL_CHUNK);
     // PAMS_PIN is text; quote each value. Values are digits/underscores only
@@ -211,7 +231,7 @@ async function lookupAddresses(
       const j = (await arcgisQueryPost(
         {
           where: `PAMS_PIN IN (${inList})`,
-          outFields: "PAMS_PIN,PROP_LOC,MUN_NAME",
+          outFields: "PAMS_PIN,PROP_LOC,MUN_NAME,ZIP_CODE",
           returnGeometry: "false",
           resultRecordCount: String(PARCEL_CHUNK * 4),
           f: "json",
@@ -227,7 +247,14 @@ async function lookupAddresses(
         if (!pin || !loc) continue;
         if (!out.has(pin)) {
           const mun = String(a.MUN_NAME ?? "").trim();
-          out.set(pin, { address: loc, city: mun || null });
+          // Take the leading 5 digits only. The layer stores a clean 5-digit
+          // ZIP on the rows that have one, but ZIP_PLUS4 exists separately and
+          // a few rows carry the hyphenated form; `permits.zip` is the 5-digit
+          // key territories are matched on, so anything longer would silently
+          // fail every territory comparison.
+          const zipRaw = String(a.ZIP_CODE ?? "").trim();
+          const zip = /^(\d{5})/.exec(zipRaw)?.[1] ?? null;
+          out.set(pin, { address: loc, city: mun || null, zip });
         }
       }
     } catch (err) {
@@ -330,6 +357,14 @@ async function handler(request: NextRequest): Promise<NextResponse> {
               [r.permittypedesc, r.usegroupdesc].filter(Boolean).join(" — ") || null,
             address: hit?.address ?? null,
             city: hit?.city ?? r.muniname ?? null,
+            // Omitted entirely rather than sent as null when the parcel has
+            // no ZIP. The upsert uses merge-duplicates, which writes every
+            // key it is given — so an explicit `zip: null` on a re-run would
+            // ERASE a ZIP that census-geocode had since resolved. An absent
+            // key leaves the stored value untouched. (Migration 00131's
+            // preserve-zip trigger also guards this, but the payload should
+            // be correct on its own rather than relying on the backstop.)
+            ...(hit?.zip ? { zip: hit.zip } : {}),
             state: "NJ",
             estimated_value: toInt(r.constcost),
             applied_date: isoDate(r.permitdate),

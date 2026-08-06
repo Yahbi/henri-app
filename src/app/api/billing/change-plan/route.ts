@@ -130,10 +130,11 @@ export async function POST(req: NextRequest) {
        * A two-phase Subscription Schedule keeps the current price live
        * through `periodEndUnix` and only then moves to the new one, so the
        * webhook keeps resolving the current tier until the boundary. */
-      const schedule = await stripe.subscriptionSchedules.create({
-        from_subscription: activeSub.id,
-      });
-
+      /* Resolved BEFORE the schedule is created (2026-08-06). This check
+       * used to sit after `subscriptionSchedules.create`, so a subscription
+       * item with no price returned 500 while leaving a freshly-created
+       * schedule attached to the live subscription. It needs nothing from
+       * the schedule, so it belongs here. */
       const currentPriceId = firstItem.price?.id;
       if (!currentPriceId) {
         return NextResponse.json(
@@ -142,22 +143,51 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      await stripe.subscriptionSchedules.update(schedule.id, {
-        end_behavior: "release",
-        phases: [
-          {
-            items: [{ price: currentPriceId, quantity: 1 }],
-            start_date: schedule.phases[0]?.start_date,
-            end_date: periodEndUnix,
-            proration_behavior: "none",
-          },
-          {
-            items: [{ price: PLAN_PRICES[plan], quantity: 1 }],
-            start_date: periodEndUnix,
-            proration_behavior: "none",
-          },
-        ],
+      const schedule = await stripe.subscriptionSchedules.create({
+        from_subscription: activeSub.id,
       });
+
+      /* From here on the schedule MANAGES the subscription. If the phase
+       * rewrite below fails and we just return, the schedule stays attached
+       * holding only the single phase Stripe imported — and Stripe rejects
+       * direct `subscriptions.update` calls on a schedule-managed
+       * subscription, so this route's own upgrade branch would 500 for that
+       * contractor from then on. Releasing hands billing control back to the
+       * subscription with nothing changed. */
+      try {
+        await stripe.subscriptionSchedules.update(schedule.id, {
+          end_behavior: "release",
+          phases: [
+            {
+              items: [{ price: currentPriceId, quantity: 1 }],
+              start_date: schedule.phases[0]?.start_date,
+              end_date: periodEndUnix,
+              proration_behavior: "none",
+            },
+            {
+              items: [{ price: PLAN_PRICES[plan], quantity: 1 }],
+              start_date: periodEndUnix,
+              proration_behavior: "none",
+            },
+          ],
+        });
+      } catch (scheduleErr) {
+        await stripe.subscriptionSchedules
+          .release(schedule.id)
+          .catch((releaseErr: unknown) => {
+            logApiError("billing.changePlan.scheduleRelease", releaseErr, {
+              scheduleId: schedule.id,
+            });
+          });
+        logApiError("billing.changePlan.scheduleUpdate", scheduleErr, {
+          plan,
+          scheduleId: schedule.id,
+        });
+        return NextResponse.json(
+          { error: "Could not schedule the plan change — your current plan is unchanged." },
+          { status: 500 },
+        );
+      }
 
       /* Service-role, same reasoning as the upgrade write below. These two
        * columns are not locked by 00117 today, but that migration's own

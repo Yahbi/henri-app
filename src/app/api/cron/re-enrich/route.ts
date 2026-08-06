@@ -81,8 +81,32 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = createAdminClient();
+  // t0 is captured AFTER the auth check on purpose: an unauthorized request
+  // is not a run, and logging it would reset catchup's staleness clock for
+  // this cron without any work having happened.
   const t0 = Date.now();
+  try {
+    return await run(request, t0);
+  } catch (err) {
+    // logCronRun was previously reachable only on the final success return,
+    // so anything that threw first — `getPriorityZipSets`,
+    // `loadQuotaRemaining`, `recordSpend`, or the orchestrator import path —
+    // left NO row in cron_runs at all. That makes "failed" and "never fired"
+    // the same observation, and catchup then treats the cron as infinitely
+    // stale and re-fires it every pass. Rethrow so Next's own error handling
+    // and the resulting 500 are unchanged; the catch exists purely to leave
+    // an audit row behind.
+    await logCronRun("re-enrich", t0, {
+      status: "error",
+      error: err instanceof Error ? err.message : String(err),
+      trigger: detectTrigger(request),
+    });
+    throw err;
+  }
+}
+
+async function run(request: NextRequest, t0: number): Promise<NextResponse> {
+  const supabase = createAdminClient();
 
   // Territory-scoped tier-gating + per-source budgets (WS2). Free in-DB
   // sources run for every lead; keyed/quota sources only fire on paid /

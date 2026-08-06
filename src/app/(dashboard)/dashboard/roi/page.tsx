@@ -10,14 +10,17 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { TrendingUp, TrendingDown, MapPin, Zap, BarChart3, Loader2 } from "lucide-react";
 import { formatCurrency } from "@/types/lead";
+import { PLAN_TIERS, findPlanTier } from "@/lib/plans/tiers";
 
-/* ─── Plan prices ─── */
-const PLAN_PRICES: Record<string, number> = {
-  founder: 149,
-  starter: 749,
-  pro: 1499,
-  enterprise: 2555,
-};
+/* ─── Plan price ───
+ * Seeds the ROI calculator and the per-source CPL figures. Sourced from the
+ * tier table so a price change lands in one place: this page used to carry
+ * its own copy of all four prices, which is how a stale number silently
+ * lies inside an ROI multiple.
+ *
+ * Unrecognised / unsubscribed plans fall back to Starter — `findPlanTier`
+ * returns undefined for null / "free" / anything off the tier list. */
+const FALLBACK_TIER = PLAN_TIERS.find((t) => t.slug === "starter")!;
 
 /* ─── Source colors ─── */
 const SOURCE_COLORS = [
@@ -62,7 +65,7 @@ export default function ROIPage() {
   const { data: intel, isLoading: intelLoading, error: intelError } = useIntelligence();
   const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
 
-  const planPrice = profile?.plan ? (PLAN_PRICES[profile.plan] ?? 749) : 749;
+  const planPrice = findPlanTier(profile?.plan)?.priceNum ?? FALLBACK_TIER.priceNum;
   const leadCount = useLeadCount();
 
   const [tab, setTab] = useState<"calculator" | "intelligence" | "territory">("intelligence");

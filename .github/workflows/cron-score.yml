@@ -31,8 +31,26 @@ on:
   # the backend is unhealthy, so a run during an outage costs ~25 seconds
   # instead of half an hour. That is strictly better than pausing, which
   # needs a human to remember to switch it back on; this resumes by itself.
+  # :05 / :25 / :45 rather than :00 / :20 / :40.
+  #
+  # Two reasons, both measured against cron_runs 2026-08-04..06.
+  #
+  # DE-STACKING. cron-fleet.yml fires at :00 and :30 and can have a dozen
+  # endpoints due in one slot. Starting the score drain on the same minute put
+  # both schedulers' heaviest bursts on the same Supabase instance at once,
+  # and the 13 score failures in that window were all
+  # `canceling statement due to statement timeout`. A five-minute offset does
+  # not make the two disjoint — the drain loop below runs for minutes, so some
+  # overlap is unavoidable while both exist — but it does stop them STARTING
+  # together, which is when each is at its most expensive.
+  #
+  # NO QUEUEING. The old pairing was a 22-minute drain on a 20-minute
+  # schedule, so a run was frequently still going when the next one arrived.
+  # That run went pending, and the arrival after it cancelled the pending one
+  # — reported as a run-level failure with zero steps executed. The drain
+  # budget below is now sized so a run always finishes inside its own slot.
   schedule:
-    - cron: "*/20 * * * *"
+    - cron: "5,25,45 * * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -42,7 +60,12 @@ concurrency:
 jobs:
   score:
     runs-on: ubuntu-latest
-    timeout-minutes: 28
+    # Under the 20-minute schedule interval on purpose. Worst case inside the
+    # step is health probe (25s) + drain budget (720s) + one final in-flight
+    # batch (290s) = ~17.3 min, so this ceiling is a backstop that should
+    # never fire rather than the thing that ends a run — a timed-out job is
+    # itself reported as a failure.
+    timeout-minutes: 19
     steps:
       # Drain loop (2026-06-10): GitHub throttles scheduled workflows hard
       # on this repo (observed 2-6 fires/day despite */20), so each run
@@ -83,7 +106,20 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          deadline=$(( $(date +%s) + 1320 ))
+          # 720s (12 min), down from 1320s (22 min).
+          #
+          # The loop starts a new ~1k-permit batch as long as the deadline has
+          # not passed, and a batch can itself take the full --max-time 290.
+          # So the real worst case is deadline + 290 + the health probe, and
+          # at 1320 that was ~27 minutes against a 20-minute schedule: runs
+          # overlapped, went pending, and got cancelled by the arrival after
+          # them. 720 puts the worst case at ~17.3 min, inside the slot.
+          #
+          # Throughput cost is smaller than the numbers suggest. The queue is
+          # bounded by the claimed-territory permit count (the score cron only
+          # considers permits inside an active territory), so in steady state
+          # a drain exits early on `scored=0` long before either budget.
+          deadline=$(( $(date +%s) + 720 ))
           runs=0; fails=0
           while [ "$(date +%s)" -lt "$deadline" ]; do
             code=$(curl -sS -o /tmp/body.json -w "%{http_code}" \

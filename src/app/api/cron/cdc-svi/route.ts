@@ -39,20 +39,35 @@ export async function GET(request: NextRequest) {
   }
 
   const startedAt = Date.now();
-  const result = {
-    ok: true,
-    duration_ms: Date.now() - startedAt,
-    pages: 0,
-    pulled: 0,
-    inserted: 0,
-    note: NOTE,
-  };
-  await logCronRun("cdc-svi", startedAt, {
-    pulled: 0,
-    inserted: 0,
-    summary: result,
-    trigger: detectTrigger(request),
-    status: "partial",
-  });
-  return NextResponse.json(result);
+  // logCronRun was only reachable on the success return. This route is a
+  // no-op today so nothing between here and there can realistically throw,
+  // but "the only audit row is written on the happy path" is the shape that
+  // makes a failure indistinguishable from a cron that never fired, and it
+  // stops being harmless the moment the fetch loop is restored. Same
+  // try/catch as territory-backfill and scrape.
+  try {
+    const result = {
+      ok: true,
+      duration_ms: Date.now() - startedAt,
+      pages: 0,
+      pulled: 0,
+      inserted: 0,
+      note: NOTE,
+    };
+    await logCronRun("cdc-svi", startedAt, {
+      pulled: 0,
+      inserted: 0,
+      summary: result,
+      trigger: detectTrigger(request),
+      status: "partial",
+    });
+    return NextResponse.json(result);
+  } catch (err) {
+    await logCronRun("cdc-svi", startedAt, {
+      status: "error",
+      error: err instanceof Error ? err.message : String(err),
+      trigger: detectTrigger(request),
+    });
+    throw err;
+  }
 }

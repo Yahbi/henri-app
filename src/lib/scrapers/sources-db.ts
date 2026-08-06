@@ -139,10 +139,19 @@ export interface DBPermitSource extends PermitSource {
    * 0 == start at the newest rows. See ./cursor.
    */
   cursorOffset: number;
+  /**
+   * Rows this source produced on its last healthy run; NULL when it has never
+   * run. This is the producer/explorer discriminator the lanes split on, and
+   * it is carried through to the caller so /api/cron/scrape can spend a cheap
+   * FIRST-TOUCH page on an unproven source instead of the full backfill
+   * allowance. Deep-paginating a source whose field mapping is still a guess
+   * costs the run's budget AND writes thousands of rows that may be garbage.
+   */
+  lastCount: number | null;
 }
 
 const SOURCE_COLUMNS =
-  "source_key, city, jurisdiction, state, endpoint, source_type, auth, update_freq, layer_index, id_field, type_field, status_field, desc_field, address_field, date_field, value_field, lat_field, lng_field, enabled, notes";
+  "source_key, city, jurisdiction, state, endpoint, source_type, auth, update_freq, layer_index, id_field, type_field, status_field, desc_field, address_field, date_field, value_field, lat_field, lng_field, enabled, notes, last_count";
 
 /** Column -> guessed default, applied when `permit_sources` has no mapping. */
 const FIELD_DEFAULTS: Array<[keyof PermitSource, string, string]> = [
@@ -184,6 +193,7 @@ function toDBPermitSource(row: SourceRow): DBPermitSource {
     unmappedFields,
     notes,
     cursorOffset: readCursor(notes),
+    lastCount: row.last_count == null ? null : Number(row.last_count),
     idField: mapping.idField,
     typeField: mapping.typeField,
     statusField: mapping.statusField,
@@ -224,18 +234,75 @@ function lane(
     .limit(opts.limit) as unknown as PromiseLike<QueryResponse<SourceRow>>;
 }
 
+/** Share of each run's slots reserved for proven producers. */
+const PRODUCER_SHARE = 0.6;
+
+/**
+ * Interleave the two lanes so the producer/explorer ratio holds at EVERY
+ * prefix of the result, not just at the end.
+ *
+ * This is the whole fix. The previous form was
+ *
+ *     [...producers, ...explorers].slice(0, limit)
+ *
+ * which puts all 30 producers at indices 0-29 and every explorer at 30+.
+ * `getActiveSources` is called with limit=50, but /api/cron/scrape processes
+ * in batches of 5 against a 175s budget and reaches roughly the first 15
+ * sources — so indices 15-49 were never read, and the explorer lane received
+ * ZERO slots on any run where 15+ producers existed. 28,010 do.
+ *
+ * That closed a loop rather than merely slowing one down: a source is an
+ * explorer until it earns `last_count > 0`, it can only earn that by being
+ * scraped, and it could only be scraped from a slot it was never given.
+ * Measured on production 2026-08-06 — of 239,897 enabled sources, 210,903 had
+ * NEVER been scraped, and exactly 44 had been scraped in the preceding 30
+ * days: the same 44 every run, deep-paginating their own history. The 60/40
+ * split was nominal; the effective split was 100/0. `activate-arcgis-sources`
+ * enabling 50 new sources a day fed a queue nothing could ever leave.
+ *
+ * Weaving makes the cutoff harmless. Because the ratio is enforced against
+ * the running output length, any prefix is already balanced — the first 15
+ * slots carry ~9 producers and ~6 explorers, and so would the first 8 or the
+ * first 30. The budget can stop wherever it likes and new sources still get
+ * scraped. Whichever lane runs dry first, the other fills the remainder, so a
+ * short lane costs throughput but never a slot.
+ */
+function weaveLanes<T>(producers: T[], explorers: T[], limit: number): T[] {
+  const out: T[] = [];
+  let p = 0;
+  let e = 0;
+
+  while (out.length < limit && (p < producers.length || e < explorers.length)) {
+    // How many producers SHOULD have appeared once this slot is filled.
+    const producerQuota = Math.round((out.length + 1) * PRODUCER_SHARE);
+    const wantProducer = p < producerQuota;
+
+    if (wantProducer && p < producers.length) out.push(producers[p++]);
+    else if (e < explorers.length) out.push(explorers[e++]);
+    else if (p < producers.length) out.push(producers[p++]);
+    else break;
+  }
+
+  return out;
+}
+
 export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
   const supabase = createAdminClient();
 
-  const producerSlots = Math.ceil(limit * 0.6);
-
+  // Both lanes fetch the full limit. Fetching only `limit * 0.6` producers
+  // would cap the weave's ability to backfill from the producer lane when the
+  // explorer lane is short, and the query cost is the same order either way.
+  //
   // priority DESC first in BOTH lanes so human-verified / high-value
   // sources (priority=10, e.g. the Tampa territory feed + GOLD contact
   // feeds) always scrape before the long tail, then last_scraped_at
-  // rotates within each priority band.
+  // rotates within each priority band. NULLS FIRST on last_scraped_at is
+  // what walks the never-scraped backlog: `recordSourceRun` stamps the
+  // column on BOTH the success and the failure path, so a source leaves the
+  // NULL block after exactly one attempt and the queue always advances.
   const [producersRes, explorersRes] = await Promise.all([
     withDatasetKindFallback((useDatasetKind) =>
-      lane(supabase, { producers: true, limit: producerSlots, useDatasetKind }),
+      lane(supabase, { producers: true, limit, useDatasetKind }),
     ),
     withDatasetKindFallback((useDatasetKind) =>
       lane(supabase, { producers: false, limit, useDatasetKind }),
@@ -261,12 +328,11 @@ export async function getActiveSources(limit = 50): Promise<DBPermitSource[]> {
 
   const producers = producersRes.data ?? [];
   const seen = new Set(producers.map((r) => String(r.source_key ?? "")));
-  const data = [
-    ...producers,
-    ...(explorersRes.data ?? []).filter((r) => !seen.has(String(r.source_key ?? ""))),
-  ].slice(0, limit);
+  const explorers = (explorersRes.data ?? []).filter(
+    (r) => !seen.has(String(r.source_key ?? "")),
+  );
 
-  return data.map((row) => toDBPermitSource(row));
+  return weaveLanes(producers, explorers, limit).map((row) => toDBPermitSource(row));
 }
 
 /**
@@ -300,6 +366,24 @@ export async function getSourcesByKeys(keys: string[]): Promise<DBPermitSource[]
 
 /** Consecutive failures before a source is auto-disabled. */
 export const MAX_CONSECUTIVE_ERRORS = 10;
+
+/**
+ * Priority value meaning "reach this unproven source sooner".
+ *
+ * Both lanes order `priority DESC, last_scraped_at ASC NULLS FIRST`, so this
+ * is how a source in a state with no permit coverage jumps the ~210k
+ * never-scraped queue instead of waiting out a full rotation. Set in bulk by
+ * scripts/prioritize-coverage-gaps.mjs against the states that are actually
+ * empty, recomputed from live counts rather than hardcoded.
+ *
+ * Deliberately 1, not 10: 10 is the hand-set operator value for verified
+ * high-value feeds (the Tampa territory feed, the GOLD contact feeds) and must
+ * stay strictly above an automated boost.
+ *
+ * The boost is CONSUMED on the first healthy run — see recordSourceRun. A
+ * permanent boost would recreate the starvation it exists to fix.
+ */
+export const DISCOVERY_BOOST_PRIORITY = 1;
 
 export interface SourceRunRecord {
   outcome: ScrapeOutcome;
@@ -383,11 +467,26 @@ export async function recordSourceRun(
       // 'verified' — a human never confirmed the schema.
       const { data: current } = await supabase
         .from("permit_sources")
-        .select("field_mapping_status")
+        .select("field_mapping_status, priority")
         .eq("source_key", sourceKey)
         .maybeSingle();
       if (record.outcome === "ok" && current?.field_mapping_status === "failed") {
         update.field_mapping_status = "probed";
+      }
+
+      // Spend the discovery boost. See DISCOVERY_BOOST_PRIORITY — the boost
+      // buys a source its FIRST look, nothing more. Leaving it in place would
+      // rebuild the lock it was created to break: both lanes order by
+      // `priority DESC` before `last_scraped_at`, so thousands of graduated
+      // boosted sources would form a permanent front rank and starve the
+      // priority-0 producers that carry today's ingest. Reset on the first
+      // healthy run, and only from the boost value — hand-set operator
+      // priorities (10) are never touched.
+      if (
+        record.outcome === "ok" &&
+        Number(current?.priority ?? 0) === DISCOVERY_BOOST_PRIORITY
+      ) {
+        update.priority = 0;
       }
 
       // BLOCKER 3: persist the resume offset. Clearing the stale diagnostic

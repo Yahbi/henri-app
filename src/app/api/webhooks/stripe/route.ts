@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
 import { getStripe } from "@/lib/stripe/client";
+import { releaseTerritory } from "@/lib/territory/ziplock";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,62 @@ async function findProfileByCustomer(
   return data;
 }
 
+/** Same lookup, plus the recorded tier-subscription pointer. Only the
+ *  cancellation path needs it, so the common lookup stays narrow. */
+async function findProfileWithSubscription(
+  supabase: AdminClient,
+  customerId: string
+) {
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, stripe_subscription_id")
+    .eq("stripe_customer_id", customerId)
+    .single();
+  return data as { id: string; stripe_subscription_id: string | null } | null;
+}
+
+/**
+ * Release every ZIP the contractor still holds. Returns how many were
+ * released.
+ *
+ * `release_territory` is SECURITY DEFINER and promotes the first waitlister
+ * into the freed slot; the admin (service-role) client is the only caller
+ * permitted since migration 00112.
+ */
+async function releaseAllTerritories(
+  supabase: AdminClient,
+  contractorId: string
+): Promise<number> {
+  const { data, error } = await supabase
+    .from("territories")
+    .select("zip")
+    .eq("contractor_id", contractorId)
+    .eq("status", "active");
+
+  if (error) {
+    logger.error("subscription ended: could not list territories to release", {
+      contractorId,
+      error: error.message,
+    });
+    return 0;
+  }
+
+  let released = 0;
+  for (const row of (data ?? []) as Array<{ zip: string }>) {
+    const result = await releaseTerritory(row.zip, contractorId);
+    if (result.success) {
+      released++;
+    } else {
+      logger.error("subscription ended: territory release failed", {
+        contractorId,
+        zip: row.zip,
+        message: result.message,
+      });
+    }
+  }
+  return released;
+}
+
 /** Insert a notification for a user. */
 async function notify(
   supabase: AdminClient,
@@ -63,9 +120,26 @@ async function notify(
   });
 }
 
+/** Outcome of a billing_events insert — the handlers' idempotency signal. */
+type LogOutcome = "inserted" | "duplicate" | "error";
+
 /**
- * Log a billing event. Uses stripe_event_id for idempotency — duplicate
- * deliveries from Stripe are silently ignored via the unique constraint.
+ * Log a billing event and report whether the row was NEW.
+ *
+ * `billing_events.stripe_event_id` is UNIQUE (migration 00007), so a
+ * redelivery of the same event fails the insert with SQLSTATE 23505.
+ * Stripe delivers at-least-once, so every handler calls this FIRST and
+ * stops on "duplicate" — the same insert-first pattern that
+ * `applyReferralCreditIfEligible` below uses to make coupon issuance
+ * at-most-once.
+ *
+ * (Until 2026-08-06 this returned nothing and never read the insert error,
+ * so the comment here claimed a short-circuit that did not exist and every
+ * handler re-applied its mutation on every redelivery.)
+ *
+ * A non-duplicate insert failure returns "error": the audit row is lost and
+ * logged, but the caller still applies the event, because a broken audit
+ * write must not withhold an entitlement the customer paid for.
  */
 async function logBillingEvent(
   supabase: AdminClient,
@@ -75,8 +149,8 @@ async function logBillingEvent(
   amount: number | null,
   currency: string,
   metadata?: Record<string, unknown>
-) {
-  await supabase.from("billing_events").insert({
+): Promise<LogOutcome> {
+  const { error } = await supabase.from("billing_events").insert({
     user_id: userId,
     stripe_event_id: stripeEventId,
     event_type: eventType,
@@ -85,6 +159,20 @@ async function logBillingEvent(
     metadata: metadata ?? null,
     created_at: new Date().toISOString(),
   });
+
+  if (!error) return "inserted";
+
+  if (error.code === "23505") {
+    logger.info("Stripe webhook redelivery ignored", { stripeEventId, eventType });
+    return "duplicate";
+  }
+
+  logger.error("billing_events insert failed", {
+    stripeEventId,
+    eventType,
+    error: error.message,
+  });
+  return "error";
 }
 
 /* ─── Event handlers ─── */
@@ -122,6 +210,10 @@ async function handleCheckoutCompleted(
   // the trial-ending-reminder cron both depend on profiles.trial_ends_at.
   let plan: string = session.metadata?.plan ?? "pro";
   let trialEndsAt: string | null = null;
+  // False when the retrieve below failed, i.e. we learned NOTHING about the
+  // trial. Distinct from `trialEndsAt === null`, which means "retrieved, and
+  // this subscription genuinely has no trial".
+  let trialKnown = false;
 
   if (subscriptionId) {
     try {
@@ -132,23 +224,31 @@ async function handleCheckoutCompleted(
       if (resolved !== "free") plan = resolved;
       // trial_end is a Unix timestamp (seconds). Null when the sub didn't
       // use a trial. Stored as ISO timestamptz in profiles.
-      if (sub.trial_end) {
-        trialEndsAt = new Date(sub.trial_end * 1000).toISOString();
-      }
-    } catch {
-      // Retrieval failed -- fall back to metadata plan; trial_ends_at
-      // stays null. Billing-sync cron will backfill.
-      logger.warn("checkout.session.completed: could not retrieve subscription, using metadata plan");
+      trialEndsAt = sub.trial_end
+        ? new Date(sub.trial_end * 1000).toISOString()
+        : null;
+      trialKnown = true;
+    } catch (err) {
+      /* Retrieval failed — fall back to the metadata plan and leave
+       * trial_ends_at ALONE (see the patch below). Writing null here was
+       * wrong twice over: Stripe does not order deliveries, so it could
+       * erase a value customer.subscription.created had already written,
+       * and /api/checkout reads that column to decide `alreadyTrialed` —
+       * a null there mints a SECOND 24-hour free trial on the customer's
+       * next checkout. Error, not warn: this is a revenue leak, not noise. */
+      logger.error(
+        "checkout.session.completed: subscription retrieve failed; plan from metadata, trial_ends_at left untouched",
+        { subscriptionId, userId, error: String(err) },
+      );
     }
   }
 
-  // IDEMPOTENCY ORDERING: write the billing_events row FIRST. If the
-  // profile update below fails after the event was already applied,
-  // Stripe will retry and we'll short-circuit on the unique stripe_event_id
-  // constraint on billing_events. Previously the profile mutation ran
-  // first, so a retry after a partial failure could double-apply plan
-  // changes.
-  await logBillingEvent(
+  // IDEMPOTENCY: write the billing_events row FIRST and stop if Stripe has
+  // already delivered this event. `stripe_event_id` is UNIQUE, so the second
+  // delivery loses the insert race and returns "duplicate" — that is the only
+  // thing standing between an at-least-once webhook and a double-applied
+  // profile mutation.
+  const logged = await logBillingEvent(
     supabase,
     userId,
     stripeEventId,
@@ -157,17 +257,17 @@ async function handleCheckoutCompleted(
     "usd",
     { plan, subscription_id: subscriptionId }
   );
+  if (logged === "duplicate") return;
 
-  await supabase
-    .from("profiles")
-    .update({
-      stripe_customer_id: customerId,
-      stripe_subscription_id: subscriptionId,
-      plan,
-      trial_ends_at: trialEndsAt,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", userId);
+  const patch: Record<string, unknown> = {
+    stripe_customer_id: customerId,
+    stripe_subscription_id: subscriptionId,
+    plan,
+    updated_at: new Date().toISOString(),
+  };
+  if (trialKnown) patch.trial_ends_at = trialEndsAt;
+
+  await supabase.from("profiles").update(patch).eq("id", userId);
 }
 
 /**
@@ -185,14 +285,9 @@ async function handleTrialWillEnd(
   const customerId = subscription.customer as string;
   const profile = await findProfileByCustomer(supabase, customerId);
   if (!profile) return;
-  await notify(
-    supabase,
-    profile.id,
-    "trial_will_end",
-    "Trial ending soon",
-    "Your free trial ends soon. We'll charge your saved card to continue service — cancel anytime in Settings → Billing.",
-  );
-  await logBillingEvent(
+
+  // Log first, notify second: a redelivery must not send the reminder twice.
+  const logged = await logBillingEvent(
     supabase,
     profile.id,
     stripeEventId,
@@ -200,6 +295,15 @@ async function handleTrialWillEnd(
     null,
     "usd",
     { subscription_id: subscription.id, trial_end: subscription.trial_end },
+  );
+  if (logged === "duplicate") return;
+
+  await notify(
+    supabase,
+    profile.id,
+    "trial_will_end",
+    "Trial ending soon",
+    "Your free trial ends soon. We'll charge your saved card to continue service — cancel anytime in Settings → Billing.",
   );
 }
 
@@ -217,6 +321,24 @@ async function handleSubscriptionUpdated(
     logger.error("customer.subscription.updated: no profile for customer", { customerId });
     return;
   }
+
+  /* Log first, mutate second (moved here from the end of the function on
+   * 2026-08-06). Stripe delivers at-least-once and the unique
+   * stripe_event_id is the only thing that can tell a redelivery apart from
+   * a genuine second update, so it has to be consulted BEFORE the plan
+   * write and the notification, not after. Side effect of the move: the
+   * unrecognized-price branch below now leaves an audit row where it
+   * previously left none. */
+  const logged = await logBillingEvent(
+    supabase,
+    profile.id,
+    stripeEventId,
+    "subscription_updated",
+    null,
+    "usd",
+    { status, price_id: priceId }
+  );
+  if (logged === "duplicate") return;
 
   if (status === "active" || status === "trialing") {
     // Subscription is healthy -- resolve plan from price
@@ -293,16 +415,6 @@ async function handleSubscriptionUpdated(
       "Your subscription is no longer active. Resubscribe to continue receiving leads."
     );
   }
-
-  await logBillingEvent(
-    supabase,
-    profile.id,
-    stripeEventId,
-    "subscription_updated",
-    null,
-    "usd",
-    { status, price_id: priceId }
-  );
 }
 
 async function handleSubscriptionDeleted(
@@ -312,35 +424,72 @@ async function handleSubscriptionDeleted(
 ) {
   const customerId = subscription.customer as string;
 
-  const profile = await findProfileByCustomer(supabase, customerId);
+  const profile = await findProfileWithSubscription(supabase, customerId);
+  if (!profile) {
+    logger.error("customer.subscription.deleted: no profile for customer", { customerId });
+    return;
+  }
 
-  // Revert to free -- don't delete any data
+  const logged = await logBillingEvent(
+    supabase,
+    profile.id,
+    stripeEventId,
+    "subscription_deleted",
+    null,
+    "usd"
+  );
+  if (logged === "duplicate") return;
+
+  /* Not every subscription on a customer is the tier subscription — the
+   * extra-ZIP add-on (/api/billing/extra-zip) is a second one. Ending the
+   * add-on must not revoke the plan. Treat this as the tier subscription
+   * when EITHER its price is one of the four tier prices OR the profile
+   * points at it; if the pointer is missing entirely, nothing else claims
+   * to be the tier subscription, so the cancellation is terminal. */
+  const cancelledPriceId = subscription.items.data[0]?.price?.id;
+  const isTierPrice = resolvePlan(cancelledPriceId) !== "free";
+  const pointsAtThisSub = profile.stripe_subscription_id === subscription.id;
+  if (profile.stripe_subscription_id && !pointsAtThisSub && !isTierPrice) {
+    logger.info("customer.subscription.deleted: non-tier subscription ended, entitlement untouched", {
+      customerId,
+      subscriptionId: subscription.id,
+      priceId: cancelledPriceId,
+    });
+    return;
+  }
+
+  /* Revert entitlement. No data is deleted.
+   *
+   * `stripe_subscription_id` is cleared alongside `plan` (2026-08-06). It
+   * used to survive cancellation, which left the account looking paid to
+   * every gate that reads it — /api/territories' 402 check, claim_territory
+   * (00113), the enrichment priority ranking, and the TopBar pill — and
+   * blocked /api/checkout's already_subscribed guard from ever letting them
+   * resubscribe. */
   await supabase
     .from("profiles")
     .update({
       plan: "free",
+      stripe_subscription_id: null,
       updated_at: new Date().toISOString(),
     })
-    .eq("stripe_customer_id", customerId);
+    .eq("id", profile.id);
 
-  if (profile) {
-    await notify(
-      supabase,
-      profile.id,
-      "subscription_updated",
-      "Subscription Canceled",
-      "Your subscription has ended. Resubscribe to continue receiving leads."
-    );
+  /* Release the ZIPs. Exclusivity is what the other contractors are paying
+   * for: `leads_select_own` has no plan predicate, so a cancelled account
+   * that keeps its territories keeps receiving leads AND keeps those ZIP
+   * slots (3 per ZIP) locked away from paying contractors indefinitely. */
+  const released = await releaseAllTerritories(supabase, profile.id);
 
-    await logBillingEvent(
-      supabase,
-      profile.id,
-      stripeEventId,
-      "subscription_deleted",
-      null,
-      "usd"
-    );
-  }
+  await notify(
+    supabase,
+    profile.id,
+    "subscription_updated",
+    "Subscription Canceled",
+    released > 0
+      ? `Your subscription has ended and your ${released} ZIP ${released === 1 ? "territory has" : "territories have"} been released. Resubscribe to claim territories again.`
+      : "Your subscription has ended. Resubscribe to continue receiving leads."
+  );
 }
 
 async function handlePaymentFailed(
@@ -356,19 +505,26 @@ async function handlePaymentFailed(
     return;
   }
 
-  // Log the failure as a billing event with a grace_period flag in metadata.
-  // The billing-sync cron and lead delivery logic can check for recent
-  // payment_failed events to enforce the grace period without immediately
-  // pausing leads.
-  await logBillingEvent(
+  /* Record the failure and warn the contractor. Nothing is paused here:
+   * access follows the Stripe subscription status, which stays `past_due`
+   * (handled in handleSubscriptionUpdated) until Stripe's own retry
+   * schedule gives up and emits customer.subscription.deleted.
+   *
+   * The metadata used to carry `grace_period: true` and the comment claimed
+   * "the billing-sync cron and lead delivery logic can check for recent
+   * payment_failed events to enforce the grace period". Neither did — the
+   * flag had no reader anywhere in the repo, so it described a feature that
+   * did not exist. Dropped rather than left as a false marker. */
+  const logged = await logBillingEvent(
     supabase,
     profile.id,
     stripeEventId,
     "payment_failed",
     invoice.amount_due ?? null,
     invoice.currency ?? "usd",
-    { invoice_id: invoice.id, grace_period: true }
+    { invoice_id: invoice.id }
   );
+  if (logged === "duplicate") return;
 
   await notify(
     supabase,
@@ -389,9 +545,9 @@ async function handlePaymentSucceeded(
   const profile = await findProfileByCustomer(supabase, customerId);
   if (!profile) return;
 
-  // Log successful payment -- this implicitly "clears" any grace period
-  // because downstream logic checks for the most recent billing event type.
-  await logBillingEvent(
+  // Log first: a redelivery must not re-notify or re-run the referral
+  // credit below.
+  const logged = await logBillingEvent(
     supabase,
     profile.id,
     stripeEventId,
@@ -400,6 +556,7 @@ async function handlePaymentSucceeded(
     invoice.currency ?? "usd",
     { invoice_id: invoice.id }
   );
+  if (logged === "duplicate") return;
 
   await notify(
     supabase,

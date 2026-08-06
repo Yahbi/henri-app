@@ -33,7 +33,39 @@ export const maxDuration = 300;
 
 const ENDPOINT = "https://geocoding.geo.census.gov/geocoder/locations/addressbatch";
 const BATCH_SIZE = 1000; // census accepts up to 10k; stay smaller for safety + memory
-const MAX_PER_RUN = 5000; // 5 batches per cron tick
+/**
+ * Permits offered to Census per invocation.
+ *
+ * Raised 5,000 -> 20,000. This is the highest-leverage number in the ingest
+ * pipeline: a permit with no ZIP cannot become a lead for anyone, and
+ * 2,260,438 of 3,381,151 permits (67%) were in that state on 2026-08-06.
+ *
+ * The old value was leaving most of the function idle. Measured over
+ * 2026-08-04→06: 17 runs, 70,000 addresses sent, 40,589 matched (a 58% match
+ * rate), averaging **77 seconds** against a 300s limit. At 5,000/run the
+ * backlog needed ~92 days; at 20,000 it is ~23 days, and the run still
+ * finishes inside its budget.
+ *
+ * Safe to raise only because DEADLINE_MS now bounds the loop — see below.
+ * Without that guard a slow Census response would push the run past
+ * maxDuration and Vercel would kill it mid-batch, losing the writes.
+ */
+const MAX_PER_RUN = 20_000;
+/**
+ * Wall-clock ceiling for the batch loop.
+ *
+ * Two limits sit above this and the LOWER one binds: Vercel hard-kills at
+ * maxDuration=300s, and the GitHub Actions caller runs curl with
+ * `--max-time 290`, so a run that survives Vercel can still be recorded as a
+ * failure by the scheduler. 240s leaves ~50s for the final summary write and
+ * for whichever batch is in flight when the deadline trips.
+ *
+ * Reaching the deadline is a normal outcome, not an error: the work is
+ * resumable by construction (every id sent is stamped with
+ * `geocode_attempted_at`), so the next run continues from where this one
+ * stopped rather than repeating it.
+ */
+const DEADLINE_MS = 240_000;
 /** Days before a permit Census could not match is offered to it again. */
 const RETRY_AFTER_DAYS = 30;
 /** Ids per attempt-stamp UPDATE — `.in()` rides in the query string. */
@@ -210,9 +242,23 @@ export async function GET(request: NextRequest) {
   let totalZipped = 0;
   let totalFetched = 0;
   let batches = 0;
+  let deadlineReached = false;
 
   try {
     while (totalFetched < MAX_PER_RUN) {
+      // Stop on the clock, not just on the row cap. Census latency varies by
+      // an order of magnitude between batches, so the row cap alone cannot
+      // predict when the run ends.
+      if (Date.now() - startedAt > DEADLINE_MS) {
+        deadlineReached = true;
+        logger.warn("census-geocode.deadline_reached", {
+          fetched: totalFetched,
+          zipped: totalZipped,
+          batches,
+        });
+        break;
+      }
+
       const remaining = MAX_PER_RUN - totalFetched;
       const fetchSize = Math.min(BATCH_SIZE, remaining);
 
@@ -273,19 +319,35 @@ export async function GET(request: NextRequest) {
       // values ride in the query string (~8KB ceiling).
       const attemptedAt = new Date().toISOString();
       const sentIds = (pending as PermitRow[]).map((r) => r.id);
+      const stampChunks: string[][] = [];
       for (let i = 0; i < sentIds.length; i += ATTEMPT_STAMP_CHUNK) {
-        const idChunk = sentIds.slice(i, i + ATTEMPT_STAMP_CHUNK);
-        const { error: stampErr } = await supabase
-          .from("permits")
-          .update({ geocode_attempted_at: attemptedAt })
-          .in("id", idChunk);
-        if (stampErr) {
-          // Non-fatal: the geocode results below are still worth writing.
-          // But log it, because a silently failing stamp reinstates exactly
-          // the re-grinding loop this column exists to stop.
+        stampChunks.push(sentIds.slice(i, i + ATTEMPT_STAMP_CHUNK));
+      }
+      // Concurrent, not sequential. Each chunk is an independent bounded
+      // UPDATE, so awaiting them one at a time was paying five round-trips of
+      // latency per batch for no ordering guarantee — and at 20k rows/run
+      // that is 100 serialized round-trips that the deadline would otherwise
+      // absorb. `allSettled` because a failed stamp must not abort the batch:
+      // the geocode results below are still worth writing.
+      const stampResults = await Promise.allSettled(
+        stampChunks.map((idChunk) =>
+          supabase
+            .from("permits")
+            .update({ geocode_attempted_at: attemptedAt })
+            .in("id", idChunk)
+            .then(({ error }) => {
+              if (error) throw new Error(error.message);
+              return idChunk.length;
+            }),
+        ),
+      );
+      for (const [i, r] of stampResults.entries()) {
+        if (r.status === "rejected") {
+          // Logged, never swallowed: a silently failing stamp reinstates
+          // exactly the re-grinding loop this column exists to stop.
           logger.warn("census-geocode.attempt_stamp_failed", {
-            count: idChunk.length,
-            error: stampErr.message,
+            count: stampChunks[i].length,
+            error: r.reason instanceof Error ? r.reason.message : String(r.reason),
           });
         }
       }
@@ -351,6 +413,11 @@ export async function GET(request: NextRequest) {
       fetched: totalFetched,
       geocoded: totalGeocoded,
       zipped: totalZipped,
+      // Surfaced so an operator can tell "drained the queue" from "ran out of
+      // clock" without reading logs. If this stays true every run, the run is
+      // time-bound rather than candidate-bound and MAX_PER_RUN is no longer
+      // the binding constraint.
+      deadline_reached: deadlineReached,
     };
     await logCronRun("census-geocode", startedAt, {
       pulled: totalFetched, inserted: totalGeocoded,

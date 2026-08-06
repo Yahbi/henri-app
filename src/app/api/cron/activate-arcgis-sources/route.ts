@@ -266,14 +266,30 @@ export async function GET(request: NextRequest) {
     };
 
     logger.info("activate-arcgis.done", result);
+    // `partial` means INCONCLUSIVE, not "activated nothing".
+    //
+    // The previous rule was `probed > 0 && activated === 0`, which reported a
+    // run as unclean whenever every candidate was rejected — but a definitive
+    // rejection is this route working exactly as designed. Most of the ~2,364
+    // auto-discovered ArcGIS endpoints in the registry are not permit feeds,
+    // and a batch of 50 that are all correctly refused and recorded with their
+    // evidence is a CLEAN run, not a failure. Reporting it as one is how a
+    // fleet-wide failure count fills with entries nobody can act on.
+    //
+    // What genuinely leaves work undone is a probe that returned no verdict:
+    // an endpoint we could not reach, or a candidate the time budget cut off
+    // before it was probed at all. Those are the ones worth surfacing.
+    const inconclusive = unreachable.length + (candidates.length - probed.length);
     await logCronRun("activate-arcgis-sources", startedAt, {
       pulled: probed.length,
       inserted: activated,
       summary: result,
       trigger: detectTrigger(request),
-      // A run that probed sources but could enable none is not a clean run —
-      // say so rather than reporting a green tick over 50 refusals.
-      status: probed.length > 0 && activated === 0 ? "partial" : "ok",
+      status: inconclusive > 0 ? "partial" : "ok",
+      error:
+        inconclusive > 0
+          ? `${unreachable.length} unreachable, ${candidates.length - probed.length} cut off by the probe budget`
+          : null,
     });
     return NextResponse.json(result);
   } catch (err) {

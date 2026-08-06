@@ -676,6 +676,34 @@ function DashboardContent() {
             onStyleChange={(style) => mapRef.current?.setCurrentStyle(style)}
           />
 
+          {/* The full-screen map at /dashboard/map is a complete, working
+           * surface with its own two-stage progressive loading and the
+           * unfiltered lead pool — but it was reachable ONLY via the Cmd+K
+           * command palette after the Map tab was pulled from the top nav.
+           * A whole page nobody can find is the same as a page that doesn't
+           * exist. CLAUDE.md forbids new top-level tabs, so the entry point
+           * lives here, on the surface it belongs to, next to the map it
+           * expands. Desktop only — on mobile the split already collapses to
+           * a full-screen map via the list/map toggle below.
+           *
+           * `right-16`, not `right-4`: MapLibre renders its own zoom /
+           * compass cluster into `.maplibregl-ctrl-top-right`, which occupies
+           * roughly the first 40px inside the container's right edge. At
+           * right-4 this button (z-20) sat on top of the Zoom-in control and
+           * swallowed its clicks. 64px clears it with room to spare, and both
+           * offsets are relative to the same container so the gap holds at
+           * every desktop width. */}
+          <Button
+            asChild
+            variant="outline"
+            className="hidden md:inline-flex absolute top-4 right-16 z-20 bg-card"
+          >
+            <Link href="/dashboard/map">
+              <MapIcon className="h-4 w-4" aria-hidden="true" />
+              Full-screen map
+            </Link>
+          </Button>
+
           {/* Weather alert banner */}
           {overlayState.weatherAlerts && weatherAlerts.length > 0 && (
             <WeatherAlertBanner

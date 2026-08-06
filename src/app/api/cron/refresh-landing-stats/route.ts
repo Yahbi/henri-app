@@ -35,11 +35,31 @@
  * has a 60s budget where a marketing page render has six seconds.
  *
  * FAILURE POSTURE
- * Partial failure never corrupts the cache. If any per-state count
- * errors the whole refresh aborts and leaves the previous row intact,
- * because a histogram missing California would silently under-report
- * coverage on the homepage. A stale-but-correct row beats a fresh-but-
- * wrong one.
+ * Partial failure never corrupts the cache, and the cache is never
+ * published from an incomplete read. A histogram missing California
+ * would silently under-report coverage on the homepage, so the rule is
+ * that a stale-but-correct row beats a fresh-but-wrong one.
+ *
+ * How that rule is applied changed on 2026-08-06, after both of this
+ * route's live failure modes turned out to abort the whole refresh:
+ *
+ *   - A per-state count that still errors after MAX_ATTEMPTS now CARRIES
+ *     FORWARD that state's previous cached figures instead of aborting.
+ *     The observed failure was `state AL: unknown` — the empty-message
+ *     error the pool returns under worker contention, which is transient
+ *     by nature. Carrying the last known value keeps the state on the map
+ *     (the exact thing the abort existed to protect) and the run is
+ *     recorded as `partial` naming every state carried. If a state has no
+ *     previous value there is nothing to carry, and the refresh aborts as
+ *     before.
+ *
+ *   - The subtraction-budget ceiling now DEGRADES rather than throwing.
+ *     Exceeding it means we cannot subtract every non-permit feed, and a
+ *     partial subtraction over-states the catalog — the one direction
+ *     CLAUDE.md forbids — so the cache is deliberately left untouched.
+ *     That is not an error in this route, so it is logged `partial` with
+ *     the count and answered 200 rather than failing the scheduler run
+ *     every hour over a registry-classification fact.
  */
 
 import { NextResponse } from "next/server";
@@ -50,7 +70,16 @@ import { ALL_US_STATES, deriveActiveStates } from "@/lib/stats/us-states";
 import { fetchNonPermitSources, countLeadsExact, type NonPermitSource } from "@/lib/stats/landing";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+/**
+ * 300s, raised from 60s on 2026-08-06.
+ *
+ * The subtraction fan-out is one count query per non-permit feed and the
+ * registry now classifies 479 of them, which no longer fits a 60s budget
+ * with any headroom. 300 is the ceiling the rest of the cron fleet uses and
+ * matches the scheduler's `curl --max-time 290`. The run still guards itself
+ * with SUBTRACTION_DEADLINE_MS below rather than relying on this ceiling.
+ */
+export const maxDuration = 300;
 
 /**
  * Cap on concurrent count queries.
@@ -68,12 +97,29 @@ const MAX_ATTEMPTS = 3;
 /**
  * Ceiling on how many non-permit feeds we will subtract in one run.
  *
- * Each one costs a count query, so an unbounded list would turn a 2s
- * refresh into a several-minute one and blow `maxDuration`. Crossing this
- * means the registry classified far more feeds as junk than anyone
- * expects, which is a signal to look rather than to publish.
+ * Each one costs a count query, so an unbounded list would blow
+ * `maxDuration`. The old value was 120 against a 60s budget; the registry
+ * now classifies 479 feeds as non-permit, so every run since has refused to
+ * publish and the cache has been frozen. At the measured ~90ms per
+ * index-only count with CONCURRENCY 4, 1,000 feeds is ~23s of wall time —
+ * comfortable inside the 300s budget — and SUBTRACTION_DEADLINE_MS stops the
+ * run anyway if the instance is slower than that on the day.
+ *
+ * Crossing 1,000 still means the registry classified far more feeds as junk
+ * than anyone expects, which is a signal to look rather than to publish.
  */
-const MAX_EXCLUDED_SOURCES = 120;
+const MAX_EXCLUDED_SOURCES = 1000;
+
+/**
+ * Wall-clock ceiling on the subtraction fan-out.
+ *
+ * The count is bounded above, but per-count LATENCY is not — the instance
+ * has had days where an index-only count took seconds. Without this, a slow
+ * day runs past `maxDuration`, Vercel kills the function mid-flight, and the
+ * run leaves no `cron_runs` row at all: indistinguishable from never having
+ * fired. Hitting it degrades (cache untouched, run logged `partial`).
+ */
+const SUBTRACTION_DEADLINE_MS = 240_000;
 
 async function mapWithConcurrency<T, R>(
   items: readonly T[],
@@ -105,7 +151,46 @@ export async function GET(request: Request) {
   const startedAt = Date.now();
   const supabase = createAdminClient();
 
+  /**
+   * Stop without publishing, without erroring the run.
+   *
+   * Used for the conditions where the read is INCOMPLETE — a subtraction we
+   * cannot finish, a state we cannot count and cannot carry. Publishing from
+   * an incomplete read would over-state the catalog, and erroring would put a
+   * red run in front of the operator every hour for something that is not a
+   * fault in this route. The cache keeps its last good row either way; the
+   * reason lands in `cron_runs` as `partial`.
+   */
+  const degrade = async (reason: string): Promise<NextResponse> => {
+    logger.warn("refresh-landing-stats.degraded", { reason });
+    await logCronRun("refresh-landing-stats", startedAt, {
+      status: "partial",
+      error: reason,
+    });
+    return NextResponse.json({ ok: false, degraded: reason });
+  };
+
   try {
+    // Previous cache row, read ONCE up front.
+    //
+    // It is the fallback for a state whose count will not come back (see the
+    // carry-forward below) and for the ZIP total, and reading it here rather
+    // than lazily means the fallback is available at the moment it is needed
+    // instead of after the run has already decided to abort.
+    const { data: prevRow } = await supabase
+      .from("landing_stats")
+      .select("value")
+      .eq("key", "coverage")
+      .maybeSingle();
+    const prevValue = (prevRow?.value ?? null) as {
+      state_permits?: Record<string, number>;
+      state_permits_zipped?: Record<string, number>;
+      zips_covered?: unknown;
+    } | null;
+
+    /** States whose figures came from the previous cache, not this run. */
+    const carriedStates: string[] = [];
+
     // 51 index-only counts, plus the leads total, the distinct-ZIP helper
     // RPC, and the registry reads that drive the non-permit subtraction.
     // Each is its own statement, so each gets its own 8s budget rather
@@ -155,6 +240,25 @@ export async function GET(request: Request) {
               await new Promise((r) => setTimeout(r, 250 * attempt));
             }
           }
+          // Retries exhausted. Observed live as `state AL: unknown` — the
+          // empty-message error the connection pool returns under worker
+          // contention, which clears on its own. Aborting the entire refresh
+          // over one flaky state is what kept the whole cache stale, so
+          // carry that state's last published figures forward instead. The
+          // run is marked `partial` and names the state, so a state that
+          // carries forward run after run is visible rather than silent.
+          const prevTotal = prevValue?.state_permits?.[state];
+          const prevZipped = prevValue?.state_permits_zipped?.[state];
+          if (typeof prevTotal === "number") {
+            carriedStates.push(state);
+            return [
+              state,
+              prevTotal,
+              typeof prevZipped === "number" ? prevZipped : 0,
+            ] as const;
+          }
+          // Nothing to carry — publishing would drop the state off the map
+          // entirely, which is the under-report the abort exists to prevent.
           throw new Error(`state ${state}: ${lastError}`);
         }),
         // EXACT, summed over the urgency enum.
@@ -200,20 +304,31 @@ export async function GET(request: Request) {
       );
     }
     if (nonPermitSources.length > MAX_EXCLUDED_SOURCES) {
-      throw new Error(
-        `${nonPermitSources.length} non-permit sources exceeds the ${MAX_EXCLUDED_SOURCES} subtraction budget — refusing to publish a partially corrected count`,
+      // Not an error in this route — the registry simply classified more
+      // feeds as junk than we can subtract in one budget. Subtracting only
+      // some of them would over-state the catalog, so leave the cache alone
+      // and say why.
+      return await degrade(
+        `${nonPermitSources.length} non-permit sources exceeds the ${MAX_EXCLUDED_SOURCES} subtraction budget — cache left untouched rather than publishing a partially corrected count`,
       );
     }
 
     // One index-only `count(*) WHERE source_city = $1` per junk feed. The
     // unique index on (source_city, source_id) covers it, so this is the
     // same shape and cost as the per-state counts above.
+    //
+    // `null` means "this feed's rows could not be counted" — retries
+    // exhausted, or the wall-clock budget ran out. Either way the total
+    // below would silently keep those rows in it, so the run degrades
+    // instead of publishing.
+    const deadline = startedAt + SUBTRACTION_DEADLINE_MS;
     const excludedCounts = await mapWithConcurrency(
       nonPermitSources,
       CONCURRENCY,
       async (src: NonPermitSource) => {
         let lastError = "";
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          if (Date.now() > deadline) return null;
           const { count, error } = await supabase
             .from("permits")
             .select("*", { count: "exact", head: true })
@@ -224,11 +339,20 @@ export async function GET(request: Request) {
             await new Promise((r) => setTimeout(r, 250 * attempt));
           }
         }
-        // Abort rather than publish a total that silently keeps this
-        // feed's rows in it.
-        throw new Error(`source ${src.sourceCity}: ${lastError}`);
+        logger.warn("refresh-landing-stats.excluded-count-failed", {
+          source: src.sourceCity,
+          error: lastError,
+        });
+        return null;
       },
     );
+
+    const uncounted = excludedCounts.filter((r) => r === null).length;
+    if (uncounted > 0) {
+      return await degrade(
+        `${uncounted} of ${nonPermitSources.length} non-permit feeds could not be counted (retries exhausted or ${SUBTRACTION_DEADLINE_MS}ms subtraction budget hit) — cache left untouched`,
+      );
+    }
 
     const statePermits: Record<string, number> = {};
     // Parallel histogram counting only rows that carry a ZIP — the subset
@@ -251,7 +375,11 @@ export async function GET(request: Request) {
     //     the headline stays honest.
     let excludedRows = 0;
     let excludedUnattributed = 0;
-    for (const [src, n] of excludedCounts) {
+    // Every entry is non-null here — the `uncounted > 0` guard above
+    // returned early otherwise.
+    for (const entry of excludedCounts) {
+      if (entry === null) continue;
+      const [src, n] = entry;
       if (n <= 0) continue;
       excludedRows += n;
       const st = src.declaredState;
@@ -299,13 +427,9 @@ export async function GET(request: Request) {
     // zeroing a stat that's rendered on the homepage.
     let zipsCovered = typeof zipsRes.data === "number" ? zipsRes.data : 0;
     if (zipsRes.error || zipsCovered <= 0) {
-      const { data: prev } = await supabase
-        .from("landing_stats")
-        .select("value")
-        .eq("key", "coverage")
-        .maybeSingle();
-      const prevZips = (prev?.value as { zips_covered?: unknown } | null)
-        ?.zips_covered;
+      // Reuses the cache row already read at the top of the run rather than
+      // issuing a second identical select.
+      const prevZips = prevValue?.zips_covered;
       zipsCovered = typeof prevZips === "number" ? prevZips : 0;
       logger.warn("refresh-landing-stats.zip-count-unavailable", {
         error: zipsRes.error?.message,
@@ -361,14 +485,24 @@ export async function GET(request: Request) {
         .length,
       excluded_sources: nonPermitSources.length,
       excluded_rows: excludedRows,
+      // States whose figures are the PREVIOUS run's, because their count
+      // would not come back this time. Named, not just counted, so a state
+      // that carries forward repeatedly is visible.
+      carried_forward_states: carriedStates,
       duration_ms: durationMs,
     };
 
     await logCronRun("refresh-landing-stats", startedAt, {
-      status: "ok",
+      // A row that carries any state forward is fresh in most of its figures
+      // and stale in one — neither `ok` nor `error`.
+      status: carriedStates.length > 0 ? "partial" : "ok",
       pulled: permitsTotal,
       inserted: 1,
       summary,
+      error:
+        carriedStates.length > 0
+          ? `carried forward previous counts for: ${carriedStates.join(", ")}`
+          : null,
     });
 
     return NextResponse.json({ ok: true, ...summary });

@@ -2,6 +2,12 @@
  * Central environment variable validation.
  * Call `getEnv()` in server code to get validated env values.
  * In dev mode, missing vars log a warning instead of crashing.
+ *
+ * Two properties this file has to keep (both were broken until 2026-08-06,
+ * see getEnv below):
+ *   1. Reading one variable must not validate the other seventeen.
+ *   2. A variable the app treats as optional — every one with a `hasX()`
+ *      feature check below — must not be required here.
  */
 
 interface EnvConfig {
@@ -61,29 +67,54 @@ function requireEnv(key: string, fallback = ""): string {
   return value;
 }
 
+/** An optional integration's key. Absent means "feature off", never fatal —
+ *  callers gate on the matching `hasX()` helper below. */
+function optionalEnv(key: string): string {
+  return process.env[key] ?? "";
+}
+
+/**
+ * Validated environment access.
+ *
+ * Every property is a GETTER, so a caller that reads `appUrl` validates
+ * `NEXT_PUBLIC_APP_URL` and nothing else. Until 2026-08-06 this returned a
+ * plain object literal, which meant calling `getEnv()` at all ran
+ * `requireEnv` over all 18 vars — and `requireEnv` THROWS in production.
+ * Twilio is unprovisioned in production, so `getEnv()` threw there for every
+ * caller regardless of what they wanted; `src/lib/stripe/client.ts` had
+ * already been rewritten to read `process.env.STRIPE_SECRET_KEY` directly to
+ * escape it (see the note in that file), which is why nothing in src/ calls
+ * this today.
+ *
+ * Twilio / Resend / OpenAI / Mapbox are also no longer `requireEnv`: the app
+ * ships `hasTwilio()` / `hasResend()` / `hasOpenAI()` / `hasMapbox()` and
+ * degrades when they are unset, so declaring them required here contradicted
+ * how the rest of the codebase treats them. The Supabase, Stripe, cron and
+ * app-URL vars stay required and still throw in production when missing.
+ */
 export function getEnv(): EnvConfig {
   return {
-    supabaseUrl: requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    supabaseAnonKey: requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-    supabaseServiceRoleKey: requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
+    get supabaseUrl() { return requireEnv("NEXT_PUBLIC_SUPABASE_URL"); },
+    get supabaseAnonKey() { return requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"); },
+    get supabaseServiceRoleKey() { return requireEnv("SUPABASE_SERVICE_ROLE_KEY"); },
 
-    stripeSecretKey: requireEnv("STRIPE_SECRET_KEY"),
-    stripeWebhookSecret: requireEnv("STRIPE_WEBHOOK_SECRET"),
-    stripeFounderPriceId: requireEnv("STRIPE_FOUNDER_PRICE_ID"),
-    stripeStarterPriceId: requireEnv("STRIPE_STARTER_PRICE_ID"),
-    stripeProPriceId: requireEnv("STRIPE_PRO_PRICE_ID"),
-    stripeEnterprisePriceId: requireEnv("STRIPE_ENTERPRISE_PRICE_ID"),
+    get stripeSecretKey() { return requireEnv("STRIPE_SECRET_KEY"); },
+    get stripeWebhookSecret() { return requireEnv("STRIPE_WEBHOOK_SECRET"); },
+    get stripeFounderPriceId() { return requireEnv("STRIPE_FOUNDER_PRICE_ID"); },
+    get stripeStarterPriceId() { return requireEnv("STRIPE_STARTER_PRICE_ID"); },
+    get stripeProPriceId() { return requireEnv("STRIPE_PRO_PRICE_ID"); },
+    get stripeEnterprisePriceId() { return requireEnv("STRIPE_ENTERPRISE_PRICE_ID"); },
 
-    twilioAccountSid: requireEnv("TWILIO_ACCOUNT_SID"),
-    twilioAuthToken: requireEnv("TWILIO_AUTH_TOKEN"),
-    twilioFromNumber: requireEnv("TWILIO_FROM_NUMBER"),
-    resendApiKey: requireEnv("RESEND_API_KEY"),
+    get twilioAccountSid() { return optionalEnv("TWILIO_ACCOUNT_SID"); },
+    get twilioAuthToken() { return optionalEnv("TWILIO_AUTH_TOKEN"); },
+    get twilioFromNumber() { return optionalEnv("TWILIO_FROM_NUMBER"); },
+    get resendApiKey() { return optionalEnv("RESEND_API_KEY"); },
 
-    openaiApiKey: requireEnv("OPENAI_API_KEY"),
-    mapboxPublicToken: requireEnv("NEXT_PUBLIC_MAPBOX_TOKEN"),
+    get openaiApiKey() { return optionalEnv("OPENAI_API_KEY"); },
+    get mapboxPublicToken() { return optionalEnv("NEXT_PUBLIC_MAPBOX_TOKEN"); },
 
-    appUrl: requireEnv("NEXT_PUBLIC_APP_URL", "http://localhost:3000"),
-    cronSecret: requireEnv("CRON_SECRET"),
+    get appUrl() { return requireEnv("NEXT_PUBLIC_APP_URL", "http://localhost:3000"); },
+    get cronSecret() { return requireEnv("CRON_SECRET"); },
   };
 }
 

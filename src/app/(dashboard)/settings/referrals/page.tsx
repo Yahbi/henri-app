@@ -40,14 +40,26 @@ function rewardDisplay(referral: Referral) {
 }
 
 export default function ReferralsPage() {
+  // `error` was previously dropped on the floor. When /api/referrals fails
+  // the hook keeps its zeroed defaults, so the four tiles rendered
+  // "0 / 0 / $0 / 0" and the history rendered "No referrals yet" — a fetch
+  // failure presented to a paying contractor as the fact that they have
+  // earned nothing. Same class of bug the territories page fixed; same
+  // shape of fix (explicit alert + retry, real values suppressed).
   const {
     referralCode,
     referralLink,
     referrals,
     stats,
     isLoading,
+    error,
+    refresh,
     sendInviteEmail,
   } = useReferrals();
+
+  /* Any tile/number is unknown — not zero — while loading or after a
+     failure. Render an em dash rather than a figure we can't stand behind. */
+  const statsUnknown = isLoading || error !== null;
 
   const [copied, setCopied] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -115,6 +127,31 @@ export default function ReferralsPage() {
         </div>
       </div>
 
+      {/* Fetch failed — say so once, loudly, above everything the failure
+          would otherwise render as a zero. */}
+      {error && (
+        <div
+          role="alert"
+          className="rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm"
+        >
+          <p className="font-semibold text-destructive">
+            Couldn&apos;t load your referrals
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            The counts below are <strong className="text-foreground">not</strong>{" "}
+            zero — we just couldn&apos;t reach them. Any credits you&apos;ve
+            earned are still on your account. {error}
+          </p>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="mt-3 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground transition-opacity hover:opacity-90"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card className="p-4">
@@ -123,7 +160,7 @@ export default function ReferralsPage() {
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Referred</p>
           </div>
           <p className="text-2xl font-heading font-normal text-foreground">
-            {isLoading ? "\u2014" : stats.totalReferred}
+            {statsUnknown ? "\u2014" : stats.totalReferred}
           </p>
         </Card>
         <Card className="p-4">
@@ -132,7 +169,7 @@ export default function ReferralsPage() {
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Converted</p>
           </div>
           <p className="text-2xl font-heading font-normal text-green-400">
-            {isLoading ? "\u2014" : stats.converted}
+            {statsUnknown ? "\u2014" : stats.converted}
           </p>
         </Card>
         <Card className="p-4">
@@ -141,7 +178,7 @@ export default function ReferralsPage() {
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Earned</p>
           </div>
           <p className="text-2xl font-heading font-normal text-primary">
-            {isLoading ? "\u2014" : `$${stats.totalEarned}`}
+            {statsUnknown ? "\u2014" : `$${stats.totalEarned}`}
           </p>
         </Card>
         <Card className="p-4">
@@ -150,7 +187,7 @@ export default function ReferralsPage() {
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Pending</p>
           </div>
           <p className="text-2xl font-heading font-normal text-warm">
-            {isLoading ? "\u2014" : stats.pendingRewards}
+            {statsUnknown ? "\u2014" : stats.pendingRewards}
           </p>
         </Card>
       </div>
@@ -164,12 +201,23 @@ export default function ReferralsPage() {
             <input
               readOnly
               value={referralLink ?? ""}
-              placeholder={referralLink ? undefined : "Loading your referral link..."}
+              // After a failed fetch the link stays null forever, so the
+              // "Loading..." placeholder would spin indefinitely. Say what
+              // actually happened instead.
+              placeholder={
+                referralLink
+                  ? undefined
+                  : error
+                    ? "Couldn't load your referral link"
+                    : "Loading your referral link..."
+              }
+              aria-label="Your referral link"
               className="flex-1 rounded-lg border border-border bg-bg-subtle px-3 py-2 text-sm text-foreground font-mono truncate"
             />
             <button
               onClick={handleCopy}
-              className="flex items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity shrink-0"
+              disabled={!referralLink}
+              className="flex items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
             >
               {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               {copied ? "Copied" : "Copy"}
@@ -177,7 +225,9 @@ export default function ReferralsPage() {
           </div>
           <p className="text-xs text-muted-foreground">
             Share this link with contractors or homeowners. Your code:{" "}
-            <span className="font-mono text-foreground">{referralCode}</span>
+            <span className="font-mono text-foreground">
+              {referralCode ?? "—"}
+            </span>
           </p>
         </Card>
 
@@ -224,6 +274,28 @@ export default function ReferralsPage() {
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">Loading referrals...</p>
           </Card>
+        ) : error ? (
+          /* Never fall through to "No referrals yet" on a failed fetch —
+             that presents an outage as an empty history. */
+          <div
+            role="alert"
+            className="rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm"
+          >
+            <p className="font-semibold text-destructive">
+              Referral history unavailable
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              This is <strong className="text-foreground">not</strong> an empty
+              history — the request failed. {error}
+            </p>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="mt-3 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground transition-opacity hover:opacity-90"
+            >
+              Retry
+            </button>
+          </div>
         ) : referrals.length > 0 ? (
           <Card className="overflow-hidden">
             <table className="w-full text-sm">

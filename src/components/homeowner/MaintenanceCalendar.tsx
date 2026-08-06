@@ -9,6 +9,14 @@ interface MaintenanceTask {
   title: string;
   category: "hvac" | "plumbing" | "electrical" | "exterior" | "interior" | "seasonal";
   months: number[]; // 0-indexed months when this task is due
+  /**
+   * Fixed editorial ballpark for a typical single-family home. NOT derived
+   * from anything: no query, no ZIP, no local quote history, no property
+   * facts. Every homeowner sees the identical string. It must therefore
+   * never be presented as an estimate FOR THIS HOME — the disclosure under
+   * the task list carries that caveat, mirroring the national-fallback
+   * copy CostEstimator already renders when it has no local benchmark rows.
+   */
   estimatedCost: string;
   urgency: "routine" | "important" | "critical";
   description: string;
@@ -213,7 +221,11 @@ export function MaintenanceCalendar({ onBookPro }: MaintenanceCalendarProps = {}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{task.description}</p>
                     <div className="flex items-center gap-3 mt-1.5">
-                      <span className="text-[10px] text-muted-foreground">Est. {task.estimatedCost}</span>
+                      {/* "Est." read as an estimate for THIS home. It isn't
+                          — it's the same static string for every user. */}
+                      <span className="text-[10px] text-muted-foreground">
+                        Typical cost {task.estimatedCost}
+                      </span>
                       {!done && onBookPro && (
                         <button
                           onClick={() => onBookPro(CATEGORY_TRADE[task.category])}
@@ -230,6 +242,19 @@ export function MaintenanceCalendar({ onBookPro }: MaintenanceCalendarProps = {}
           })
         )}
       </div>
+
+      {/* Truthfulness: the cost strings above are a fixed national ballpark
+          hardcoded in `allTasks` — no ZIP, no property, no quote data behind
+          them. Disclose that rather than let a homeowner read "$100-250" as
+          a figure for their house. Same disclosure CostEstimator renders on
+          its no-local-data path. */}
+      {tasksForMonth.length > 0 && (
+        <p className="text-[10px] text-muted-foreground">
+          Costs shown are rough national ballparks for a typical single-family
+          home, not quotes and not specific to your property. Actual pricing
+          varies a lot by region, access, and condition.
+        </p>
+      )}
     </div>
   );
 }
