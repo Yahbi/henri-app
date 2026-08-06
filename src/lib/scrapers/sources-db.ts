@@ -234,8 +234,25 @@ function lane(
     .limit(opts.limit) as unknown as PromiseLike<QueryResponse<SourceRow>>;
 }
 
-/** Share of each run's slots reserved for proven producers. */
-const PRODUCER_SHARE = 0.6;
+/**
+ * Share of each run's slots reserved for proven producers.
+ *
+ * Lowered 0.6 -> 0.35 on 2026-08-06 after the weave went live and the real
+ * numbers came in. The pools are wildly asymmetric — 28,010 producers against
+ * 211,887 explorers, and only 44 sources had EVER produced recently — so
+ * spending 60% of every run re-reading a handful of known feeds was the wrong
+ * trade once the explorer lane could be reached at all. First measured run
+ * after the weave: 24 sources, of which only 7 were new.
+ *
+ * Freshness does not suffer. At 0.35 the producer lane still gets ~10 slots
+ * per run x 24 runs/day across 44 active producers, so each is scraped
+ * several times a day, and every one of those runs does a HEAD pass first
+ * (offset 0 = newest). Permits filed this morning still land today.
+ *
+ * Revisit when the producer pool grows: once thousands of sources are
+ * genuinely producing, they will need a larger share to stay fresh.
+ */
+export const PRODUCER_SHARE = 0.35;
 
 /**
  * Interleave the two lanes so the producer/explorer ratio holds at EVERY
@@ -274,7 +291,14 @@ function weaveLanes<T>(producers: T[], explorers: T[], limit: number): T[] {
 
   while (out.length < limit && (p < producers.length || e < explorers.length)) {
     // How many producers SHOULD have appeared once this slot is filled.
-    const producerQuota = Math.round((out.length + 1) * PRODUCER_SHARE);
+    //
+    // ceil, not round. At PRODUCER_SHARE = 0.35 rounding gives a quota of 0
+    // for the first slot, so slot 0 would go to an explorer — and slot 0 is
+    // exactly where the priority-10 hand-verified feeds live, since both
+    // lanes sort priority DESC. ceil guarantees the run always opens with a
+    // producer while still converging on the share across the whole list
+    // (ceil(20 * 0.35) = 7 of 20).
+    const producerQuota = Math.ceil((out.length + 1) * PRODUCER_SHARE);
     const wantProducer = p < producerQuota;
 
     if (wantProducer && p < producers.length) out.push(producers[p++]);

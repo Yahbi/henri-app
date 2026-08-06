@@ -35,6 +35,7 @@ import {
   datasetKindSupported,
   __resetDatasetKindSupport,
   MAX_CONSECUTIVE_ERRORS,
+  PRODUCER_SHARE,
 } from "../sources-db";
 
 // ── minimal PostgREST-shaped fake ────────────────────────────────────────────
@@ -187,7 +188,7 @@ describe("getActiveSources — probe-rejected sources leave the rotation", () =>
     }
   });
 
-  it("gives producers 60% of the slots and explorers the rest", async () => {
+  it("splits slots by PRODUCER_SHARE, explorers take the rest", async () => {
     // Both lanes answer with `limit` distinct rows, so the split is visible.
     const fake = createFakeClient((q) => ({
       data: Array.from({ length: q.limit ?? 0 }, (_, i) => ({
@@ -199,8 +200,11 @@ describe("getActiveSources — probe-rejected sources leave the rotation", () =>
 
     const sources = await getActiveSources(50);
     expect(sources).toHaveLength(50);
-    expect(sources.filter((s) => s.source_key.startsWith("p"))).toHaveLength(30);
-    expect(sources.filter((s) => s.source_key.startsWith("e"))).toHaveLength(20);
+    // Derived, not hardcoded: PRODUCER_SHARE is a tuning knob and this test
+    // asserts the invariant it controls, not the value it happens to hold.
+    const wantProducers = Math.ceil(50 * PRODUCER_SHARE);
+    expect(sources.filter((s) => s.source_key.startsWith("p"))).toHaveLength(wantProducers);
+    expect(sources.filter((s) => s.source_key.startsWith("e"))).toHaveLength(50 - wantProducers);
   });
 
   /**
@@ -239,8 +243,8 @@ describe("getActiveSources — probe-rejected sources leave the rotation", () =>
 
       expect(explorers).toBeGreaterThan(0);
       // Allow one slot of rounding drift either way.
-      expect(producers).toBeGreaterThanOrEqual(Math.round(prefixLength * 0.6) - 1);
-      expect(producers).toBeLessThanOrEqual(Math.round(prefixLength * 0.6) + 1);
+      expect(producers).toBeGreaterThanOrEqual(Math.ceil(prefixLength * PRODUCER_SHARE) - 1);
+      expect(producers).toBeLessThanOrEqual(Math.ceil(prefixLength * PRODUCER_SHARE) + 1);
     }
   });
 

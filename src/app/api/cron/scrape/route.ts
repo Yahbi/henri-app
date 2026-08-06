@@ -245,7 +245,18 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
   // Raising --max-time is NOT the alternative: Vercel hard-kills the function
   // at maxDuration=300, so 290 is already at the ceiling. The budget is the
   // only side with room to move.
-  const BUDGET_MS = 175_000;
+  // Raised 175s -> 210s on 2026-08-06.
+  //
+  // 175s was chosen when a 230s budget produced 296s runs and blew curl's
+  // --max-time 290, but it over-corrected: it left 115 seconds of the
+  // caller's window unused, and after the rotation weave landed the run was
+  // budget-bound at 24 sources with 210,896 still never scraped. The tail
+  // that overran at 230s was ~66s, so 210s lands around 270s — inside 290
+  // with real margin, and inside Vercel's maxDuration=300 either way.
+  //
+  // The budget is the only side with room to move: --max-time cannot go past
+  // 300 because Vercel hard-kills the function there.
+  const BUDGET_MS = 210_000;
   let budgetExhausted = false;
 
   // ── FRESHNESS PASS vs BACKFILL (2026-08-05) ───────────────────────────
