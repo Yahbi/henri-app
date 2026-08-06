@@ -500,9 +500,21 @@ export async function scrapeArcGISSource(
           status:          normalizeStatus(getField(attr, source.status_field) ?? ""),
           description:     getField(attr, source.desc_field),
           address:         rawAddress || null,
-          zip:             resolvedZip,
-          latitude:        geo?.lat ?? null,
-          longitude:       geo?.lng ?? null,
+          // zip / latitude / longitude are ABSENT here and added below only
+          // when this fetch resolved them — same rule as flat-record.ts.
+          //
+          // They used to be unconditional on this path. The upsert runs with
+          // merge-duplicates, so a re-scrape that resolved nothing wrote
+          // `SET zip = NULL` over a stored ZIP, erasing geocoder backfill on
+          // a schedule. That was fixed in flat-record.ts (the Socrata/CKAN
+          // path) earlier today and MISSED here — which matters more, not
+          // less, because ArcGIS is 87% of enabled sources.
+          //
+          // The database trigger permits_preserve_zip (00131) already blocks
+          // the damage, so this is defence in depth rather than the only
+          // guard. Both layers stay: the trigger protects rows whatever
+          // writes them, and omitting the key here keeps the app honest
+          // about what it actually resolved.
           issued_date:     issuedDate,
           estimated_value: parseMoney(rawValue),
           // `contractor_name` is DELIBERATELY ABSENT from the base payload.
@@ -519,6 +531,14 @@ export async function scrapeArcGISSource(
           raw_json:        attr,
           updated_at:      new Date().toISOString(),
         };
+
+        // Geo columns: present only when this fetch resolved them. See the
+        // note in the row literal above — writing null erases backfill.
+        if (resolvedZip) row.zip = resolvedZip;
+        if (geo?.lat != null && geo?.lng != null) {
+          row.latitude = geo.lat;
+          row.longitude = geo.lng;
+        }
 
         // Populate the denormalised contact columns from the raw attributes —
         // ArcGIS feeds such as Bozeman MT ship CONTRACTOR_EMAIL and

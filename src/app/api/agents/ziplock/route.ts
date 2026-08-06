@@ -4,6 +4,7 @@ import { requireContractor } from "@/lib/auth/requireContractor";
 import { PLAN_ZIP_LIMITS } from "@/lib/plans/constants";
 import { ZipLockBodySchema, parseBody } from "@/lib/schemas/api";
 import { logger } from "@/lib/logger";
+import { claimTerritory, releaseTerritory } from "@/lib/territory/ziplock";
 
 /**
  * ZipLock Agent — Territory Exclusivity Manager
@@ -118,19 +119,27 @@ export async function POST(request: NextRequest) {
         }, { status: 403 });
       }
 
-      // Claim the territory
-      const { error } = await supabase
-        .from("territories")
-        .insert({
-          zip,
-          contractor_id,
-          claimed_at: new Date().toISOString(),
-        });
+      // Claim through the RPC, not a direct insert.
+      //
+      // A raw .insert() here stopped working the moment migration 00129 added
+      // the territories_guard_writes trigger, which refuses any writer that
+      // is not service_role/postgres/supabase_admin — the guard that closed a
+      // paywall bypass where any signed-in user could grant themselves
+      // territory straight through PostgREST. This route was the one
+      // legitimate caller still writing directly, so it 500'd.
+      //
+      // Routing through claim_territory is the correct fix rather than a
+      // workaround: that RPC is SECURITY DEFINER owned by postgres (so it
+      // passes the guard) AND it enforces the subscription check and the
+      // per-plan ZIP cap server-side. The plan-cap check above stays as a
+      // fast pre-flight that returns a friendlier 403, but it is no longer
+      // the only thing standing between a caller and a free territory.
+      const claim = await claimTerritory(zip, contractor_id);
 
-      if (error) {
+      if (!claim.success) {
         return NextResponse.json(
-          { status: "error", message: error.message },
-          { status: 500 },
+          { status: "error", message: claim.message },
+          { status: 409 },
         );
       }
 
@@ -152,16 +161,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const { error, count } = await supabase
-        .from("territories")
-        .delete()
-        .eq("zip", zip)
-        .eq("contractor_id", contractor_id);
+      // Release through the RPC — same reason as the claim path above: the
+      // 00129 trigger refuses direct DML, and release_territory is SECURITY
+      // DEFINER owned by postgres.
+      const release = await releaseTerritory(zip, contractor_id);
 
-      if (error) {
+      if (!release.success) {
         return NextResponse.json(
-          { status: "error", message: error.message },
-          { status: 500 },
+          { status: "error", message: release.message },
+          { status: 409 },
         );
       }
 
@@ -169,7 +177,10 @@ export async function POST(request: NextRequest) {
         status: "ok",
         action: "released",
         zip,
-        deleted: (count ?? 0) > 0,
+        // Was `deleted: (count ?? 0) > 0` from the raw .delete()'s row count.
+        // release_territory reports its own outcome, and reaching here means
+        // it succeeded — the failure branch returned 409 above.
+        message: release.message,
       });
     }
 
