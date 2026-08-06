@@ -249,17 +249,33 @@ export async function GET(request: NextRequest) {
       // a transaction-y loop with Promise.allSettled so a few failures
       // don't break the batch.
       const updates = matches.map(async (m) => {
-        // Only ever ADD a zip, never overwrite one. A permit that arrived
-        // from its source with a ZIP has better provenance than a Census
-        // fuzzy match, and territory assignment keys off this column.
+        // Unconditional. The "never overwrite a source ZIP" rule is enforced
+        // in the DATABASE by the permits_preserve_zip BEFORE UPDATE trigger
+        // (migration 00131), which keeps the first non-empty zip and any
+        // complete coordinate pair.
+        //
+        // This used to carry an app-side guard too — `.or("zip.is.null,
+        // zip.eq.")` appended when a ZIP was parsed — and that guard was
+        // actively destructive. supabase-js ANDs it with `.eq("id", …)`, so
+        // for any permit that ALREADY had a zip the filter matched zero rows
+        // and the latitude/longitude in the same patch were silently dropped.
+        // PostgREST returns no error for an update that matches nothing, so
+        // it logged nothing either.
+        //
+        // Measured before the fix: 626,757 permits had a zip, no coordinates,
+        // and a geocodable address — they were re-sent to Census every hour
+        // and could never leave that state. Every logged run showed
+        // geocoded === zipped (3914/3914, 3510/3510, 3204/3204 …), which is
+        // the signature: the only writes that landed were the ones where the
+        // guard did not apply.
         const patch: { latitude: number; longitude: number; zip?: string } =
           { latitude: m.lat, longitude: m.lng };
         if (m.zip) patch.zip = m.zip;
 
-        const q = supabase.from("permits").update(patch).eq("id", m.id);
-        const { error } = m.zip
-          ? await q.or("zip.is.null,zip.eq.")
-          : await q;
+        const { error } = await supabase
+          .from("permits")
+          .update(patch)
+          .eq("id", m.id);
         if (error) logger.warn("census-geocode.update_failed", { id: m.id, error: error.message });
       });
       await Promise.allSettled(updates);

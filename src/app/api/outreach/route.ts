@@ -179,16 +179,40 @@ export async function POST(request: NextRequest) {
      * fallback, so a partial context still yields a readable sentence and
      * never the strings "undefined" or "null".
      */
-    const { data: leadCtxRow } = await supabase
+    // `permit_filed_date` and `permit_age_days` used to be in this list.
+    // NEITHER COLUMN EXISTS on public.leads (the real permit_* columns are
+    // permit_description, permit_history, permit_id, permit_type,
+    // permit_value). PostgREST rejects the WHOLE select when one column is
+    // unknown, and the error was discarded below, so leadCtx came back null
+    // for every request and every token fell through to its generic
+    // fallback. Real outreach was going to homeowners as "Hi there, ... at
+    // your property (#your recent permit) ... your project ... recently" —
+    // which breaks the wedge rule that outreach is permit-specific.
+    //
+    // The age now comes off the embedded permit's issued_date, with the
+    // lead's own created_at as a backstop for manually-added and
+    // parcel-synthesized leads that have no permit row.
+    const { data: leadCtxRow, error: leadCtxErr } = await supabase
       .from("leads")
       .select(
         "owner_first, owner_last, owner_name, address, city, state, zip, " +
-          "trade, permit_value, permit_description, permit_filed_date, " +
-          "permit_age_days, permits ( permit_number )"
+          "trade, permit_value, permit_description, created_at, " +
+          "permits ( permit_number, issued_date )"
       )
       .eq("id", lead_id)
       .eq("contractor_id", user.id)
       .single();
+
+    // Never swallow this again. A failed context select does not fail the
+    // request — the fallbacks still produce a sendable message — but it must
+    // be visible, because the symptom (generic boilerplate reaching real
+    // homeowners) looks like a copywriting problem rather than a query bug.
+    if (leadCtxErr) {
+      logger.warn("outreach.lead_context_failed", {
+        lead_id,
+        error: leadCtxErr.message,
+      });
+    }
 
     const { data: profile } = await supabase
       .from("profiles")
@@ -213,9 +237,11 @@ export async function POST(request: NextRequest) {
       trade?: string | null;
       permit_value?: number | null;
       permit_description?: string | null;
-      permit_filed_date?: string | null;
-      permit_age_days?: number | null;
-      permits?: { permit_number?: string | null } | null;
+      created_at?: string | null;
+      permits?: {
+        permit_number?: string | null;
+        issued_date?: string | null;
+      } | null;
     } | null;
 
     const permit = leadCtx?.permits ?? null;
@@ -229,18 +255,16 @@ export async function POST(request: NextRequest) {
         ? leadCtx.owner_name.trim().split(/\s+/)[0] || null
         : null);
 
-    // permit_age_days is denormalized onto leads by the score cron, but
-    // is null on manually-added and parcel-synthesized leads; derive from
-    // the filed date when it's missing. A malformed date yields NaN,
-    // which formatContextValue turns into the "recently" fallback.
-    const daysAgo =
-      leadCtx?.permit_age_days ??
-      (leadCtx?.permit_filed_date
-        ? Math.round(
-            (Date.now() - new Date(leadCtx.permit_filed_date).getTime()) /
-              86_400_000
-          )
-        : null);
+    // Age of the permit, preferred from the permit's own issued_date and
+    // falling back to when the lead was created (manually-added and
+    // parcel-synthesized leads have no permit row at all). A malformed or
+    // absent date yields null/NaN, which formatContextValue turns into the
+    // "recently" fallback — so this degrades to vague, never to "undefined".
+    const ageSource =
+      leadCtx?.permits?.issued_date ?? leadCtx?.created_at ?? null;
+    const daysAgo = ageSource
+      ? Math.round((Date.now() - new Date(ageSource).getTime()) / 86_400_000)
+      : null;
 
     const addressFull = [
       leadCtx?.address,
