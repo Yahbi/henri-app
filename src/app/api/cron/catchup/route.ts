@@ -82,7 +82,16 @@ const CADENCE_H: Record<string, number> = {
   // 15 of the 100 score points — a stale table silently mis-scores every
   // lead in the product, which is worse than an obviously-missing feature.
   "zip-demand": 24,
-  "geocode-backfill": 24,
+  // geocode-backfill removed 2026-08-06. It burned 281s of its 290s ceiling
+  // per run to read 250 permits and write 0 coordinates, indefinitely: it
+  // geocodes through Nominatim at 1 req/sec (so 250 rows is 275s by
+  // construction) and it has no attempt marker, so with nothing ever filled
+  // nothing drops out of its filter and every run re-reads the identical 250
+  // rows. `census-geocode` below does the same job through the free Census
+  // batch endpoint at 5,000 rows/run, hourly, with `geocode_attempted_at`
+  // (migration 00134) so it walks forward. The route stays on disk and in the
+  // admin trigger allow-list; re-enrol by restoring the line here and the
+  // 14:30 slot in .github/workflows/cron-fleet.yml.
   "predictive-refresh": 24,
   "market-intel": 168,
   "re-enrich": 168,

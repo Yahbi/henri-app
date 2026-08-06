@@ -33,6 +33,39 @@ export const maxDuration = 300;
 const SOCRATA_PAGE = 25;
 const ARCGIS_PAGE = 15;
 
+/**
+ * Search phrases the discovery sweep rotates through, one per completed sweep.
+ *
+ * Municipalities do not agree on what to call this dataset. Searching only
+ * "building permits" misses every portal that publishes under "construction
+ * permits", "trade permits" or per-trade splits — and the per-trade feeds are
+ * the valuable ones, because they carry the trade attribution Henri's scoring
+ * needs instead of forcing it out of a free-text description.
+ *
+ * Ordered by expected yield, so the highest-value phrases run first on a
+ * fresh `discovery_state`. "building permits" stays at the head both for that
+ * reason and so the existing cursor keeps pointing into the same result set
+ * it was already walking when this shipped.
+ *
+ * Each phrase gets its own full sweep before the next begins; duplicates
+ * across phrases are free because `ingestCandidates` upserts on `source_key`
+ * with `ignoreDuplicates`.
+ */
+const DISCOVERY_QUERIES = [
+  "building permits",
+  "construction permits",
+  "permits issued",
+  "trade permits",
+  "residential permits",
+  "electrical permits",
+  "plumbing permits",
+  "mechanical permits",
+  "roofing permits",
+  "building inspections",
+  "development permits",
+  "permit applications",
+] as const;
+
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
 }
@@ -145,16 +178,34 @@ async function sweepCatalog(
   // ArcGIS Hub startindex is 1-based; Socrata offset is 0-based.
   const start = catalog === "arcgis" ? Math.max(1, cursor) : cursor;
 
+  // Rotate the search phrase once per completed sweep.
+  //
+  // Both fetchers have always accepted a `query`, and both defaulted to
+  // "building permits" because nothing ever passed one. That made the entire
+  // reachable universe of discovery exactly the result set for that single
+  // phrase — roughly 480 Socrata datasets. At 25/run x 24 runs/day the sweep
+  // finishes in under a day and then re-discovers the same datasets forever,
+  // which is why `activate-arcgis-sources` had nothing new to enable.
+  //
+  // Keying off `sweeps_completed` needs no migration and no second cursor:
+  // the wrap below already increments it, so the phrase advances precisely
+  // when the current one is exhausted, and the offset cursor stays exactly
+  // as meaningful as before (it is always an offset into the CURRENT phrase's
+  // result set, which resets to 0 on the same wrap).
+  const sweepsBefore = stateRow?.sweeps_completed ?? 0;
+  const query = DISCOVERY_QUERIES[sweepsBefore % DISCOVERY_QUERIES.length];
+
   const { candidates, total } =
     catalog === "socrata"
-      ? await fetchSocrataPage(start, pageSize)
-      : await fetchArcgisPage(start, pageSize);
+      ? await fetchSocrataPage(start, pageSize, query)
+      : await fetchArcgisPage(start, pageSize, query);
 
   const outcome = await ingestCandidates(supabase, candidates);
 
-  // Advance cursor; wrap to top when we've passed the end (re-sweep forever).
+  // Advance cursor; wrap to top when we've passed the end. On wrap the sweep
+  // counter moves, which is what selects the next phrase above.
   let nextCursor = start + pageSize;
-  let sweeps = stateRow?.sweeps_completed ?? 0;
+  let sweeps = sweepsBefore;
   if (total > 0 && nextCursor >= total) {
     nextCursor = catalog === "arcgis" ? 1 : 0;
     sweeps += 1;

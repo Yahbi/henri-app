@@ -1,7 +1,8 @@
 /* eslint-disable react/no-unescaped-entities -- internal dev preview;
    curly quotes / apostrophes in narrative copy are intentional and
    render correctly. Each entity-escape would clutter 33 lines for a
-   page that ships behind robots:noindex and never reaches indexers. */
+   page carrying `metadata.robots = { index: false, follow: false }`,
+   below. */
 /**
  * Internal brand preview — twelve wordmark iterations set in Fraunces,
  * the platform's heading face.
@@ -23,8 +24,22 @@
  * wordmark gets traced to outlines so it doesn't depend on the webfont
  * loading.)
  *
- * This page is dev-only — it isn't linked from anywhere in the public
- * nav, and metadata.robots blocks indexing.
+ * Reachability, stated precisely (the previous wording claimed the page
+ * "never reaches indexers", which overstated the protection):
+ *   - It IS served in production. Nothing 404s it — /brand-preview sits in
+ *     the (marketing) group, and middleware's contractor gate doesn't cover
+ *     it.
+ *   - It IS crawlable. src/app/robots.ts deliberately does NOT disallow it:
+ *     a robots.txt Disallow stops the fetch, which would stop a crawler ever
+ *     reading the noindex below and leave the URL indexed-but-uncrawled.
+ *   - It is NOT indexable. `metadata.robots = { index: false, follow: false }`
+ *     emits <meta name="robots" content="noindex, nofollow">, which is what
+ *     actually keeps it out of results.
+ *   - It isn't linked from any nav, so it carries no internal link equity.
+ *
+ * Net: a crawler may read this page; it should not list it. If it must be
+ * unreachable rather than merely unlisted, that needs a real guard (a
+ * middleware 404 like /dev/*), not a comment.
  */
 
 import type { Metadata } from "next";

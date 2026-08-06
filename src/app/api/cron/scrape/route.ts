@@ -275,9 +275,40 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
   const HEAD_PAGES = 2;
   const BACKFILL_PAGES = 6;
 
+  // ── FIRST TOUCH (2026-08-06) ──────────────────────────────────────────
+  // A source that has never produced a row gets ONE page, not BACKFILL_PAGES.
+  //
+  // Two reasons, and the second is the important one.
+  //
+  // Throughput: unblocking the explorer lane (see weaveLanes in
+  // lib/scrapers/sources-db.ts) is worthless if each newly-reachable source
+  // then costs the same 6 pages as a proven producer. 210,903 enabled sources
+  // had never been scraped when this landed, so the run needs to spend as
+  // little as possible per source to find out whether it works at all.
+  //
+  // Correctness: 236,602 of 239,883 enabled sources have `address_field IS
+  // NULL`, so `toDBPermitSource` is feeding the scraper GUESSED column names
+  // ("id", "address", "issue_date"). Reading 6,000 rows through a mapping
+  // nobody has verified writes 6,000 rows of whatever those guesses happened
+  // to select. One page is enough for the page-0 mapping gate to reject a bad
+  // mapping, and a source that survives it earns the full allowance on its
+  // next rotation because `last_count` is then > 0.
+  const FIRST_TOUCH_PAGES = 1;
+
   if (useDbSources) {
-    // Process DB sources in batches of 5 concurrent
-    const BATCH = 5;
+    // Sources scraped concurrently per batch.
+    //
+    // Raised 5 -> 12. Scraping is network-bound — each source is waiting on a
+    // remote municipal endpoint, not on CPU or on Postgres — so the old value
+    // left most of the 175s budget idle. It is the throughput multiplier that
+    // matters most: at ~15 sources/run the never-scraped backlog would take
+    // years to clear regardless of how the slots are split.
+    //
+    // Deliberately not higher. Writes still land on a saturated Free-tier
+    // Postgres that is already returning statement timeouts to the score and
+    // enrich crons, and first-touch sources cap out at one page each, so the
+    // added write pressure is bounded.
+    const BATCH = 12;
     for (let i = 0; i < dbSources.length; i += BATCH) {
       if (Date.now() - startMs > BUDGET_MS) {
         budgetExhausted = true;
@@ -319,10 +350,21 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
               }
             }
 
+            // An unproven source buys one page; a proven one gets the full
+            // backfill allowance. `lastCount` is NULL only when the source has
+            // never completed a healthy run, which is exactly the explorer
+            // lane. A manual ?offset= backfill always gets the full allowance
+            // — that path exists to read a specific slice of history on
+            // purpose, including for a source still being brought up.
+            const backfillPages =
+              explicitOffset === null && !source.lastCount
+                ? FIRST_TOUCH_PAGES
+                : BACKFILL_PAGES;
+
             const { report, scraper } = await runOneSource(
               source,
               startOffset,
-              BACKFILL_PAGES,
+              backfillPages,
             );
 
             await recordSourceRun(source.source_key, {

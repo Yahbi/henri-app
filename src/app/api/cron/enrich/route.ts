@@ -124,10 +124,16 @@ export async function GET(request: NextRequest) {
   // real constraint (today it's not — the 133k-row backlog is
   // processable in ~20 bursts regardless of order).
   //
-  // The nested `permits(...)` join also contributed cost. Keeping it
-  // here for now because dropping it would require a second lookup
-  // per batch; premature until we measure. If bursts time out again,
-  // split into two queries (leads by id, permits by permit_id IN (...)).
+  // 2026-08-06: the nested `permits(...)` join has now been split out,
+  // exactly as the line that used to sit here proposed ("if bursts time out
+  // again, split into two queries"). They did: 4 of the 18 enrich runs on
+  // 2026-08-04..06 failed with `canceling statement due to statement
+  // timeout` on this scan. PostgREST resolves an embed inside the SAME
+  // statement as the parent select, so one 1,200-row lead scan also carried
+  // 1,200 keyed lookups into a 2.4M-row permits table, and the whole thing
+  // shared ONE 8s budget. Split, the lead scan and each 200-id permit lookup
+  // are separate statements with a separate budget each. See the chunked
+  // permit hydration right after the batch is collected.
   //
   // Not filtering on state — OpenStreetMap + (upcoming) Regrid fallback
   // provide nationwide coverage, so even leads outside our specialised
@@ -170,7 +176,7 @@ export async function GET(request: NextRequest) {
   // `permit_id` is needed to queue the lead for re-scoring after a
   // successful enrichment patch (see the scored_at reset below).
   const SELECT_COLS =
-    "id, permit_id, address, city, state, zip, year_built, home_sqft, assessed_value, owner_name, owner_first, owner_last, phone, email, score, permits(contractor_name, applicant_name, description)";
+    "id, permit_id, address, city, state, zip, year_built, home_sqft, assessed_value, owner_name, owner_first, owner_last, phone, email, score";
 
   const priorityZips = allPriorityZips(sets);
   const collected: Array<Record<string, unknown>> = [];
@@ -217,6 +223,47 @@ export async function GET(request: NextRequest) {
   }
 
   const leads = collected;
+
+  /* Attach each lead's permit fields with a SECOND set of statements.
+   *
+   * `permit_id` is the FK to `permits.id`, so every chunk below is a
+   * primary-key lookup. Chunked at 200 because PostgREST puts `.in()` values
+   * in the QUERY STRING (~8KB ceiling; 200 UUIDs is ~7.6KB) — the same bound
+   * territory-backfill and the score cron use.
+   *
+   * A missing permit yields `null`, which `processOne` already handles: it
+   * reads the field through optional chaining and falls back to null for
+   * contractor_name / applicant_name / permit_text.
+   */
+  const PERMIT_IN_CHUNK = 200;
+  if (!error && leads.length > 0) {
+    const permitIds = [
+      ...new Set(
+        leads.map((l) => l.permit_id as string | null).filter(Boolean),
+      ),
+    ] as string[];
+    const byId = new Map<string, Record<string, unknown>>();
+    for (let i = 0; i < permitIds.length; i += PERMIT_IN_CHUNK) {
+      const chunk = permitIds.slice(i, i + PERMIT_IN_CHUNK);
+      const { data: rows, error: pErr } = await supabase
+        .from("permits")
+        .select("id, contractor_name, applicant_name, description")
+        .in("id", chunk);
+      if (pErr) {
+        error = pErr;
+        break;
+      }
+      for (const p of (rows ?? []) as Array<Record<string, unknown>>) {
+        byId.set(p.id as string, p);
+      }
+    }
+    if (!error) {
+      for (const l of leads) {
+        const pid = l.permit_id as string | null;
+        l.permits = pid ? (byId.get(pid) ?? null) : null;
+      }
+    }
+  }
 
   if (error) {
     logger.error("Enrich cron scan error", { error: error.message });

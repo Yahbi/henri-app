@@ -102,8 +102,14 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const plan = profile?.plan ?? "starter";
-      const maxZips = PLAN_ZIP_LIMITS[plan] ?? 5;
+      /* Fail closed on both halves. `?? "starter"` handed a plan-less
+       * profile the $749 tier, and `PLAN_ZIP_LIMITS[plan] ?? 5` did the
+       * same for any plan missing from the table — "free" was missing, so a
+       * free account resolved to 5 ZIPs here and only the DB cap said no.
+       * An unknown plan string now yields 0, which denies rather than
+       * grants. */
+      const plan = profile?.plan ?? "free";
+      const maxZips = PLAN_ZIP_LIMITS[plan] ?? 0;
 
       const { count } = await supabase
         .from("territories")

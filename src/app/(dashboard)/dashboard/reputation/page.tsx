@@ -356,7 +356,12 @@ export default function ReputationPage() {
 
 function ReputationPageInner() {
   const { user, profile } = useUser();
-  const { reviews: rawReviews, stats, isLoading } = useReviews(user?.id);
+  // `error` was previously discarded. On a failed /api/reviews call the hook
+  // holds its zeroed defaults, so this page rendered "0 reviews / 0% response
+  // rate / 0 pos 0 neu 0 neg" plus "No reviews yet" — an outage shown to a
+  // contractor as the fact that nobody has reviewed them. Matches the explicit
+  // error state on /settings/territories.
+  const { reviews: rawReviews, stats, isLoading, error, refresh } = useReviews(user?.id);
   const [replyTarget, setReplyTarget] = useState<ReviewItem | null>(null);
   const [requestOpen, setRequestOpen] = useState(false);
   const [filter, setFilter] = useState<Sentiment | "all">("all");
@@ -423,6 +428,33 @@ function ReputationPageInner() {
         </button>
       </div>
 
+      {error ? (
+        /* A failed fetch must not render as "you have no reviews". Every
+           number below this point is derived from `reviews`, which is empty
+           after a failure — so the whole body is replaced rather than
+           dressed up with zeros. */
+        <div
+          role="alert"
+          className="rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm"
+        >
+          <p className="font-semibold text-destructive">
+            Couldn&apos;t load your reviews
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            This is <strong className="text-foreground">not</strong> an empty
+            review history — the request failed, so we can&apos;t show your
+            rating, response rate, or replies right now. {error}
+          </p>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="mt-3 rounded-lg bg-cta px-4 py-2 text-sm font-medium text-cta-foreground transition-opacity hover:opacity-90"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+      <>
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card className="p-4">
@@ -592,6 +624,9 @@ function ReputationPageInner() {
           </div>
         )}
       </div>
+
+      </>
+      )}
 
       {/* Modals */}
       {replyTarget && <ReplyModal review={replyTarget} onClose={() => setReplyTarget(null)} />}

@@ -168,7 +168,14 @@ export default function CapacitySettingsPage() {
               placeholder="e.g. 6"
               value={draft.max_active_jobs}
               onChange={(v) => setDraft((d) => ({ ...d, max_active_jobs: v }))}
-              hint="Will stop surfacing new leads once you&apos;re at this count (coming soon)."
+              /* `hint` is a plain string prop rendered as {hint} inside a
+               * <p>, not JSX markup — React escapes it, so the old
+               * "you&apos;re" printed the raw entity on screen. The trailing
+               * "(coming soon)" also restated, more vaguely, the "Not yet
+               * active — coming in a future update" badge already on this
+               * section's title, so the field carried the caveat twice and
+               * the actual behaviour once. */
+              hint="Once active, Henri will stop surfacing new leads while you're at this count. Saved now, applied when it ships."
             />
           </Section>
 

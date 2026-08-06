@@ -203,6 +203,47 @@ describe("getActiveSources — probe-rejected sources leave the rotation", () =>
     expect(sources.filter((s) => s.source_key.startsWith("e"))).toHaveLength(20);
   });
 
+  /**
+   * The regression that mattered. The test above asserts the split across all
+   * 50 returned sources — and it PASSED against the broken implementation,
+   * because `[...producers, ...explorers]` does yield 30/20 once you read all
+   * 50. The bug was that nothing reads all 50: /api/cron/scrape processes in
+   * batches of 5 against a 175s budget and reaches roughly the first 15, where
+   * the old order held 15 producers and 0 explorers.
+   *
+   * So the invariant worth testing is not the total — it is that EVERY prefix
+   * is balanced, because the time budget truncates at an index the rotation
+   * cannot predict.
+   *
+   * Live cost of getting this wrong, measured 2026-08-06: 210,903 of 239,897
+   * enabled sources had never been scraped once, and exactly 44 had been
+   * scraped in the previous 30 days.
+   */
+  it("keeps explorers in every prefix, because the time budget truncates the run", async () => {
+    const fake = createFakeClient((q) => ({
+      data: Array.from({ length: q.limit ?? 0 }, (_, i) => ({
+        source_key: `${has(q, "gt", "last_count", 0) ? "p" : "e"}${i}`,
+      })),
+      error: null,
+    }));
+    h.client = fake.client;
+
+    const sources = await getActiveSources(50);
+
+    // 15 is what a 175s budget actually reaches; the others bracket it so the
+    // property is tested rather than one magic number.
+    for (const prefixLength of [5, 10, 15, 25, 50]) {
+      const prefix = sources.slice(0, prefixLength);
+      const explorers = prefix.filter((s) => s.source_key.startsWith("e")).length;
+      const producers = prefix.length - explorers;
+
+      expect(explorers).toBeGreaterThan(0);
+      // Allow one slot of rounding drift either way.
+      expect(producers).toBeGreaterThanOrEqual(Math.round(prefixLength * 0.6) - 1);
+      expect(producers).toBeLessThanOrEqual(Math.round(prefixLength * 0.6) + 1);
+    }
+  });
+
   it("hands unused producer slots to explorers rather than shrinking the run", async () => {
     const fake = createFakeClient((q) =>
       has(q, "gt", "last_count", 0)

@@ -8,7 +8,20 @@
  * pay more to see all trades. A plumbing contractor will see only plumbing."
  *
  * Plan → trade access:
- *   free        → no map access (already enforced)
+ *   free        → own trade only, same as any other non-enterprise plan.
+ *                 This line used to read "no map access (already enforced)".
+ *                 It was not enforced and is not enforced now: the only
+ *                 plan-aware branch in this file is the `enterprise` check
+ *                 below, and `/api/leads/map` gates solely on
+ *                 `requireContractor` (auth + role="contractor") — it never
+ *                 reads `profiles.plan` to admit or deny. What actually
+ *                 keeps a non-paying account off the map is (a) middleware
+ *                 redirecting incomplete onboarding away from /dashboard,
+ *                 and (b) owning zero territories, which leaves the ZIP
+ *                 list empty and the response with no leads. Neither is a
+ *                 plan check. A comment asserting a protection is not a
+ *                 protection — if free-tier map access should 402, add the
+ *                 check to the route and restate this line.
  *   founder     → own trade only
  *   starter     → own trade only
  *   pro         → own trade only (Pro is most popular but still trade-gated;

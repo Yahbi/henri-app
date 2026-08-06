@@ -15,18 +15,24 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, ArrowRight, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PLAN_TIERS, findPlanTier } from "@/lib/plans/tiers";
 
 const LeadTrendChart = dynamic(
   () => import("@/components/analytics/LeadTrendChart").then((m) => m.LeadTrendChart),
   { ssr: false, loading: () => <div className="h-[340px] bg-card border border-border rounded-xl animate-pulse" /> }
 );
 
-const PLAN_PRICES: Record<string, number> = {
-  founder: 149,
-  starter: 749,
-  pro: 1499,
-  enterprise: 2555,
-};
+/* Subscription price feeding Cost-per-Win, ROI and the "$X/mo subscription"
+ * label in MetricGrid. Sourced from the tier table so a price change lands
+ * in exactly one place: this page used to carry its own copy of all four
+ * prices, which is precisely how a stale figure ends up lying inside a
+ * money metric without anyone noticing.
+ *
+ * Unrecognised / unsubscribed plans fall back to Starter — `findPlanTier`
+ * returns undefined for null / "free" / anything off the tier list. Same
+ * rule /api/analytics/forecast applies, so the client-computed metrics and
+ * the server forecast agree. */
+const FALLBACK_TIER = PLAN_TIERS.find((t) => t.slug === "starter")!;
 
 /* ─── Funnel Visualization ─── */
 function ConversionFunnel({ stages, overall }: {
@@ -311,7 +317,7 @@ export default function AnalyticsPage() {
   const leads = useMemo(() => leadsRaw ?? [], [leadsRaw]);
   const { profile } = useUser();
   const { funnel, isLoading: funnelLoading, error: funnelError } = useFunnel();
-  const planPrice = profile?.plan ? (PLAN_PRICES[profile.plan] ?? 749) : 749;
+  const planPrice = findPlanTier(profile?.plan)?.priceNum ?? FALLBACK_TIER.priceNum;
   const { forecast, isLoading: forecastLoading, error: forecastError } = useForecast(planPrice);
 
   // Mount-time "now" so the 30-day window is stable across renders (not a moving target)

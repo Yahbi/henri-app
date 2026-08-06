@@ -48,22 +48,51 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     const { error: rpcErr } = await supabase.rpc("refresh_zip_pre_intent_aggregates");
 
     if (rpcErr) {
-      // The function may not exist OR the matview-based function may
-      // fail because we converted to a regular table. Fall back to a
-      // direct SQL refresh via supabase-js's `from(…).select(0)` no-op
-      // (PostgREST has no exec-arbitrary-SQL endpoint, so we surface
-      // the original error and rely on the founder's manual populator
-      // script `_populate-zip-aggregates-volume.mjs`).
+      // Two different failures arrive here and they deserve different
+      // answers.
+      //
+      // STATEMENT TIMEOUT (SQLSTATE 57014) is not a fault, it is a known
+      // structural limit: the function recomputes a 730-day aggregate over
+      // ~2.4M permits, and every PostgREST call — service-role included —
+      // inherits the 8s statement_timeout. There is no argument, no paging
+      // parameter and no chunk size that makes this route fit inside 8s,
+      // because it invokes ONE statement it does not control. Returning 500
+      // for it means the weekly scheduler reports a red run for a condition
+      // that will never change until the aggregate is moved off PostgREST,
+      // and a recurring alert nobody can act on is how the actionable ones
+      // get ignored. Record it as `partial` with the reason and the operator
+      // script to run, and answer 200 so it does not fail the fleet run.
+      //
+      // Anything else — function missing, permission denied, bad signature —
+      // IS actionable and keeps the 500 it always had.
+      const isTimeout =
+        rpcErr.code === "57014" ||
+        /statement timeout/i.test(rpcErr.message ?? "");
+      const hint =
+        "Run `node scripts/_populate-zip-aggregates-volume.mjs` from the operator host — it chunks the same recompute by ZIP prefix so no single statement hits the 8s PostgREST ceiling.";
+
       logger.warn("refresh-zip-aggregates.rpc_failed", {
         error: rpcErr.message,
-        hint:
-          "If `refresh_zip_pre_intent_aggregates()` fails because the matview was converted to a regular table, run `node scripts/_populate-zip-aggregates-volume.mjs` from the operator host instead.",
+        code: rpcErr.code,
+        timeout: isTimeout,
+        hint,
       });
       await logCronRun("refresh-zip-aggregates", startedAt, {
-        status: "error",
+        status: isTimeout ? "partial" : "error",
         trigger: detectTrigger(request),
-        error: rpcErr.message,
+        error: isTimeout
+          ? `statement timeout — recompute does not fit the 8s PostgREST budget. ${hint}`
+          : rpcErr.message,
       });
+      if (isTimeout) {
+        return NextResponse.json({
+          success: false,
+          skipped: "statement_timeout",
+          detail: rpcErr.message,
+          hint,
+          watchdog,
+        });
+      }
       return NextResponse.json(
         { error: "Refresh failed", detail: rpcErr.message, watchdog },
         { status: 500 },

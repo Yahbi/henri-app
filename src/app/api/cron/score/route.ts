@@ -318,22 +318,41 @@ export async function GET(request: NextRequest) {
         .select("id, permit_type, status, description, address, city, state, zip, latitude, longitude, estimated_value, issued_date, applied_date, applicant_name, created_at, raw_json")
         .is("scored_at", null)
         .in("zip", zipChunk)
-        // Audit finding E: freshness is the heaviest single component (0-20)
-        // and it reads `issued_date` alone, so the order the queue is drained
-        // in decides which permits get the limited per-run budget.
+        // NO `ORDER BY issued_date` — removed 2026-08-06.
         //
-        // The 2026-08-05 deep audit argued AGAINST this ordering, on two
-        // grounds: newest-first would permanently starve the 16,611 unscored
-        // permits with a NULL `issued_date`, and it would sort a 1.5M-row
-        // unfiltered set. Both objections were measured against the
-        // UNFILTERED select, and the claimed-ZIP predicate above defuses
-        // both. The queue is now bounded by the claimed-ZIP permit count
-        // (16,548 today), which drains completely at 1,000/run — so
-        // NULLS LAST defers those rows by hours, it does not starve them —
-        // and the sort runs over that same bounded set rather than the whole
-        // corpus. Do NOT re-add this ordering if the ZIP predicate is ever
-        // removed.
-        .order("issued_date", { ascending: false, nullsFirst: false })
+        // It was here so the limited per-run budget went to the freshest
+        // permits (freshness is the heaviest single score component, 0-20).
+        // But it was also the reason this statement was the single largest
+        // source of cron failures in the fleet: 13 of the 366 score runs on
+        // 2026-08-04..06 died on `canceling statement due to statement
+        // timeout` at exactly this query, all reported as
+        // "Failed to fetch unscored permits".
+        //
+        // The mechanism is the classic ORDER BY + LIMIT trap. With the sort
+        // key present, `idx_permits_issued_date` (migration 00036) looks to
+        // the planner like a way to avoid a sort: walk the date index newest-
+        // first and stop after 1,000 rows pass the filter. Neither `zip` nor
+        // `scored_at` is IN that index, so every candidate needs a heap
+        // fetch to be tested — against a 2.4M-row table where matching rows
+        // are a fraction of a percent. That is hundreds of thousands of
+        // random reads for 1,000 results, and on an instance whose disk IO
+        // budget has been exhausted before it intermittently crosses 8s.
+        //
+        // Without the sort key that plan has nothing to recommend it, and the
+        // planner can BitmapAnd the two partial/plain indexes that DO cover
+        // the predicate — `idx_permits_unscored` (scored_at IS NULL) and
+        // `idx_permits_zip` — then stop at LIMIT.
+        //
+        // What is actually lost: the batch is no longer the globally-freshest
+        // 1,000 unscored permits, it is an arbitrary 1,000. Freshness still
+        // orders the batch — see the in-memory sort below — so the
+        // deadline-truncation inside the scoring loop still favours recent
+        // permits. That is a real reduction in ordering guarantee and it is
+        // acceptable only because the claimed-ZIP predicate above bounds the
+        // whole queue (16,548 permits today) to a few runs' worth of work, so
+        // every permit is reached within hours either way. If that predicate
+        // is ever removed, this trade-off stops holding — fix the index, do
+        // not re-add the ORDER BY.
         .limit(PERMIT_LIMIT - permits.length);
 
       if (fetchError) {
@@ -341,6 +360,23 @@ export async function GET(request: NextRequest) {
       }
       permits.push(...((page ?? []) as PermitRow[]));
     }
+
+    // Freshest-first WITHIN the batch, done here rather than in the database
+    // (see the note on the select above). This is what makes the per-permit
+    // deadline check further down spend its remaining budget on recent
+    // permits; it does not restore the global newest-first ordering the
+    // ORDER BY used to give. Rows with no `issued_date` sort last, matching
+    // the old NULLS LAST behaviour.
+    permits.sort((a, b) => {
+      const at = a.issued_date ? Date.parse(a.issued_date) : NaN;
+      const bt = b.issued_date ? Date.parse(b.issued_date) : NaN;
+      const aOk = Number.isFinite(at);
+      const bOk = Number.isFinite(bt);
+      if (aOk && bOk) return bt - at;
+      if (aOk) return -1;
+      if (bOk) return 1;
+      return 0;
+    });
 
     if (permits.length === 0) {
       const emptySummary = {

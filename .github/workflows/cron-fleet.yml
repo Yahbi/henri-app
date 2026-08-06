@@ -51,8 +51,38 @@ on:
         required: false
         default: ""
 
+# ONE GROUP PER SCHEDULE, not one group for the whole workflow.
+#
+# The old value was a single `group: cron-fleet` shared by both the :00 and
+# the :30 schedule. GitHub's queue for a group with `cancel-in-progress:
+# false` holds exactly ONE pending run: when a third arrival lands, the
+# pending one is CANCELLED to make room. A cancelled run reports at run level
+# as a failure and emails the repo owner, and its signature is unmistakable —
+# zero steps executed, job conclusion `cancelled`, ~16 minutes queued. Those
+# were the majority of the failure emails: roughly ten a day for runs that
+# never executed a single line, which buried the handful that were real.
+#
+# Keying the group on the schedule means the :00 and :30 fires never contend
+# with each other at all — only a :00 run can queue behind another :00 run,
+# and those are an hour apart against `timeout-minutes: 30`. So the window in
+# which a run can still be occupying the group when the next one arrives goes
+# from 30 minutes to zero of EXECUTION time. `workflow_dispatch` gets its own
+# group for the same reason (`github.event.schedule` is empty for a manual
+# run).
+#
+# Not a total guarantee, and worth saying plainly: `timeout-minutes` does not
+# cover time spent waiting for a runner. If GitHub starves this repo of
+# runners for more than an hour, a queued run can still be sitting in the
+# group when the next hour's fires, and the one after that would cancel it.
+# That needs an hour of starvation where the old shared group needed
+# thirty minutes with two schedules feeding it — the observed cancellations
+# had ~16 minutes queued, which the split removes.
+#
+# There is no in-workflow way to "exit 0 because superseded": GitHub cancels a
+# pending run BEFORE any step runs, so no step can observe it. Not queueing is
+# the only fix available.
 concurrency:
-  group: cron-fleet
+  group: cron-fleet-${{ github.event.schedule || github.event_name }}
   cancel-in-progress: false
 
 jobs:
@@ -176,7 +206,30 @@ jobs:
               13:00) due+=(enrich) ;;
               13:30) due+=(enrich) ;;
               14:00) due+=(enrich) ;;
-              14:30) due+=(enrich geocode-backfill) ;;
+              # geocode-backfill was removed from this slot 2026-08-06.
+              #
+              # Measured over 2026-08-04..06 it spent 281 seconds — one second
+              # under the 290s curl ceiling — to read 250 permits and write
+              # ZERO coordinates, every single run. Two independent reasons,
+              # and neither is fixable in a slot:
+              #
+              #   1. It geocodes through Nominatim at the policy-mandated
+              #      1 req/sec, so 250 rows IS 275 seconds by construction.
+              #      /api/cron/census-geocode does the same job through the
+              #      free Census BATCH endpoint at 5,000 rows/run and fires
+              #      hourly at :00 (17/17 successful in the same window).
+              #   2. Its candidate query has no ordering and no attempt
+              #      marker, so it re-reads the same head of the same filtered
+              #      set forever. Because it fills nothing, nothing drops out
+              #      of the filter, so every run re-attempts the identical 250
+              #      rows. census-geocode has `geocode_attempted_at`
+              #      (migration 00134) precisely so it does not do this.
+              #
+              # The route stays on disk and stays in the admin trigger
+              # allow-list, so it can still be fired by hand. Re-enable by
+              # restoring `geocode-backfill` to this slot and to CADENCE_H in
+              # src/app/api/cron/catchup/route.ts.
+              14:30) due+=(enrich) ;;
               15:00) due+=(blast-worker) ;;
               16:30) due+=(courtlistener-liens) ;;
               17:00) due+=(usgs-quakes) ;;

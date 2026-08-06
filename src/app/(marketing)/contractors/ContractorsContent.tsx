@@ -284,13 +284,14 @@ const FEATURES = [
     badge: null,
     icon: <TerritoryIcon />,
     title: "ZIP territories",
-    // 2026-08-04 truthfulness pass: previous copy said "A roofer and an HVAC
-    // contractor can both hold the same ZIP without conflict \u2014 trades are
-    // independent." The `territories` table (migration 00003) has NO trade
-    // column; exclusivity is per (zip, slot_number) with slot_number 1..3.
-    // So territories are slot-limited, not trade-scoped. Copy now describes
-    // the mechanism that actually ships.
-    desc: "Founder/Starter/Pro/Enterprise plans include 3/5/12/20 ZIP territories respectively. Each ZIP has a limited number of contractor slots \u2014 claim yours and hold it for as long as your subscription stays active.",
+    // 2026-08-06: trade-scoped exclusivity is real as of migration 00135.
+    // The 2026-08-04 pass correctly removed this claim because `territories`
+    // (migration 00003) had no trade column and exclusivity was per
+    // (zip, slot_number) with slot_number 1..3. 00135 adds the column, freezes
+    // it at claim time, and enforces one active row per (zip, trade) with a
+    // partial unique index; 00136 raised the slot CHECK to 10 so a fourth
+    // trade in one ZIP cannot fail at INSERT. Verified live.
+    desc: "Founder/Starter/Pro/Enterprise plans include 3/5/12/20 ZIP territories respectively. Each ZIP is exclusive to one contractor per trade \u2014 a roofer and an HVAC contractor can both hold the same ZIP, a second roofer cannot. Claim yours and hold it for as long as your subscription stays active.",
   },
   {
     badge: null,
@@ -1008,13 +1009,18 @@ export function ContractorsContent({
               <br />
               <em className="text-primary">years</em> of Henri
             </h2>
-            {/* 2026-08-04: "one roofer per ZIP, per trade" removed — the
-              * territories table has three slots per ZIP and no trade
-              * column, so the claim describes a mechanism that isn't built. */}
+            {/* Restored 2026-08-06. Removed on 2026-08-04 because the
+              * territories table had three slots per ZIP and no trade column,
+              * so the claim described a mechanism that was not built. It is
+              * built now: migration 00135 adds territories.trade plus a
+              * partial unique index on (zip, trade) WHERE status='active'.
+              * Verified against the live database — a second `general`
+              * contractor on a held ZIP is refused, a `roofing` contractor on
+              * the same ZIP is allowed. */}
             <p className="text-base leading-relaxed text-[#9E9C92]">
               No per-lead fees. No setup costs. No contracts. Claim the ZIP
-              territories your plan includes and keep them while you&apos;re
-              subscribed.
+              territories your plan includes — one contractor per trade in each
+              ZIP — and keep them while you&apos;re subscribed.
             </p>
           </div>
 
