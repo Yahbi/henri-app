@@ -305,6 +305,20 @@ interface CoveragePayload {
   zips_covered?: unknown;
   state_permits?: unknown;
   computed_at?: unknown;
+  /**
+   * Per-state count of permits that actually CARRY A ZIP, written by the
+   * refresh cron (the only place that can afford the extra query per state).
+   *
+   * Optional on purpose: a cache row written before this field existed must
+   * still render, so the reader falls back to the raw histogram below.
+   *
+   * This is what a state's coverage should be judged on. Territories are sold
+   * per ZIP, so a permit without one cannot be sold to anybody — qualifying a
+   * state on raw row count tells a contractor a state is covered when nothing
+   * in it is purchasable. Measured 2026-08-06: 42 states hold permits, 33
+   * clear the floor on raw volume, only 26 clear it on ZIP-bearing volume.
+   */
+  state_permits_zipped?: unknown;
 }
 
 function asPositiveInt(v: unknown): number {
@@ -343,8 +357,37 @@ function parseCoveragePayload(raw: unknown): LandingStats | null {
     }
   }
 
-  const activeStates = (Object.keys(statePermits) as UsState[])
-    .filter((s) => (statePermits[s] ?? 0) >= ACTIVE_STATE_MIN_PERMITS)
+  // Qualify states on ZIP-BEARING volume when the cache carries it.
+  //
+  // The refresh cron writes `state_permits_zipped` alongside `state_permits`,
+  // but this reader ignored it and re-derived from RAW volume — so the cron
+  // computed the honest figure (26 states) and the site rendered the inflated
+  // one (33). The write half of that truthfulness fix shipped without the
+  // read half, which is worse than not shipping it: the number looks
+  // considered and is wrong.
+  //
+  // The threshold stays here rather than in the cron so there is exactly one
+  // definition of "covered". Falls back to the raw histogram when the field
+  // is absent, so a cache row written by the previous version renders
+  // unchanged.
+  const statePermitsZipped: Partial<Record<UsState, number>> = {};
+  if (p.state_permits_zipped && typeof p.state_permits_zipped === "object") {
+    for (const [code, n] of Object.entries(
+      p.state_permits_zipped as Record<string, unknown>,
+    )) {
+      const upper = code.toUpperCase();
+      if (!VALID_STATES.has(upper)) continue;
+      const count = asPositiveInt(n);
+      if (count > 0) statePermitsZipped[upper as UsState] = count;
+    }
+  }
+
+  const qualifyOn = Object.keys(statePermitsZipped).length
+    ? statePermitsZipped
+    : statePermits;
+
+  const activeStates = (Object.keys(qualifyOn) as UsState[])
+    .filter((s) => (qualifyOn[s] ?? 0) >= ACTIVE_STATE_MIN_PERMITS)
     .sort();
 
   // A payload with permits but no usable histogram is a partial write;
