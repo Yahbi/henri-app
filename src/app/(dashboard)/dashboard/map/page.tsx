@@ -241,6 +241,12 @@ export default function MapPage() {
     gatedTrade: string | null;
     plan: string | null;
     profileTrade: string | null;
+    /** Exact count of this contractor's leads the trade gate is hiding.
+     *  null means NOT COUNTED, which is not the same as zero — the banner
+     *  renders nothing rather than "0 hidden" in that case. Wedge rule 3
+     *  says rows are never silently dropped; the API has been returning this
+     *  since 2026-08-05 and nothing rendered it. */
+    filteredOut: number | null;
   } | null>(null);
 
   // Module 20 — bottom drawer on full-screen map. Click a pin → fetch the
@@ -1170,7 +1176,15 @@ export default function MapPage() {
               <Lock className="h-4 w-4 text-[#7d4f39] shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-[12px] text-[#7d4f39] leading-tight">
-                  <span className="font-semibold">Showing {formatTradeLabel(gateMeta.gatedTrade)} leads only.</span>
+                  <span className="font-semibold">
+                    Showing {formatTradeLabel(gateMeta.gatedTrade)} leads only
+                    {/* Only when actually counted AND non-zero. A null count
+                      * means the API did not measure it, and "0 hidden" would
+                      * be a claim we cannot support. */}
+                    {typeof gateMeta.filteredOut === "number" && gateMeta.filteredOut > 0
+                      ? ` — ${gateMeta.filteredOut.toLocaleString()} hidden.`
+                      : "."}
+                  </span>
                   <span className="opacity-80"> Upgrade to GC tier (Enterprise) to see every trade across your territories.</span>
                 </p>
               </div>

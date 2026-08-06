@@ -4,6 +4,29 @@ import { checkRateLimit, getClientIp, rateLimitResponse } from "@/lib/utils/rate
 import { logger } from "@/lib/logger";
 import { isZip5, sanitizeFilterText } from "@/lib/validation/params";
 
+/**
+ * The `trade_type` Postgres enum, verified against the live database
+ * 2026-08-06. `profiles.trade` is this enum, not text — which is why the
+ * previous `.ilike("trade", …)` filter 500'd: `~~*` has no operator for an
+ * enum type, so PostgREST rejected the whole query.
+ *
+ * Kept in sync by hand because there is no generated types file for it; if a
+ * value is ever added to the enum, add it here or that trade becomes
+ * unsearchable (a 400, which is at least loud, rather than a silent 500).
+ */
+const TRADE_TYPES = [
+  "general",
+  "roofing",
+  "plumbing",
+  "electrical",
+  "hvac",
+  "solar",
+  "landscaping",
+  "painting",
+  "concrete",
+  "other",
+] as const;
+
 /* ─── Response contract ───────────────────────────────────────────────────
  * This interface is the ONLY declaration of the search payload. The browser
  * side (`src/hooks/useContractorSearch.ts`) imports it type-only instead of
@@ -182,9 +205,27 @@ export async function GET(request: NextRequest) {
       .eq("role", "contractor")
       .eq("onboarding_completed", true);
 
-    /* Apply trade filter */
+    /* Apply trade filter.
+     *
+     * Equality against the enum, NOT ilike. `profiles.trade` is the Postgres
+     * ENUM `trade_type`, and `~~*` has no operator for an enum — PostgREST
+     * errors and this handler returned 500 for ANY request carrying a trade
+     * filter. Latent so far only because the sole UI caller (ContractorList)
+     * never passes one.
+     *
+     * An unrecognised trade is a client mistake, so it earns a 400 rather
+     * than an empty 200 — silently returning "no contractors" for a typo is
+     * indistinguishable from genuinely having none, which is the more
+     * expensive answer to debug. */
     if (trade) {
-      query = query.ilike("trade", `%${trade}%`);
+      const wanted = trade.trim().toLowerCase();
+      if (!(TRADE_TYPES as readonly string[]).includes(wanted)) {
+        return NextResponse.json(
+          { error: `Unknown trade '${trade}'. Valid: ${TRADE_TYPES.join(", ")}` },
+          { status: 400 },
+        );
+      }
+      query = query.eq("trade", wanted);
     }
 
     /* Sort by the specified field */

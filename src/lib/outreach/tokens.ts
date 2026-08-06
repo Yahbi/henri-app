@@ -137,6 +137,39 @@ function formatContextValue(key: keyof OutreachTokenContext, raw: unknown): stri
  * resolved value. Unknown tokens are left intact so a human
  * proofreading a rendered template can see the gap.
  */
+/**
+ * Names that mean the same thing as a canonical token.
+ *
+ * The template editor's picker offered `{{address}}` and
+ * `{{permit_description}}` while the resolver only knew `address_full` and
+ * `permit_scope`. Unknown tokens are left intact by design (see below), and
+ * once the pre-send guard started refusing bodies with surviving `{{...}}`,
+ * every template built from those picker entries became a PERMANENT silent
+ * send failure — the contractor saw a red "Failed" chip and no reason.
+ *
+ * Aliasing rather than renaming, because templates already saved with the old
+ * names must keep working. Both spellings resolve to the same value.
+ */
+const TOKEN_ALIASES: Record<string, keyof OutreachTokenContext> = {
+  address: "address_full",
+  permit_description: "permit_scope",
+  // The picker called this "Type of permit"; `trade` is the field that
+  // actually carries it on the lead.
+  permit_type: "trade",
+};
+
+/**
+ * Every token name that will resolve — canonical names plus aliases.
+ *
+ * Exported so the editor's picker can be filtered against it rather than
+ * maintained as a second, independent list. A token that cannot resolve must
+ * never be offered: it does not degrade to a fallback, it blocks the send.
+ */
+export const RESOLVABLE_TOKENS: ReadonlySet<string> = new Set<string>([
+  ...Object.keys(FALLBACKS),
+  ...Object.keys(TOKEN_ALIASES),
+]);
+
 export function resolveTokens(
   input: string | null | undefined,
   ctx: Partial<OutreachTokenContext>,
@@ -146,7 +179,8 @@ export function resolveTokens(
   // support tokens like `storm_count_30d` and `lien_count_90d` that
   // bake the lookup window into the name.
   return input.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (match, rawKey: string) => {
-    const key = rawKey.toLowerCase().trim() as keyof OutreachTokenContext;
+    const raw = rawKey.toLowerCase().trim();
+    const key = (TOKEN_ALIASES[raw] ?? raw) as keyof OutreachTokenContext;
     if (!(key in FALLBACKS)) return match; // unknown token → leave as-is
     return formatContextValue(key, (ctx as Record<string, unknown>)[key]);
   });

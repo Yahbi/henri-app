@@ -23,6 +23,7 @@ import {
   resolveTokens,
   renderTemplate,
   KNOWN_TOKENS,
+  RESOLVABLE_TOKENS,
   type OutreachTokenContext,
 } from "../tokens";
 
@@ -335,5 +336,66 @@ describe("renderTemplate", () => {
     const out = renderTemplate(t, FULL_CTX);
     expect(out.subject).toBe("");
     expect(out.body).toBe("Jane");
+  });
+});
+
+/**
+ * Token aliases (2026-08-06).
+ *
+ * The template editor's picker and this resolver were maintained as two
+ * independent lists and drifted. The picker offered {{address}},
+ * {{permit_type}}, {{permit_description}} and {{contractor_license}}; the
+ * resolver knew none of them. Unknown tokens survive resolveTokens by design,
+ * so once the pre-send guard began refusing bodies containing "{{...}}", every
+ * template built from those entries became a PERMANENT silent send failure.
+ */
+describe("token aliases", () => {
+  it("resolves {{address}} as the full address", () => {
+    expect(resolveTokens("at {{address}}", FULL_CTX)).toBe(
+      resolveTokens("at {{address_full}}", FULL_CTX),
+    );
+  });
+
+  it("resolves {{permit_description}} as the permit scope", () => {
+    expect(resolveTokens("re {{permit_description}}", FULL_CTX)).toBe(
+      resolveTokens("re {{permit_scope}}", FULL_CTX),
+    );
+  });
+
+  it("resolves {{permit_type}} as the trade", () => {
+    expect(resolveTokens("a {{permit_type}} job", FULL_CTX)).toBe(
+      resolveTokens("a {{trade}} job", FULL_CTX),
+    );
+  });
+
+  it("leaves a genuinely unknown token intact so the pre-send guard catches it", () => {
+    // This is the contract the guard depends on. If an unknown token ever
+    // silently resolved to empty, a malformed template would ship instead of
+    // being blocked.
+    expect(resolveTokens("lic {{contractor_license}}", FULL_CTX)).toBe(
+      "lic {{contractor_license}}",
+    );
+  });
+
+  it("aliases resolve to a fallback, never to 'undefined', on an empty context", () => {
+    for (const alias of ["address", "permit_description", "permit_type"]) {
+      const out = resolveTokens(`x {{${alias}}} y`, {});
+      expect(out).not.toContain("undefined");
+      expect(out).not.toContain("null");
+      expect(out).not.toContain("{{");
+    }
+  });
+
+  it("RESOLVABLE_TOKENS is a superset of KNOWN_TOKENS", () => {
+    // The editor filters its picker against RESOLVABLE_TOKENS. If a canonical
+    // token were missing from it, the picker would stop offering something
+    // that works.
+    for (const k of KNOWN_TOKENS) expect(RESOLVABLE_TOKENS.has(k)).toBe(true);
+  });
+
+  it("every RESOLVABLE token actually resolves", () => {
+    for (const name of RESOLVABLE_TOKENS) {
+      expect(resolveTokens(`{{${name}}}`, FULL_CTX)).not.toContain("{{");
+    }
   });
 });

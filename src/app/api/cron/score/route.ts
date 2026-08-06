@@ -1109,22 +1109,46 @@ export async function GET(request: NextRequest) {
 
     const leadZips = [...new Set(scoredLeads.map((sl) => sl.permit.zip).filter(Boolean))] as string[];
 
-    const { data: territoryRows, error: territoryErr } = await supabase
-      .from("territories")
-      .select("zip, contractor_id, profiles!inner(id, phone, email, full_name)")
-      .in("zip", leadZips)
-      .eq("status", "active");
-    if (territoryErr) {
-      logger.error("score.territory_query_failed", {
-        error: territoryErr.message,
-        leadZipsCount: leadZips.length,
-      });
-    } else {
-      logger.info("score.territory_query_done", {
-        leadZipsCount: leadZips.length,
-        territoryRowsCount: territoryRows?.length ?? 0,
-      });
+    // Chunked, and FATAL on error — both matter.
+    //
+    // `.in()` values ride in the query string, so an unbounded leadZips list
+    // is an unbounded URL. Step 1 already chunks at ZIP_IN_CHUNK for exactly
+    // this reason; this query did not, and it is the one whose failure is
+    // most expensive.
+    //
+    // The error was also only LOGGED, then execution continued with
+    // territoryRows undefined — so a 414 here produced a run that resolved
+    // zero contractors, created zero leads, and reported status "ok". A run
+    // that cannot resolve contractors has not succeeded at anything; it must
+    // fail loudly so the fleet marks it and catchup re-fires it, rather than
+    // quietly booking a zero.
+    // Shape matches the select: zip + contractor_id are the columns, and
+    // `profiles` is the embedded relation (an object, or an array when
+    // PostgREST widens it — the consumer below handles both).
+    type TerritoryRow = {
+      zip: string;
+      contractor_id: string;
+      profiles: Record<string, string> | Record<string, string>[];
+    };
+    const territoryRows: TerritoryRow[] = [];
+    for (let i = 0; i < leadZips.length; i += ZIP_IN_CHUNK) {
+      const zipChunk = leadZips.slice(i, i + ZIP_IN_CHUNK);
+      const { data, error: territoryErr } = await supabase
+        .from("territories")
+        .select("zip, contractor_id, profiles!inner(id, phone, email, full_name)")
+        .in("zip", zipChunk)
+        .eq("status", "active");
+      if (territoryErr) {
+        throw new Error(
+          `territory query failed (${zipChunk.length} zips): ${territoryErr.message}`,
+        );
+      }
+      territoryRows.push(...((data ?? []) as unknown as TerritoryRow[]));
     }
+    logger.info("score.territory_query_done", {
+      leadZipsCount: leadZips.length,
+      territoryRowsCount: territoryRows.length,
+    });
 
     /* Build ZIP -> contractors map */
     const zipToContractors = new Map<

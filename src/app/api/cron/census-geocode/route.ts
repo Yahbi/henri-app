@@ -34,6 +34,10 @@ export const maxDuration = 300;
 const ENDPOINT = "https://geocoding.geo.census.gov/geocoder/locations/addressbatch";
 const BATCH_SIZE = 1000; // census accepts up to 10k; stay smaller for safety + memory
 const MAX_PER_RUN = 5000; // 5 batches per cron tick
+/** Days before a permit Census could not match is offered to it again. */
+const RETRY_AFTER_DAYS = 30;
+/** Ids per attempt-stamp UPDATE — `.in()` rides in the query string. */
+const ATTEMPT_STAMP_CHUNK = 200;
 
 interface PermitRow {
   id: string;
@@ -232,6 +236,26 @@ export async function GET(request: NextRequest) {
         .not("address", "is", null)
         .neq("address", "")
         .neq("address", "[object Object]")
+        // Skip rows we have already sent to Census recently.
+        //
+        // Without this the query has no memory: every run re-read the same
+        // head of the same filtered set, so a permit Census CANNOT match — a
+        // rural route, a PO box, a malformed street — was re-sent hourly
+        // forever, occupying a slot a matchable permit could have used. That
+        // is why hourly cadence did not drain the 1.3M-permit ZIP backlog it
+        // was introduced for.
+        //
+        // Not `IS NULL` only: addresses get corrected upstream and Census
+        // extends its own coverage, so a row that fails today may match next
+        // quarter. RETRY_AFTER_DAYS lets them back in, just not every hour.
+        .or(
+          `geocode_attempted_at.is.null,geocode_attempted_at.lt.${
+            new Date(Date.now() - RETRY_AFTER_DAYS * 86_400_000).toISOString()
+          }`,
+        )
+        // Deterministic order so the 5 in-run batches walk FORWARD instead of
+        // re-reading page one five times.
+        .order("id", { ascending: true })
         .limit(fetchSize);
 
       if (fetchErr) {
@@ -243,6 +267,28 @@ export async function GET(request: NextRequest) {
       const matches = await geocodeBatch(pending as PermitRow[]);
       batches += 1;
       totalFetched += pending.length;
+
+      // Stamp EVERY id we sent, matched or not — an unmatched row is exactly
+      // the one that must not come back next hour. Chunked because `.in()`
+      // values ride in the query string (~8KB ceiling).
+      const attemptedAt = new Date().toISOString();
+      const sentIds = (pending as PermitRow[]).map((r) => r.id);
+      for (let i = 0; i < sentIds.length; i += ATTEMPT_STAMP_CHUNK) {
+        const idChunk = sentIds.slice(i, i + ATTEMPT_STAMP_CHUNK);
+        const { error: stampErr } = await supabase
+          .from("permits")
+          .update({ geocode_attempted_at: attemptedAt })
+          .in("id", idChunk);
+        if (stampErr) {
+          // Non-fatal: the geocode results below are still worth writing.
+          // But log it, because a silently failing stamp reinstates exactly
+          // the re-grinding loop this column exists to stop.
+          logger.warn("census-geocode.attempt_stamp_failed", {
+            count: idChunk.length,
+            error: stampErr.message,
+          });
+        }
+      }
 
       // Bulk update via individual updates (Supabase doesn't support
       // multi-row UPDATE in a single round-trip via the JS client). Use

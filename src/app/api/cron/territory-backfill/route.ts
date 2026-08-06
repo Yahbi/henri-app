@@ -143,6 +143,11 @@ async function handler(request: NextRequest): Promise<NextResponse> {
           .select("id")
           .eq("zip", zip)
           .not("scored_at", "is", null)
+          // Deterministic order. `.range()` without an ORDER BY leaves the
+          // row order up to the planner, so two pages of the same scan can
+          // overlap or skip rows entirely — the paging arithmetic below only
+          // means anything against a stable sequence.
+          .order("id", { ascending: true })
           .range(offset, offset + SCAN_PAGE - 1);
 
         if (permErr) {
@@ -195,6 +200,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         }
 
         const budget = Math.min(orphans.length, MAX_PER_RUN - requeued);
+        let requeuedThisPage = 0;
         for (let i = 0; i < budget; i += CHUNK) {
           if (pastDeadline()) break;
           const slice = orphans.slice(i, Math.min(i + CHUNK, budget));
@@ -209,10 +215,19 @@ async function handler(request: NextRequest): Promise<NextResponse> {
           }
           requeued += slice.length;
           perZip[zip] = (perZip[zip] ?? 0) + slice.length;
+          requeuedThisPage += slice.length;
         }
 
-        // Rows we skipped stay in the filtered set and must still be paged past.
-        offset += candidates.length - budget;
+        // Advance past the rows we did NOT re-queue.
+        //
+        // Re-queued rows drop out of the `scored_at IS NOT NULL` filter, so
+        // the next page shifts down by however many actually moved — and it
+        // is `requeuedThisPage`, not `budget`, that moved. The two differ
+        // whenever the loop exits early (deadline reached, or an UPDATE
+        // errored), and using `budget` then skips orphans that were never
+        // touched: they sit unexamined until some later run happens to page
+        // over them again.
+        offset += candidates.length - requeuedThisPage;
         if (candidates.length < SCAN_PAGE) break;
       }
     }

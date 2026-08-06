@@ -8,6 +8,7 @@ import { FocusTrap } from "@/components/ui/focus-trap";
 import { OutreachLibraryCard } from "@/components/dashboard/OutreachLibraryCard";
 import { AutoFireOutreachToggle } from "@/components/dashboard/AutoFireOutreachToggle";
 import { Card } from "@/components/ui/card";
+import { RESOLVABLE_TOKENS } from "@/lib/outreach/tokens";
 
 interface Template {
   name: string;
@@ -93,7 +94,7 @@ interface TemplateModalProps {
  * plan calls for a token picker; this is the catalog that powers it.
  * Token names match what the sequence engine substitutes at send-time
  * (see src/lib/sequences/engine.ts). */
-const TEMPLATE_TOKENS: { name: string; sample: string; hint: string }[] = [
+const TEMPLATE_TOKEN_CATALOG: { name: string; sample: string; hint: string }[] = [
   { name: "{{owner_first}}",        sample: "John",                   hint: "First name of the homeowner" },
   { name: "{{owner_last}}",         sample: "Smith",                  hint: "Last name of the homeowner" },
   { name: "{{address}}",            sample: "123 Maple St, Hartford", hint: "Full property address" },
@@ -110,10 +111,39 @@ const TEMPLATE_TOKENS: { name: string; sample: string; hint: string }[] = [
   { name: "{{contractor_license}}", sample: "HIC.0654321",            hint: "Contractor license number" },
 ];
 
+/**
+ * The picker, filtered to tokens the SEND-TIME resolver can actually resolve.
+ *
+ * These two lists used to be independent, and drifted: the catalog offered
+ * {{address}}, {{permit_type}}, {{permit_description}} and
+ * {{contractor_license}}, none of which src/lib/outreach/tokens.ts knew.
+ * Unknown tokens survive resolveTokens by design, and once the pre-send guard
+ * began refusing bodies containing `{{...}}`, every template built from those
+ * entries became a PERMANENT silent send failure — a red "Failed" chip with
+ * no explanation. Before the guard they at least shipped, with visible braces.
+ *
+ * Three of the four are now aliased in the resolver. {{contractor_license}}
+ * is NOT, deliberately: no license number is plumbed into the outreach
+ * context, and inventing one in a message to a homeowner is a compliance
+ * problem, not a formatting one. Filtering means it simply stops being
+ * offered rather than becoming a trap.
+ *
+ * Deriving the offer list from RESOLVABLE_TOKENS is the point: a token added
+ * here without resolver support now disappears from the UI — visible and
+ * harmless — instead of silently killing sends.
+ */
+const TEMPLATE_TOKENS = TEMPLATE_TOKEN_CATALOG.filter((t) =>
+  RESOLVABLE_TOKENS.has(t.name.replace(/[{}]/g, "").trim().toLowerCase()),
+);
+
 /** Render a template body with tokens replaced by sample values for the
  *  live-preview pane. Pure function; safe for render. */
 function renderPreview(body: string): string {
   let out = body;
+  // Iterate the FILTERED list: the preview must show what the send-time
+  // resolver will actually produce. Previewing an unresolvable token with a
+  // plausible sample value is precisely how {{contractor_license}} looked
+  // fine in the editor and then blocked every send built from it.
   for (const t of TEMPLATE_TOKENS) {
     out = out.replaceAll(t.name, t.sample);
   }

@@ -22,7 +22,27 @@ export async function GET(
 
     const availability = await getZipAvailability(zip);
 
-    return NextResponse.json(availability);
+    // This endpoint is PUBLIC and unauthenticated by design — the ZIP
+    // availability widget on /portal and the onboarding territory picker both
+    // poll it without a session. get_zip_availability returns a `contractors`
+    // array of raw contractor_id UUIDs, and returning those made the endpoint
+    // the first link in an enumeration chain: probe ZIPs to harvest UUIDs,
+    // then feed each UUID to the public contractor profile endpoint to read
+    // back that contractor's full active-ZIP portfolio. Both routes read
+    // through the service-role client, so RLS never applied.
+    //
+    // Nothing consumes the identities. Both callers read only slots_used and
+    // slots_total (see readSlots in src/app/onboarding/territory/page.tsx:67),
+    // so the occupancy COUNT is published and the identities are not.
+    //
+    // Kept as a key rather than dropped so any client destructuring
+    // `contractors` gets a number instead of a crash.
+    const { contractors, ...publicFields } = availability ?? {};
+
+    return NextResponse.json({
+      ...publicFields,
+      contractors_count: Array.isArray(contractors) ? contractors.length : 0,
+    });
   } catch (err) {
     logger.error("Error getting ZIP availability", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json(
