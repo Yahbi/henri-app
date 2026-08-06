@@ -479,9 +479,17 @@ export async function scrapeArcGISSource(
         if (rawAddress || issuedDate !== null) pageUsable++;
 
         const row: Record<string, unknown> = {
+          // source_id / source_city are the upsert conflict target and MUST
+          // NOT change shape — see the source_key note below, and 00133.
           source_id:       `${source.city.toLowerCase().replace(/\s+/g, "_")}_${rawId}`,
           source_city:     source.city,
           city:            source.city,
+          // Provenance only, never part of a unique constraint. 46% of
+          // enabled sources have a blank `city`, so those permits all share
+          // the namespace (source_city='', source_id='_<rawId>') and cannot
+          // be attributed to their feed. Writing this cannot change which row
+          // an upsert matches.
+          ...(source.source_key ? { source_key: source.source_key } : {}),
           // Derive state from address/ZIP so junk 'US' source states
           // (e.g. auto-discovered sources) still yield correct rows — but a
           // free-text-parsed ZIP must never override the declared state.

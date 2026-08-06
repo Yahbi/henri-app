@@ -232,8 +232,18 @@ export function normalizeFlatRecord(
   const issuedDate = parseDate(rawDate);
 
   const row: Record<string, unknown> = {
+    // source_id / source_city are the upsert conflict target and MUST NOT
+    // change shape — see the source_key note below and migration 00133.
     source_id: `${source.city.toLowerCase().replace(/\s+/g, "_")}_${rawId}`,
     source_city: source.city,
+    // Provenance. 46% of enabled sources have a blank `city`, so 952,376
+    // permits carry source_city='' and cannot be traced back to the feed that
+    // produced them — which means a source publishing garbage cannot be
+    // identified. This column records the registry key and is NOT part of any
+    // unique constraint, so writing it cannot change which row an upsert
+    // matches. Undefined for the hardcoded fallback sources, which have no
+    // registry row; the key is simply omitted then.
+    ...(source.source_key ? { source_key: source.source_key } : {}),
     city: source.city,
     // Derive state from the address/ZIP so a source with a junk 'US' state
     // (e.g. auto-discovered) still yields correct rows — but never let a

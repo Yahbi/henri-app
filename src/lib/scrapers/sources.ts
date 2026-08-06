@@ -1,4 +1,15 @@
 export interface PermitSource {
+  /**
+   * Registry key of the feed, when this source came from `permit_sources`.
+   *
+   * Optional because the hardcoded PERMIT_SOURCES fallback below has no
+   * registry row. Written to `permits.source_key` for PROVENANCE only — it is
+   * deliberately not part of the upsert conflict target, since 46% of enabled
+   * sources have a blank `city` and therefore all share the single namespace
+   * (source_city='', source_id='_<rawId>'). Changing the key would re-insert
+   * ~952k existing permits as duplicates. See migration 00133.
+   */
+  source_key?: string;
   city: string;
   state: string;
   endpoint: string;
