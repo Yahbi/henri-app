@@ -1743,3 +1743,102 @@ everything through PostgREST RPC with per-call bounds.
   copy said "one contractor per trade per ZIP". Onboarding copy was restated
   to what the code guarantees; someone must decide which model is intended
   and align `PricingSection.tsx`, `contractors/page.tsx`, `billing/page.tsx`.
+
+## 2026-08-06 — launch audit: the rotation was locked, not slow
+
+### The finding that mattered
+
+`getActiveSources` (`src/lib/scrapers/sources-db.ts`) fetched 30 producers +
+50 explorers and merged them `[...producers, ...explorers]`, so every explorer
+sat at index 30+. `/api/cron/scrape` processes in batches against a time budget
+and reaches roughly the first 15-24 entries, so **the explorer lane received
+zero slots on any run where 15+ producers existed** — and 28,010 do. A source
+is an explorer until it earns `last_count > 0`, it can only earn that by being
+scraped, and it could only be scraped from a slot it never got.
+
+Measured before the fix: of **239,897 enabled sources, 210,903 had never been
+scraped once**, and exactly **44** had been scraped in the previous 30 days —
+the same 44 every run, deep-paginating their own history. The 60/40 split was
+nominal; the effective split was 100/0. `activate-arcgis-sources` enabling 50
+sources a day fed a queue nothing could leave.
+
+`weaveLanes` enforces the ratio against the running output length, so **every
+prefix is balanced** and the budget can truncate anywhere. After deploy: 60
+sources in one hour, 4 new producers within minutes.
+
+**The test that existed asserted the split across all 50 returned sources and
+PASSED against the broken code** — because nothing reads all 50. When a
+selection function is consumed by a budget-bounded loop, assert the invariant
+on PREFIXES, not on the full result.
+
+### Tuning (measured, not guessed)
+- `PRODUCER_SHARE` 0.6 → **0.35**. Pools are 28,010 producers vs 211,887
+  explorers; re-reading known feeds was the wrong trade once the explorer lane
+  was reachable. Quota uses `ceil`, not `round`, so slot 0 always goes to a
+  producer — that is where the priority-10 hand-verified feeds live.
+- `BUDGET_MS` 175s → **210s** (curl `--max-time 290`, Vercel maxDuration 300).
+- `FIRST_TOUCH_PAGES = 1` for unproven sources: 236,602 of 239,883 enabled
+  sources have `address_field IS NULL`, so the scraper runs on GUESSED column
+  names. Never spend 6 pages on an unverified mapping.
+- `DISCOVERY_BOOST_PRIORITY = 1`, **consumed on first healthy run**. Both lanes
+  order `priority DESC` before `last_scraped_at`, so a permanent boost would
+  rebuild the starvation it exists to break. 61,459 sources in the 24 states
+  under 500 ZIP-bearing permits were boosted via
+  `scripts/prioritize-coverage-gaps.mjs` (recomputes from live counts — never
+  hardcode the empty-state list).
+
+### Discovery had one hardcoded search phrase
+`src/lib/discovery/catalog.ts` defaulted to `"building permits"` and the cron
+never passed anything else, so the entire reachable universe was one result
+set. Now 12 phrases rotating off `sweeps_completed` (no migration, no second
+cursor). Probed live: **3,850 → ~24,800** catalog hits. `"permits issued"`,
+`"permit applications"` and `"development permits"` each out-rank the original
+on at least one catalog.
+
+### ZIP is the funnel neck
+A permit with no ZIP is dropped by the score cron and can never become a lead.
+67% of the corpus was in that state. `census-geocode` `MAX_PER_RUN` 5,000 →
+20,000 behind a 240s wall-clock guard (58% Census match rate measured).
+**NJ**: 2.7M permits were born ZIP-less because the parcel lookup never
+requested one — the layer it was already querying carries `ZIP_CODE` at
+**88.3% fill**. One word in `outFields`.
+
+`[object Object]` repair finished: 125,304 permits rebuilt, **0 remaining**,
+203s, via `scripts/run-objobj-repair.mjs` — bounded RPC calls WITH PACING.
+Bounded statements alone are not enough; the 2026-08-04 outage was unpaced
+back-to-back writes saturating the pool.
+
+### Territory model decided: one contractor per trade per ZIP
+Migrations **00135** (`territories.trade` frozen at claim time + partial unique
+index on `(zip, trade) WHERE status='active'`), **00136** (slot CHECK 3 → 10,
+one per `trade_type` value), **00137** (`get_zip_availability(p_zip, p_trade)`
+returns `slots_total: 10` + `taken_trades` + `available_for_trade`).
+
+**00135 shipped a security regression, closed by 00138.** It re-attached
+`GRANT EXECUTE ... TO authenticated` copied from the older 00059 pattern.
+`CREATE OR REPLACE` preserves grants, so that line re-opened the IDOR **00112**
+had closed: `claim_territory` is SECURITY DEFINER and takes `p_contractor_id`
+as a PARAMETER, so any signed-in user could claim territory on another
+account. **Rule: a SECURITY DEFINER function that accepts an actor id as an
+argument is service_role-only.** 00059 and 00112 disagree and the wrong one
+reads like the newer convention — check 00112 before touching these grants.
+
+### Query-string byte limits bit twice more
+`.in()` values and long query params ride in the URL. `/api/exclusivity` was
+sending every lead id in one GET — 8,003 chars, **431**, so exclusivity badges
+were silently dead for any contractor with 200+ leads (the wedge's own
+signal). Chunked to 100 ids AND capped the dependency key, because the effect
+was also refetching on every page as `useLeads` grew the array. Measured:
+8,003 → 3,944 chars, 431 → 200, 110 → 10 requests.
+
+### Cron failure emails were mostly phantom
+`concurrency: {group: cron-fleet}` was shared across the :00 and :30 schedules,
+so a superseded pending run was cancelled and GitHub reported it as a
+**run-level failure with zero steps executed** (~10/day). Split per schedule.
+`cron-score` was worse and undiagnosed: a 22-minute drain on a `*/20` schedule.
+`cron_runs.trigger='cron'` means "non-admin-trigger" — it does NOT mean
+Vercel-scheduled; `vercel.json` only holds the 2 Hobby-plan slots.
+
+`geocode-backfill` unscheduled: Nominatim's mandated 1 req/s makes 250 rows =
+275s by construction, and with no attempt marker it re-attempted identical
+rows every run. `census-geocode` does the same job at scale.
