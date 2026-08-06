@@ -113,6 +113,62 @@ function configuredMapping(source: DBPermitSource): Record<string, string | null
   };
 }
 
+/**
+ * Wall-clock ceiling for ONE source's pass.
+ *
+ * The run-level BUDGET_MS only decides when to stop LAUNCHING batches; the
+ * batch already in flight is still awaited. So the true worst case is
+ * BUDGET_MS plus the slowest single source, and that source is not bounded by
+ * anything: a producer does HEAD_PAGES + BACKFILL_PAGES = 8 pages, each with
+ * its own multi-second fetch timeout, so one slow municipal endpoint can run
+ * for minutes on its own.
+ *
+ * That is what blew the ceiling on 2026-08-06: the fleet's curl carries
+ * `--max-time 290`, the run exceeded it, and curl reported HTTP 000. The cost
+ * is far worse than the lost scrape — the fleet counts it as an endpoint
+ * failure, and two consecutive failures make it abandon EVERY remaining
+ * endpoint in that slot. One hung feed silently cancels the whole slot's
+ * ingest.
+ *
+ * This bounds ONE PASS, and a source runs up to two of them sequentially
+ * (head, then backfill), so the per-source worst case is 2x this value. The
+ * arithmetic that has to hold:
+ *
+ *     BUDGET_MS (200s) + 2 x SOURCE_DEADLINE_MS (60s) = 260s
+ *
+ * which clears the fleet's 290s curl ceiling with 30s to spare and sits well
+ * inside Vercel's maxDuration of 300. Raising either number without redoing
+ * this sum is how the 290s ceiling gets blown again.
+ *
+ * 30s is generous for a healthy feed: the measured runs complete a full page
+ * in a few seconds, so only a genuinely hung endpoint reaches the deadline.
+ *
+ * A timeout is recorded as a normal failure outcome by the catch-all below,
+ * so the source takes a strike and the 10-strike auto-disable eventually
+ * retires a feed that hangs every time. It is deliberately NOT silent.
+ */
+const SOURCE_DEADLINE_MS = 30_000;
+
+/** Reject if `p` has not settled within `ms`. */
+function withDeadline<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`source deadline exceeded after ${ms}ms: ${label}`)),
+      ms,
+    );
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 async function runOneSource(
   source: DBPermitSource,
   startOffset: number,
@@ -245,18 +301,24 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
   // Raising --max-time is NOT the alternative: Vercel hard-kills the function
   // at maxDuration=300, so 290 is already at the ceiling. The budget is the
   // only side with room to move.
-  // Raised 175s -> 210s on 2026-08-06.
+  // 175s -> 210s -> 200s on 2026-08-06.
   //
-  // 175s was chosen when a 230s budget produced 296s runs and blew curl's
-  // --max-time 290, but it over-corrected: it left 115 seconds of the
-  // caller's window unused, and after the rotation weave landed the run was
-  // budget-bound at 24 sources with 210,896 still never scraped. The tail
-  // that overran at 230s was ~66s, so 210s lands around 270s — inside 290
-  // with real margin, and inside Vercel's maxDuration=300 either way.
+  // 210 was measured wrong: a fleet run overran curl's --max-time 290 and
+  // returned HTTP 000, and the fleet then abandoned every remaining endpoint
+  // in that slot. The overrun was not the budget itself but the UNBOUNDED
+  // tail — see SOURCE_DEADLINE_MS. With each pass capped at 30s and at most
+  // two passes per source, the worst case is 200 + 60 = 260s.
   //
-  // The budget is the only side with room to move: --max-time cannot go past
-  // 300 because Vercel hard-kills the function there.
-  const BUDGET_MS = 210_000;
+  // History: 175 was itself an over-correction for a 230s budget that had
+  // produced 296s runs. It left 115s of the caller's window unused, and once
+  // the rotation weave landed the run was budget-bound at 24 sources with
+  // 210,896 sources still never scraped — so the budget genuinely did need to
+  // rise. What was missing was a cap on the tail, not a smaller budget.
+  //
+  // --max-time cannot go past 300 because Vercel hard-kills the function
+  // there, so the budget and the per-source deadline are the only two sides
+  // with room to move, and they have to be tuned together.
+  const BUDGET_MS = 200_000;
   let budgetExhausted = false;
 
   // ── FRESHNESS PASS vs BACKFILL (2026-08-05) ───────────────────────────
@@ -347,7 +409,11 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
             let headFetched = 0;
             if (explicitOffset === null && startOffset > 0) {
               try {
-                const head = await runOneSource(source, 0, HEAD_PAGES);
+                const head = await withDeadline(
+                  runOneSource(source, 0, HEAD_PAGES),
+                  SOURCE_DEADLINE_MS,
+                  `${source.source_key} head`,
+                );
                 headInserted = head.report.inserted;
                 headUpdated = head.report.updated;
                 headFetched = head.report.fetched;
@@ -372,10 +438,10 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
                 ? FIRST_TOUCH_PAGES
                 : BACKFILL_PAGES;
 
-            const { report, scraper } = await runOneSource(
-              source,
-              startOffset,
-              backfillPages,
+            const { report, scraper } = await withDeadline(
+              runOneSource(source, startOffset, backfillPages),
+              SOURCE_DEADLINE_MS,
+              `${source.source_key} backfill`,
             );
 
             await recordSourceRun(source.source_key, {
