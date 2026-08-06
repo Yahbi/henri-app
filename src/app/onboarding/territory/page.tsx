@@ -10,6 +10,14 @@ import { createClient } from "@/lib/supabase/client";
 import { isGodModeEmail } from "@/lib/auth/god-mode";
 import { cn } from "@/lib/utils/cn";
 import { PLAN_ZIP_LIMITS } from "@/lib/plans/constants";
+import { isTradeType, tradeLabel } from "@/lib/territory/trades";
+import {
+  readSlots,
+  describeSlots,
+  otherTradeCount,
+  UNKNOWN_SLOTS,
+  type ZipSlots,
+} from "@/lib/territory/availability";
 
 /* ── Plan ZIP limits ──
  * Sourced from the shared constant so this page can't drift from
@@ -26,59 +34,7 @@ const PLAN_LIMITS: Record<string, number> = {
 
 /* ── ZIP metadata by city (names curated; availability fetched live) ── */
 type ZipMeta = { zip: string; name: string };
-type ZipWithAvailability = ZipMeta & {
-  available: boolean;
-  loading: boolean;
-  /** null when the availability probe failed — NOT the same as 0. */
-  slotsUsed: number | null;
-  slotsTotal: number | null;
-  /** True when we could not determine occupancy. Renders as "unknown",
-   *  never as a green "Available" check. */
-  unknown: boolean;
-};
-
-/** Per-ZIP availability derived from the get_zip_availability payload. */
-type ZipSlots = {
-  available: boolean;
-  slotsUsed: number | null;
-  slotsTotal: number | null;
-  unknown: boolean;
-};
-
-const UNKNOWN_SLOTS: ZipSlots = {
-  // Fail *closed* on the display: an unknown ZIP is not asserted to be
-  // available. Selection is still permitted — the server is the real
-  // authority (claim_territory) — but the UI must not render a green
-  // check it cannot back up.
-  available: true,
-  slotsUsed: null,
-  slotsTotal: null,
-  unknown: true,
-};
-
-/**
- * Read occupancy from the RPC payload.
- *
- * Until 2026-08-04 both call sites did `available: !data?.is_claimed`.
- * `get_zip_availability` has never returned an `is_claimed` key (see
- * supabase/migrations/00008_ziplock_rpc.sql), so the expression was
- * `!undefined` — a hardcoded `true`. Every ZIP always displayed
- * "Available", which made the "Taken" badge and the whole Join-waitlist
- * flow unreachable and steered contractors into occupied ZIPs that then
- * failed at Confirm, after payment.
- */
-function readSlots(data: unknown): ZipSlots {
-  const d = data as { slots_used?: unknown; slots_total?: unknown } | null;
-  if (!d || typeof d.slots_used !== "number" || typeof d.slots_total !== "number") {
-    return UNKNOWN_SLOTS;
-  }
-  return {
-    available: d.slots_used < d.slots_total,
-    slotsUsed: d.slots_used,
-    slotsTotal: d.slots_total,
-    unknown: false,
-  };
-}
+type ZipWithAvailability = ZipMeta & ZipSlots & { loading: boolean };
 
 const CITY_ZIPS: Record<string, { city: string; state: string; zips: ZipMeta[] }> = {
   "Los Angeles, CA": {
@@ -213,7 +169,7 @@ const CITY_OPTIONS = Object.keys(CITY_ZIPS);
 
 export default function TerritoryPage() {
   const router = useRouter();
-  const { profile } = useUser();
+  const { profile, loading: profileLoading } = useUser();
   // ZIP entry is the PRIMARY mode — city search only covers a few pilot
   // metros, while direct ZIP entry works anywhere in the US.
   const [searchMode, setSearchMode] = useState<"city" | "zip">("zip");
@@ -248,9 +204,26 @@ export default function TerritoryPage() {
   const maxZips = PLAN_LIMITS[plan] ?? 3;
   const cityData = selectedCity ? CITY_ZIPS[selectedCity] : null;
 
+  /* The trade every availability probe is asked about, and the trade
+   * `claim_territory` will freeze onto the territory row. Sourced from
+   * profiles.trade, which /onboarding/license now requires — before this
+   * step runs, deliberately, because a wrong answer here is only visible
+   * after the card has been charged.
+   *
+   * `null` when the profile hasn't loaded or carries a value outside the
+   * enum. The probe then omits `?trade=` and the UI falls back to the
+   * trade-blind slot counts, which is honest ("N of 10 taken") rather than
+   * a green check we cannot back up. */
+  const trade = isTradeType(profile?.trade) ? profile.trade : null;
+  const tradeName = tradeLabel(trade);
+  const availabilityQuery = trade ? `?trade=${encodeURIComponent(trade)}` : "";
+
   // Fetch live availability from /api/territories/[zip] whenever a city is selected
   useEffect(() => {
-    if (!cityData) return;
+    // Wait for the profile before probing: a probe fired without the trade
+    // caches a trade-blind answer that would then be rendered as if it were
+    // trade-specific. Rows stay in their "Checking..." state meanwhile.
+    if (!cityData || profileLoading) return;
     let cancelled = false;
 
     // Mark all as loading
@@ -271,7 +244,7 @@ export default function TerritoryPage() {
         const results = await Promise.all(
           chunk.map(async (z) => {
             try {
-              const r = await fetch(`/api/territories/${z.zip}`, { cache: "no-store" });
+              const r = await fetch(`/api/territories/${z.zip}${availabilityQuery}`, { cache: "no-store" });
               // A failed probe is "unknown", not "available" — the old
               // code asserted availability on every error path.
               if (!r.ok) return { zip: z.zip, ...UNKNOWN_SLOTS };
@@ -296,7 +269,7 @@ export default function TerritoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [cityData]);
+  }, [cityData, profileLoading, availabilityQuery]);
 
   const zipsWithAvailability: ZipWithAvailability[] = cityData
     ? cityData.zips.map((z) => {
@@ -306,6 +279,8 @@ export default function TerritoryPage() {
           available: a?.available ?? true,
           slotsUsed: a?.slotsUsed ?? null,
           slotsTotal: a?.slotsTotal ?? null,
+          availableForTrade: a?.availableForTrade ?? null,
+          takenTrades: a?.takenTrades ?? [],
           unknown: a?.unknown ?? true,
           loading: a?.loading ?? true,
         };
@@ -330,7 +305,7 @@ export default function TerritoryPage() {
     setZipCheckLoading(true);
     setZipCheckResult(null);
     try {
-      const r = await fetch(`/api/territories/${z}`, { cache: "no-store" });
+      const r = await fetch(`/api/territories/${z}${availabilityQuery}`, { cache: "no-store" });
       // Same rule as the city grid: a failed probe reports "unknown",
       // never a green "available".
       if (!r.ok) { setZipCheckResult({ zip: z, ...UNKNOWN_SLOTS }); return; }
@@ -340,7 +315,7 @@ export default function TerritoryPage() {
     } finally {
       setZipCheckLoading(false);
     }
-  }, [zipInput]);
+  }, [zipInput, availabilityQuery]);
 
   // Join the waitlist for a taken ZIP via /api/territories/waitlist
   // (wraps joinWaitlist() in src/lib/territory/ziplock.ts).
@@ -550,6 +525,25 @@ export default function TerritoryPage() {
               {" "}Each ZIP is exclusive to one contractor per trade — and every
               permit inside it is locked to one contractor at a time.
             </p>
+            {/* Name the trade being checked. Availability is now a
+                per-trade answer, so a picker that doesn't say which trade
+                it asked about is telling the contractor something they
+                cannot verify. */}
+            {trade ? (
+              <p className="text-xs text-muted-foreground mt-2">
+                Availability below is for <span className="font-semibold text-foreground">{tradeName}</span>,
+                the trade on your profile.
+              </p>
+            ) : !profileLoading ? (
+              <p className="text-xs text-muted-foreground mt-2" role="status">
+                We couldn&apos;t read the trade on your profile, so availability
+                below counts every trade rather than yours. Set your trade on the{" "}
+                <Link href="/onboarding/license" className="underline underline-offset-2">
+                  license step
+                </Link>{" "}
+                for an exact answer.
+              </p>
+            ) : null}
           </div>
 
           {/* Search mode tabs */}
@@ -657,11 +651,7 @@ export default function TerritoryPage() {
                           : <X className="h-4 w-4 text-destructive" />}
                       <span className="font-medium text-foreground">ZIP {zipCheckResult.zip}</span>
                       <span className="text-muted-foreground">
-                        {zipCheckResult.unknown
-                          ? "— couldn't check right now"
-                          : zipCheckResult.available
-                            ? `— available (${zipCheckResult.slotsUsed ?? 0} of ${zipCheckResult.slotsTotal ?? 3} slots taken)`
-                            : "— all slots taken"}
+                        {describeSlots(zipCheckResult, trade, tradeName)}
                       </span>
                     </div>
                     {zipCheckResult.available && !selectedZips.includes(zipCheckResult.zip) && selectedZips.length < maxZips && (
@@ -743,6 +733,7 @@ export default function TerritoryPage() {
                   const isFull = selectedZips.length >= maxZips && !isSelected;
                   const disabled = z.loading || !z.available || isFull;
                   const isTaken = !z.available && !z.loading;
+                  const otherTrades = otherTradeCount(z, trade);
                   const wl = waitlistStatus[z.zip];
                   return (
                     <div
@@ -776,6 +767,21 @@ export default function TerritoryPage() {
                         <div className="min-w-0">
                           <span className="text-sm font-medium text-foreground">{z.zip}</span>
                           <span className="text-xs text-muted-foreground ml-2">{z.name}</span>
+                          {/* Say WHY a ZIP is refused. "Taken" alone reads as
+                              "sold out" under a model where a different trade
+                              in the same ZIP is exactly what we sell. */}
+                          {isTaken && (
+                            <span className="block text-[11px] leading-tight text-destructive/80">
+                              {z.availableForTrade === false
+                                ? `Already claimed for ${tradeName}`
+                                : `All ${z.slotsTotal ?? 10} trade slots claimed`}
+                            </span>
+                          )}
+                          {!isTaken && !z.loading && !z.unknown && otherTrades > 0 && (
+                            <span className="block text-[11px] leading-tight text-muted-foreground">
+                              {otherTrades} other trade{otherTrades === 1 ? "" : "s"} claimed here
+                            </span>
+                          )}
                         </div>
                       </button>
                       {isTaken ? (
@@ -817,7 +823,9 @@ export default function TerritoryPage() {
                               ? "Selected"
                               : z.unknown
                                 ? "Unknown"
-                                : `${z.slotsUsed ?? 0}/${z.slotsTotal ?? 3} taken`}
+                                : z.availableForTrade === true
+                                  ? "Open"
+                                  : `${z.slotsUsed ?? 0}/${z.slotsTotal ?? 10} taken`}
                         </span>
                       )}
                     </div>

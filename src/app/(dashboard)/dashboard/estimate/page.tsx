@@ -7,6 +7,13 @@ import { useEstimates, type EstimateCreateInput } from "@/hooks/useEstimates";
 import { getTradeTierPrices } from "@/lib/constants/trade-costs";
 import { resolveTaxRate } from "@/lib/tax/zip-fallback";
 import { Card } from "@/components/ui/card";
+// Both modals below declare `aria-modal="true"`, which tells assistive tech
+// the rest of the page is inert — but neither moved or contained focus, so
+// Tab walked the page behind the scrim and the trigger button kept focus
+// while being dropped from the a11y tree. FocusTrap focuses the first
+// control on mount, cycles Tab/Shift+Tab, and restores focus to the trigger
+// on unmount. Same wiring as outreach/page.tsx:235.
+import { FocusTrap } from "@/components/ui/focus-trap";
 
 /* ─── Types ─── */
 interface LineItem {
@@ -93,6 +100,7 @@ function SendModal({ id, total, address, onClose }: { id: string; total: number;
     : `Hi! Here's your estimate for ${address}: $${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. View the full breakdown here: [link]. Reply YES to accept or call us with questions!`;
 
   return (
+    <FocusTrap active>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
@@ -208,6 +216,7 @@ function SendModal({ id, total, address, onClose }: { id: string; total: number;
         )}
       </div>
     </div>
+    </FocusTrap>
   );
 }
 
@@ -334,6 +343,7 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
   }
 
   return (
+    <FocusTrap active>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm print:hidden">
       <div
         role="dialog"
@@ -500,6 +510,7 @@ function EstimateModal({ onClose, onSaved, onSave }: { onClose: () => void; onSa
         </div>
       </div>
     </div>
+    </FocusTrap>
   );
 }
 

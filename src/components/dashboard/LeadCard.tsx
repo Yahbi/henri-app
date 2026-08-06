@@ -125,19 +125,172 @@ export interface LeadData {
   permitContractorName?: string;
 }
 
+/* ── WCAG AA text colour on a brand tint (2026-08-06) ─────────────────────
+ *
+ * Henri paints small chips and the score disc as "brand hex text on a
+ * 10-12% tint of the same brand hex". That reads as one colour family, but
+ * it is two nearly-identical luminances. Measured on the shipped light
+ * theme (`layout.tsx` ships `data-theme="light"`, `--card: #FFFFFF`):
+ *
+ *   score disc   #D4886A 2.55:1 · #D4A24A 2.15:1 · #4A7FC0 3.67:1
+ *   stage chips  1.56:1 (stalled) … 3.23:1 (permit filed, no contractor)
+ *
+ * All are under the 4.5:1 AA floor that applies to text below 18.66px, and
+ * every one of these is 10-12px.
+ *
+ * The brand rule keeps `#D4886A` (and the rest of the stage palette) as the
+ * accent/surface colour, so only the glyph moves: the tint background, the
+ * border and the dot stay on the raw hex, and just the text is pushed along
+ * the lightness axis until it clears the floor. Channels scale
+ * proportionally, so hue is preserved and each chip still reads as its
+ * stage.
+ *
+ * `light-dark()` selects the pair per theme. The dark themes are therefore
+ * unchanged — they already measured 4.19:1-8.43:1 and keep the raw hex
+ * wherever it passes. A browser without `light-dark()` drops the
+ * declaration and inherits the body colour, which is legible on both
+ * surfaces.
+ */
+
+/** AA needs 4.5:1; the extra 0.1 is headroom for channel rounding. */
+const AA_MIN_RATIO = 4.6;
+/** `--card` in the light theme (globals.css). */
+const LIGHT_SURFACE = "#FFFFFF";
+/** `--card` in the `dusk` theme. Dusk is the LIGHTER of the two dark
+ *  surfaces (`dark` is #1C1B18), so solving against it satisfies both. */
+const DARK_SURFACE = "#231A0E";
+
+type RGB = [number, number, number];
+
+function parseHex(hex: string): RGB | null {
+  const h = hex.replace("#", "").trim();
+  if (!/^[0-9a-f]{6}$/i.test(h)) return null;
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
+
+function toHex([r, g, b]: RGB): string {
+  return (
+    "#" +
+    [r, g, b]
+      .map((v) => Math.round(v).toString(16).padStart(2, "0"))
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function relativeLuminance([r, g, b]: RGB): number {
+  const f = (v: number) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+
+/** WCAG 2.x contrast ratio between two opaque colours. */
+export function contrastRatio(a: RGB, b: RGB): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const [hi, lo] = la > lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** Flatten `fg` at `alpha` over the opaque `base`. */
+function composite(fg: RGB, base: RGB, alpha: number): RGB {
+  return [
+    fg[0] * alpha + base[0] * (1 - alpha),
+    fg[1] * alpha + base[1] * (1 - alpha),
+    fg[2] * alpha + base[2] * (1 - alpha),
+  ];
+}
+
+/**
+ * Smallest lightness shift of `hex` that clears `AA_MIN_RATIO` as text on
+ * `hex` tinted at `alpha` over `surface`. Moves toward black on a light
+ * surface and toward white on a dark one. Returns `hex` unchanged when it
+ * already passes, so themes that were already compliant are untouched.
+ */
+export function aaTextOn(hex: string, alpha: number, surface: string): string {
+  const fg = parseHex(hex);
+  const base = parseHex(surface);
+  if (!fg || !base) return hex;
+  const bg = composite(fg, base, alpha).map(Math.round) as RGB;
+  const towardWhite = relativeLuminance(base) < 0.5;
+  for (let step = 0; step <= 100; step++) {
+    const t = step / 100;
+    const candidate = (
+      towardWhite
+        ? (fg.map((v) => v + (255 - v) * t) as RGB)
+        : (fg.map((v) => v * (1 - t)) as RGB)
+    ).map(Math.round) as RGB;
+    if (contrastRatio(candidate, bg) >= AA_MIN_RATIO) return toHex(candidate);
+  }
+  return towardWhite ? "#FFFFFF" : "#000000";
+}
+
+const tintTextCache = new Map<string, string>();
+
+/**
+ * CSS `color` value for text drawn on `hex` tinted at `alpha` over the card
+ * surface — a `light-dark()` pair so each theme gets its own AA-safe glyph
+ * while the tint background stays on the raw brand hex.
+ *
+ * Memoised: there are only ~14 distinct (hex, alpha) pairs in the app, and
+ * this is called per card in a virtualized list.
+ */
+export function tintTextColor(hex: string, alpha: number): string {
+  const key = `${hex}|${alpha}`;
+  const hit = tintTextCache.get(key);
+  if (hit) return hit;
+  const value = `light-dark(${aaTextOn(hex, alpha, LIGHT_SURFACE)}, ${aaTextOn(
+    hex,
+    alpha,
+    DARK_SURFACE,
+  )})`;
+  tintTextCache.set(key, value);
+  return value;
+}
+
+/** Alpha of the score disc's tint background on the Leads list. Must stay
+ *  in step with the `color-mix()` percentages in `scoreColor` below. */
+export const SCORE_TINT_ALPHA = 0.1;
+
+/** Alpha of the stage chip's tint background — the `1A` suffix on the
+ *  inline `backgroundColor` below (0x1A / 255). Shared with the Kanban
+ *  card, which paints the identical chip. */
+export const STAGE_TINT_ALPHA = 0x1a / 255;
+
+/** Raw score-tier hexes. These mirror `--hot` / `--warm` / `--cool` in
+ *  globals.css; the tint background below still resolves through the CSS
+ *  vars, these literals exist only so the AA solver can do arithmetic on
+ *  them (CSS vars aren't readable at render time). */
+export function scoreHex(score: number): string {
+  if (score >= 75) return "#D4886A"; // --hot
+  if (score >= 50) return "#D4A24A"; // --warm
+  return "#4A7FC0";                   // --cool
+}
+
 /* Score pill color — switched from hardcoded `bg-[rgba(...)]` literals
  * to `color-mix()` over the canonical `--hot / --warm / --cool` tokens.
  * If the brand palette ever shifts, the pill colour propagates from the
  * token definition instead of requiring a grep-and-replace. The 10%
  * opacity is the same visual result as the old rgba values.
  *
+ * The `text-hot` / `text-warm` / `text-cool` classes were dropped from this
+ * return on 2026-08-06: they rendered the numeral at 2.55 / 2.15 / 3.67:1.
+ * The glyph colour now comes from `tintTextColor(scoreHex(score))` at the
+ * call site, which measures 4.65 / 4.71 / 4.66:1 in light theme.
+ *
  * Shape is kept as a circle (w-9 h-9 rounded-full) rather than routed
  * through the Badge primitive — Badge is pill-shaped, and the distinct
  * circular score dot is a deliberate visual anchor on each card. */
 function scoreColor(score: number) {
-  if (score >= 75) return "text-hot bg-[color-mix(in_srgb,var(--hot)_10%,transparent)]";
-  if (score >= 50) return "text-warm bg-[color-mix(in_srgb,var(--warm)_10%,transparent)]";
-  return "text-cool bg-[color-mix(in_srgb,var(--cool)_10%,transparent)]";
+  if (score >= 75) return "bg-[color-mix(in_srgb,var(--hot)_10%,transparent)]";
+  if (score >= 50) return "bg-[color-mix(in_srgb,var(--warm)_10%,transparent)]";
+  return "bg-[color-mix(in_srgb,var(--cool)_10%,transparent)]";
 }
 
 /* Trade palette mapping — each trade points at the CSS-var token pair
@@ -307,7 +460,9 @@ export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, dis
                 className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full leading-tight"
                 style={{
                   backgroundColor: `${stagePalette.color}1A`,
-                  color: stagePalette.color,
+                  // Tint, border and dot stay on the raw stage hex — only
+                  // the label darkens, and only where the theme needs it.
+                  color: tintTextColor(stagePalette.color, STAGE_TINT_ALPHA),
                   border: `1px solid ${stagePalette.color}66`,
                 }}
                 title={stagePalette.label}
@@ -363,6 +518,7 @@ export function LeadCard({ lead, active, onClick, exclusivity: _exclusivity, dis
             "shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold",
             scoreColor(score)
           )}
+          style={{ color: tintTextColor(scoreHex(score), SCORE_TINT_ALPHA) }}
         >
           {score}
         </div>

@@ -60,6 +60,7 @@ import { getPriorityZipSets, leadTier } from "@/lib/enrichment/priority";
 import {
   loadQuotaRemaining,
   recordSpend,
+  sourceKeyConfigured,
   SOURCE_SPECS,
   type QuotaRemaining,
 } from "@/lib/enrichment/quota";
@@ -309,10 +310,17 @@ async function run(request: NextRequest, t0: number): Promise<NextResponse> {
     hitDeadline: Date.now() >= deadline,
   };
 
-  // Persist keyed-source spend from telemetry (WS2).
+  // Persist keyed-source spend from telemetry (WS2). `sourceKeyConfigured`
+  // keeps a source whose API key is unset out of the ledger: its module
+  // returns null before any I/O, so billing those invocations would retire
+  // the monthly budget on calls that never left the process.
   const spentBySource: Record<string, number> = {};
   for (const [source, t] of Object.entries(getTelemetry())) {
-    if (SOURCE_SPECS[source]?.budget != null && t.calls > 0) {
+    if (
+      SOURCE_SPECS[source]?.budget != null &&
+      t.calls > 0 &&
+      sourceKeyConfigured(source)
+    ) {
       spentBySource[source] = t.calls;
     }
   }

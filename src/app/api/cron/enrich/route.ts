@@ -15,9 +15,11 @@ import {
 import {
   loadQuotaRemaining,
   recordSpend,
+  sourceKeyConfigured,
   SOURCE_SPECS,
   type QuotaRemaining,
 } from "@/lib/enrichment/quota";
+import { buildEnrichPatch, enrichAttemptCutoff } from "./helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -183,6 +185,38 @@ export async function GET(request: NextRequest) {
   const seenIds = new Set<string>();
   let error: { message: string } | null = null;
 
+  /* Attempt marker (migration 00139).
+   *
+   * `year_built IS NULL` alone is not a queue: a lead whose sources cannot
+   * produce a year_built matches it on every run, forever. In the priority
+   * territories that is nearly every lead — Hillsborough FL's public parcel
+   * view has no year_built at all — so the same head rows were re-fetched
+   * four times a day and, once the first pass had written what it could,
+   * every later pass produced an empty patch and no write. Leads further
+   * down the corpus were never reached.
+   *
+   * `enrich_attempted_at` is stamped for every lead TOUCHED, not just the
+   * ones that yielded a field, and the scan below excludes leads attempted
+   * inside the retry window. Same shape as `permits.geocode_attempted_at`
+   * (00134) for the Census geocoder.
+   *
+   * Feature-flagged on the column existing, per the delivery pattern in
+   * CLAUDE.md: before the migration lands the cron keeps running with its
+   * previous (non-advancing) behaviour instead of failing every UPDATE.
+   * One probe per invocation. */
+  const { error: markerProbeErr } = await supabase
+    .from("leads")
+    .select("enrich_attempted_at")
+    .limit(1);
+  const attemptMarkerReady = !markerProbeErr;
+  if (markerProbeErr) {
+    logger.warn(
+      "enrich: enrich_attempted_at unavailable, queue cannot advance past unproductive leads (migration 00139 pending)",
+      { error: markerProbeErr.message },
+    );
+  }
+  const attemptCutoff = enrichAttemptCutoff();
+
   if (priorityZips.length > 0) {
     // NOTE (2026-08-04): deliberately NO global `.order("score")` here.
     // A global sort forces Postgres onto idx_leads_score (score DESC over the
@@ -195,13 +229,20 @@ export async function GET(request: NextRequest) {
     // which returns rows already score-ordered WITHIN each ZIP and lets LIMIT
     // short-circuit: 496 ms, a 25x speedup. Per-ZIP score ordering is also
     // fairer across claimed territories than a global sort.
-    const { data: pri, error: priErr } = await supabase
+    let priQuery = supabase
       .from("leads")
       .select(SELECT_COLS)
       .in("zip", priorityZips)
       .is("year_built", null)
-      .not("address", "is", null)
-      .limit(BATCH_SIZE);
+      .not("address", "is", null);
+    // Not `IS NULL` only: county and parcel data does get corrected upstream,
+    // so a lead that yielded nothing today may yield next month.
+    if (attemptMarkerReady) {
+      priQuery = priQuery.or(
+        `enrich_attempted_at.is.null,enrich_attempted_at.lt.${attemptCutoff}`,
+      );
+    }
+    const { data: pri, error: priErr } = await priQuery.limit(BATCH_SIZE);
     if (priErr) error = priErr;
     for (const l of (pri ?? []) as Array<Record<string, unknown>>) {
       if (!seenIds.has(l.id as string)) { seenIds.add(l.id as string); collected.push(l); }
@@ -210,12 +251,19 @@ export async function GET(request: NextRequest) {
 
   // Fill the rest of the batch from the general pool (tier 4).
   if (!error && collected.length < BATCH_SIZE) {
-    const { data: rest, error: restErr } = await supabase
+    let restQuery = supabase
       .from("leads")
       .select(SELECT_COLS)
       .is("year_built", null)
-      .not("address", "is", null)
-      .limit(BATCH_SIZE - collected.length);
+      .not("address", "is", null);
+    if (attemptMarkerReady) {
+      restQuery = restQuery.or(
+        `enrich_attempted_at.is.null,enrich_attempted_at.lt.${attemptCutoff}`,
+      );
+    }
+    const { data: rest, error: restErr } = await restQuery.limit(
+      BATCH_SIZE - collected.length,
+    );
     if (restErr) error = restErr;
     for (const l of (rest ?? []) as Array<Record<string, unknown>>) {
       if (!seenIds.has(l.id as string)) { seenIds.add(l.id as string); collected.push(l); }
@@ -336,57 +384,30 @@ export async function GET(request: NextRequest) {
       quotaRemaining,
     });
 
-    // Build a patch from the orchestrator result. Only write fields
-    // whose value changed from what was already on the lead. Don't
-    // clobber existing data with null.
-    const patch: Record<string, unknown> = {};
-    const assign = (key: string, value: unknown) => {
-      if (value == null) return;
-      if (lead[key] != null && lead[key] === value) return;
-      patch[key] = value;
-    };
-    assign("owner_name", hit.owner_name);
-    assign("owner_first", hit.owner_first);
-    assign("owner_last", hit.owner_last);
-    assign("phone", hit.phone);
-    assign("email", hit.email);
-    assign("mailing_address", hit.mailing_address);
-    assign("year_built", hit.year_built);
-    if (hit.home_sqft != null) patch.home_sqft = String(hit.home_sqft);
-    if (hit.lot_sqft != null) patch.lot_sqft = String(hit.lot_sqft);
-    assign("assessed_value", hit.assessed_value);
-    assign("property_value", hit.property_value);
-    assign("owner_occupied", hit.owner_occupied);
-
-    // Extended enrichment fields (migration 00044). Gated on
-    // WRITE_EXTENDED=1 the same way as provenance — including these
-    // in the UPDATE when the columns don't exist would fail the whole
-    // patch. Flip the env var on once 00044 lands.
-    if (process.env.WRITE_EXTENDED === "1") {
-      assign("employer", hit.employer);
-      assign("occupation", hit.occupation);
-    }
-
-    // Provenance columns (migration 00039). Gated on WRITE_PROVENANCE=1
-    // because including them in the UPDATE when the columns don't
-    // exist fails the whole patch, dropping the actual contact data
-    // we just captured. Pattern matches scripts/backfill-contact-from-raw.ts.
-    if (
-      process.env.WRITE_PROVENANCE === "1" &&
-      hit.primary_source &&
-      Object.keys(patch).length > 0
-    ) {
-      patch.contact_source = hit.primary_source;
-      patch.contact_confidence = hit.confidence;
-      patch.contact_extracted_at = new Date().toISOString();
-    }
+    // Build a patch from the orchestrator result. Only write fields whose
+    // value changed from what was already on the lead; never clobber
+    // existing data with null. `realFieldsChanged` counts only those real
+    // changes — the `enrich_attempted_at` stamp is always added on top and
+    // deliberately does not count, so the `enriched` metric stays honest.
+    //
+    // WRITE_EXTENDED covers employer/occupation (migration 00044) and
+    // WRITE_PROVENANCE covers contact_source/_confidence/_extracted_at
+    // (00039); both are env-gated because naming a column that does not
+    // exist fails the whole UPDATE and drops the contact data just found.
+    const { patch, realFieldsChanged } = buildEnrichPatch(lead, hit, {
+      writeExtended: process.env.WRITE_EXTENDED === "1",
+      writeProvenance: process.env.WRITE_PROVENANCE === "1",
+      stampAttempt: attemptMarkerReady,
+    });
 
     if (Object.keys(patch).length > 0) {
       const { error: upErr } = await supabase
         .from("leads")
         .update(patch)
         .eq("id", lead.id);
-      if (!upErr) {
+      if (upErr) {
+        missed++;
+      } else if (realFieldsChanged > 0) {
         enriched++;
 
         /* Re-score trigger (2026-08-04 audit).
@@ -425,9 +446,12 @@ export async function GET(request: NextRequest) {
           }
         }
       } else {
+        // Only the attempt stamp changed — the lead was tried and yielded
+        // nothing new. Not an enrichment, so it counts as a miss.
         missed++;
       }
     } else {
+      // Nothing to write at all (the attempt marker is not available yet).
       missed++;
     }
 
@@ -488,9 +512,20 @@ export async function GET(request: NextRequest) {
 
   // Persist actual keyed-source spend (from telemetry call-counts) so the
   // next run's quota snapshot reflects it (WS2). Best-effort.
+  //
+  // `sourceKeyConfigured` is the guard against billing a source that cannot
+  // reach the network: an unset key makes its module return null before any
+  // I/O, and counting those as spend would retire the whole monthly budget
+  // without a single request. The orchestrator already refuses such sources
+  // before `trace()`, so they carry no telemetry — this check keeps the
+  // invariant true at the point where spend is actually written.
   const spentBySource: Record<string, number> = {};
   for (const s of perSource) {
-    if (SOURCE_SPECS[s.source]?.budget != null && s.calls > 0) {
+    if (
+      SOURCE_SPECS[s.source]?.budget != null &&
+      s.calls > 0 &&
+      sourceKeyConfigured(s.source)
+    ) {
       spentBySource[s.source] = s.calls;
     }
   }

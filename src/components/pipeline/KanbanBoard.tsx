@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
@@ -12,6 +12,14 @@ import { formatCurrency } from "@/types/lead";
 import type { Lead, LeadStatus } from "@/types/lead";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AddLeadDialog } from "@/components/dashboard/AddLeadDialog";
+// Shared WCAG-AA glyph solver + tint alphas. Defined next to the Leads-list
+// card because both surfaces paint the identical stage chip and score disc;
+// see the block comment there for the measured before/after ratios.
+import {
+  tintTextColor,
+  scoreHex,
+  STAGE_TINT_ALPHA,
+} from "@/components/dashboard/LeadCard";
 import { ExclusivityBadge } from "@/components/dashboard/ExclusivityBadge";
 import { WatchersBadge } from "@/components/dashboard/WatchersBadge";
 import { useExclusivity } from "@/hooks/useExclusivity";
@@ -141,11 +149,18 @@ function mapLeadToKanban(lead: Lead): KanbanLead {
 
 /* Score-tier colour pill — uses the canonical `--hot`/`--warm`/`--cool`
  * tokens so the palette propagates from globals.css. Same pattern as
- * LeadCard's `scoreColor()` (lines 99-101). */
+ * LeadCard's `scoreColor()`.
+ *
+ * The `text-hot` / `text-warm` / `text-cool` classes were dropped from this
+ * return on 2026-08-06: at 12% tint over `--card` they measured 2.51 / 2.12
+ * / 3.59:1 on the shipped light theme, all under the 4.5:1 AA floor for
+ * 11px text. The glyph colour now comes from `tintTextColor()` at the call
+ * site (4.72 / 4.63 / 4.63:1). The tint background is unchanged. */
+const KANBAN_SCORE_TINT_ALPHA = 0.12;
 function scoreColor(score: number) {
-  if (score >= 75) return "text-hot  bg-[color-mix(in_srgb,var(--hot)_12%,transparent)]";
-  if (score >= 50) return "text-warm bg-[color-mix(in_srgb,var(--warm)_12%,transparent)]";
-  return "text-cool bg-[color-mix(in_srgb,var(--cool)_12%,transparent)]";
+  if (score >= 75) return "bg-[color-mix(in_srgb,var(--hot)_12%,transparent)]";
+  if (score >= 50) return "bg-[color-mix(in_srgb,var(--warm)_12%,transparent)]";
+  return "bg-[color-mix(in_srgb,var(--cool)_12%,transparent)]";
 }
 
 /* Trade pill colours — every Henri trade slug has a matching `--trade-*-fg`
@@ -278,7 +293,10 @@ function KanbanCard({
             </p>
           )}
         </div>
-        <div className={cn("shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold", scoreColor(lead.score))}>
+        <div
+          className={cn("shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold", scoreColor(lead.score))}
+          style={{ color: tintTextColor(scoreHex(lead.score), KANBAN_SCORE_TINT_ALPHA) }}
+        >
           {isUpdating ? <Loader2 className="h-3 w-3 animate-spin" /> : lead.score}
         </div>
       </div>
@@ -295,7 +313,9 @@ function KanbanCard({
             className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium leading-tight"
             style={{
               backgroundColor: `${stagePalette.color}1A`,
-              color: stagePalette.color,
+              // Tint, border and dot stay on the raw stage hex — only the
+              // label darkens, and only where the theme needs it.
+              color: tintTextColor(stagePalette.color, STAGE_TINT_ALPHA),
               border: `1px solid ${stagePalette.color}66`,
             }}
             title={stagePalette.label}
@@ -429,6 +449,17 @@ export function KanbanBoard() {
   const [draggedLead, setDraggedLead] = useState<{ lead: KanbanLead; fromCol: string } | null>(null);
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  /* Keyboard stage-move feedback (2026-08-06 a11y fix).
+   * `moveAnnouncement` feeds a polite live region for the success case;
+   * `moveError` feeds a visible role="alert" strip for the failure case.
+   * Deliberately two channels, not one: a single region carrying both
+   * would either under-announce the failure (polite) or interrupt on
+   * every routine move (assertive). Nothing is written to both, so
+   * screen readers never hear the same event twice. */
+  const [moveAnnouncement, setMoveAnnouncement] = useState("");
+  const [moveError, setMoveError] = useState<string | null>(null);
+  /* Card to re-focus after a keyboard stage-move, with a short expiry. */
+  const focusAfterMoveRef = useRef<{ id: string; until: number } | null>(null);
 
   // Phase 0a — exclusivity lock summaries. When migration 00031 isn't
   // applied the map is empty and no badge renders. When the scorer has
@@ -561,26 +592,78 @@ export function KanbanBoard() {
   }, [draggedLead, updateStatus]);
 
   /** Same mutation as handleDrop, reachable without a pointer. Wired to the
-   *  per-card stage select so the Pipeline tab is operable by keyboard. */
+   *  per-card stage select so the Pipeline tab is operable by keyboard.
+   *
+   *  The optimistic cache write in `useUpdateLeadStatus.onMutate` re-buckets
+   *  the lead into a different `<div key={col.id}>` subtree, so React
+   *  unmounts the card — and the `<select>` the user was operating — from
+   *  one column and mounts a fresh node in another. Focus therefore fell to
+   *  `<body>`, nothing was announced, and a rejected mutation rolled the
+   *  card back silently (and surfaced as an unhandled rejection, since the
+   *  onChange handler discards the promise this returns). All three are
+   *  handled below. */
   const handleMoveStage = useCallback(
     async (lead: KanbanLead, toStatus: string) => {
       if (toStatus === lead.status) return;
+      const label = COLUMNS.find((c) => c.id === toStatus)?.label ?? toStatus;
       setUpdatingIds((prev) => new Set(prev).add(lead.id));
+      setMoveError(null);
       try {
         await updateStatus.mutateAsync({
           leadId: lead.id,
           update: { status: toStatus as LeadStatus },
         });
+        setMoveAnnouncement(`${lead.addr} moved to ${label}`);
+      } catch {
+        // onError has already rolled the optimistic patch back, so the card
+        // is sitting in its original column with no feedback in any
+        // modality. role="alert" on the strip below announces this.
+        setMoveAnnouncement("");
+        setMoveError(`Couldn't move ${lead.addr} to ${label} — try again.`);
       } finally {
         setUpdatingIds((prev) => {
           const next = new Set(prev);
           next.delete(lead.id);
           return next;
         });
+        // Arm the focus-follow effect below. A single re-focus here is not
+        // enough: `onSettled` invalidates the leads query, and the refetch
+        // that lands afterwards re-renders the board again, which can
+        // orphan focus a second time.
+        focusAfterMoveRef.current = { id: lead.id, until: Date.now() + 3000 };
       }
     },
     [updateStatus],
   );
+
+  /* Focus follows a keyboard-moved card into its new column.
+   *
+   * Moving a lead re-buckets it into a different `<div key={col.id}>`
+   * subtree, so React unmounts the `<select>` the user was operating and
+   * focus falls to `<body>` — twice, since the optimistic write and the
+   * post-settle refetch each trigger a re-bucket. This runs after every
+   * render (cheap: a ref read and an early return) and re-asserts focus
+   * until the window expires.
+   *
+   * The `activeElement === document.body` guard is what makes that safe: we
+   * only ever reclaim focus that was actually orphaned, never focus the
+   * user has deliberately moved somewhere else. */
+  useEffect(() => {
+    const target = focusAfterMoveRef.current;
+    if (!target) return;
+    if (Date.now() > target.until) {
+      focusAfterMoveRef.current = null;
+      return;
+    }
+    const el = document.getElementById(`kanban-stage-${target.id}`);
+    if (!el) return; // mid-transition — try again on the next render
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== el) {
+      focusAfterMoveRef.current = null; // user moved on; leave them alone
+      return;
+    }
+    el.focus();
+  });
 
   // Weighted pipeline value
   const weights: Record<string, number> = { new: 0.05, contacted: 0.15, quoted: 0.3, proposal: 0.4, won: 1, lost: 0, archived: 0 };
@@ -623,6 +706,28 @@ export function KanbanBoard() {
           </button>
         </div>
       </div>
+
+      {/* Polite live region for a successful keyboard stage-move. Moving a
+          card silently relocates it in the DOM, which is invisible to a
+          screen-reader user; this is the only thing that announces it. */}
+      <div aria-live="polite" className="sr-only">
+        {moveAnnouncement}
+      </div>
+
+      {/* Failed stage-move. Rendered ABOVE the columns rather than in place
+          of them (unlike the query-error branch below) so a transient write
+          failure never reads as data loss. */}
+      {moveError && (
+        <div
+          role="alert"
+          className="mx-4 mt-3 shrink-0 flex items-center justify-between gap-3 rounded-lg border border-border bg-bg-subtle px-3 py-2"
+        >
+          <p className="text-xs text-foreground">{moveError}</p>
+          <Button variant="outline" size="sm" onClick={() => setMoveError(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
 
       {/* Columns — or the explanatory empty state when the contractor has
           zero leads overall (NOT when a stage filter merely matches none;

@@ -34,11 +34,10 @@ interface PermitRow {
   permit_id: string;
   status: string;
   filed_date: string;
-  expiry_date: string | null;
+  /** Elapsed days since the jurisdiction's filing date. NOT a countdown —
+   *  see the note on `leadsToPermitRows`. */
+  days_since_filed: number;
 }
-
-/* ─── Constants ─── */
-const PERMIT_VALIDITY_DAYS = 180;
 
 /* ─── Helpers ─── */
 function statusIcon(status: string, expiryDate: string | null) {
@@ -95,25 +94,46 @@ function daysUntil(dateStr: string | null): number | null {
   return Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
 }
 
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
+function daysSince(dateStr: string): number {
+  return Math.max(
+    0,
+    Math.floor((Date.now() - new Date(dateStr).getTime()) / 86_400_000),
+  );
 }
 
 function formatDate(dateStr: string, opts?: Intl.DateTimeFormatOptions): string {
   return new Date(dateStr).toLocaleDateString("en-US", opts ?? { month: "short", day: "numeric", year: "numeric" });
 }
 
-/** Map Lead objects to permit rows for the table */
+/** Map Lead objects to permit rows for the table.
+ *
+ * 2026-08-06 truthfulness pass — permit EXPIRY is gone from this file.
+ *
+ * There was a `PERMIT_VALIDITY_DAYS = 180` constant here, added to the
+ * filing date to produce an "Expires" calendar date, a red "Expired"
+ * badge and an "expires in N days" alert banner. Henri ingests no expiry
+ * data at all: no column exists anywhere in supabase/migrations (only the
+ * `expired` value of the `permit_status` enum, which nothing sets from a
+ * date), no scraper captures one, and permit validity is a
+ * jurisdiction-by-jurisdiction rule that ranges from 60 days to
+ * indefinite-while-inspections-continue. Every date in that column was
+ * invented arithmetic printed as a fact a contractor would act on — the
+ * expensive failure being skipping a live lead because Henri said its
+ * permit had lapsed.
+ *
+ * The status override was the second half of the same defect: it replaced
+ * the contractor's OWN CRM status, so a lead they had marked `won`
+ * displayed as "Expired" once the filing date passed 180 days.
+ *
+ * What ships instead is the one thing the join actually knows — elapsed
+ * days since the jurisdiction's filing date. If a real expiry field is
+ * ever ingested, add it as its own column here; do not re-derive one.
+ */
 function leadsToPermitRows(leads: Lead[]): PermitRow[] {
   return leads
     .filter((l) => l.permit_filed_date)
     .map((l) => {
       const filedDate = l.permit_filed_date!;
-      const expiryDate = addDays(filedDate, PERMIT_VALIDITY_DAYS);
-      const now = new Date().toISOString().split("T")[0];
-      const isExpired = expiryDate < now;
 
       return {
         id: l.id,
@@ -122,9 +142,9 @@ function leadsToPermitRows(leads: Lead[]): PermitRow[] {
         state: l.state ?? "",
         permit_type: l.trade ?? l.permit_type ?? "General",
         permit_id: l.permit_id,
-        status: isExpired ? "expired" : l.status,
+        status: l.status,
         filed_date: filedDate,
-        expiry_date: expiryDate,
+        days_since_filed: daysSince(filedDate),
       };
     });
 }
@@ -196,23 +216,77 @@ function buildVerificationHistory(license: LicenseRecord | null): VerificationEv
 function ComplianceScore({
   license,
   insuranceExpiry,
+  territories,
   apiScore,
 }: {
   license: LicenseRecord | null;
   insuranceExpiry: string | null;
+  territories: Array<{ active: boolean }>;
   apiScore: number;
 }) {
+  /* 2026-08-06 truthfulness pass — this checklist used to advertise a
+   * scoring formula the product does not use.
+   *
+   * The weights shown were license-on-file 20 / verified 20 / not-expiring
+   * 10 / insurance-on-file 30 / insurance-not-expiring 20, while the number
+   * in the circle beside them is `compliance_score` from
+   * /api/compliance (computeComplianceScore), which weights
+   * license 40 / verified 20 / insurance 20 / territories-active 20. So the
+   * panel that exists to tell a contractor what to fix first pointed at the
+   * wrong item: insurance read as half the score when it is a fifth, and
+   * "all territories active" — a real 20 points — had no row at all.
+   *
+   * The "<60d" row was worse than merely mis-weighted. `expiry_date` is a
+   * roster-owned column (migration 00127 rejects hand-set values, and the
+   * only writer is the signup cross-check, which covers 9 states), so for
+   * most contractors it is null — and the ternary evaluated null as a
+   * FAILURE. They got a permanent red X on a row they had no way to clear
+   * while the server happily awarded the full 40 points. It is gone: the
+   * server has no such component, and an expiry the roster never supplied
+   * cannot be scored.
+   *
+   * These four rows now mirror computeComplianceScore in
+   * src/app/api/compliance/route.ts one-for-one. THAT FUNCTION IS THE
+   * SOURCE OF TRUTH — if you change a weight there, change it here in the
+   * same commit. (The API's breakdown is not plumbed through useCompliance
+   * today; doing so is the durable fix and would let this array be
+   * deleted.)
+   */
   const insuranceDays = daysUntil(insuranceExpiry);
-  const hasInsurance = insuranceExpiry !== null;
+  const insuranceValid = insuranceDays !== null && insuranceDays > 0;
 
-  // Weights must sum to 100 — keeping them in the UI makes it obvious
-  // which checklist item to fix first when the score is low (Phase 2.4).
+  const licenseExpiryDays = daysUntil(license?.expiry_date ?? null);
+  const licenseExpired = licenseExpiryDays !== null && licenseExpiryDays <= 0;
+
+  // Via the module-scope helper — `Date.now()` inline in a component body
+  // trips the react-hooks/purity rule.
+  const verifiedSinceDays =
+    license?.last_checked_at != null ? daysSince(license.last_checked_at) : null;
+
   const items = [
-    { label: "License on file", weight: 20, ok: !!license },
-    { label: "License verified", weight: 20, ok: license?.verification_status === "verified" },
-    { label: "License not expiring (<60d)", weight: 10, ok: license?.expiry_date ? (daysUntil(license.expiry_date) ?? 0) > 60 : false },
-    { label: "Insurance on file", weight: 30, ok: hasInsurance },
-    { label: "Insurance not expiring (<30d)", weight: 20, ok: hasInsurance && insuranceDays !== null && insuranceDays > 30 },
+    {
+      label: "License on file and not expired",
+      weight: 40,
+      ok: !!license?.license_number && !licenseExpired,
+    },
+    {
+      label: "License checked in the last 30 days",
+      weight: 20,
+      ok:
+        license?.verification_status === "verified" &&
+        verifiedSinceDays !== null &&
+        verifiedSinceDays <= 30,
+    },
+    {
+      label: "Insurance on file and not expired",
+      weight: 20,
+      ok: insuranceValid,
+    },
+    {
+      label: "All claimed territories active",
+      weight: 20,
+      ok: territories.length > 0 && territories.every((t) => t.active),
+    },
   ];
   const pct = apiScore;
 
@@ -272,6 +346,9 @@ export default function CompliancePage() {
   const {
     license: hookLicense,
     insuranceExpiry,
+    // `territories` carries 20 of the 100 compliance points server-side, so
+    // the checklist needs it to render a row that matches the score.
+    territories,
     complianceScore,
     warnings,
     isLoading,
@@ -317,32 +394,34 @@ export default function CompliancePage() {
     return buildVerificationHistory(license);
   }, [license]);
 
-  // Expiration warnings for permits from real data
-  const expiringPermits = useMemo(() => {
-    return permitRows.filter((p) => {
-      if (!p.expiry_date || p.status === "expired") return false;
-      const days = daysUntil(p.expiry_date);
-      return days !== null && days <= 30 && days > 0;
-    });
-  }, [permitRows]);
+  // 2026-08-06: the `expiringPermits` memo and the "Permit Expiration
+  // Warning" banner it fed were deleted with the rest of the invented
+  // 180-day expiry (see leadsToPermitRows). The banner named a specific
+  // address and a specific day count for a deadline no jurisdiction ever
+  // issued, which is the most actionable form the fabrication took.
 
   async function runComplianceCheck() {
     setChecking(true);
     setCheckMsg("");
     setCheckFailed(false);
     try {
-      // Trigger a server-side re-check (license + permit expirations),
-      // then refresh the local compliance snapshot so the new state
-      // appears in the UI.
+      // Trigger the server-side license re-check, then refresh the local
+      // compliance snapshot so the new state appears in the UI.
       const res = await fetch("/api/compliance/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
       if (!res.ok) throw new Error(`server returned ${res.status}`);
+      // 2026-08-06: the `permits` half of this response is gone. It reported
+      // `already_expired` / `expiring_in_30d` counts derived from the same
+      // invented 180-day validity window removed above — and computed them
+      // over an arbitrary slice of leads at that (the route asked for 5,000
+      // rows, which PostgREST silently caps at 1,000, unordered). Deleted in
+      // /api/compliance/verify rather than paginated: a bounded sample of a
+      // number that should not exist is still a number that should not exist.
       const result = await res.json() as {
-        license: { expired: boolean; expiring_soon: boolean; leads_paused: boolean };
-        permits: { already_expired: number; expiring_in_30d: number };
+        license: { expired: boolean; expiring_soon: boolean };
       };
       await refresh();
       const pieces: string[] = [];
@@ -355,8 +434,6 @@ export default function CompliancePage() {
       if (result.license.expired) pieces.push("License expired or no expiry on file");
       else if (result.license.expiring_soon) pieces.push("License expires soon");
       else pieces.push("License current");
-      if (result.permits.already_expired > 0) pieces.push(`${result.permits.already_expired} expired permits`);
-      if (result.permits.expiring_in_30d > 0) pieces.push(`${result.permits.expiring_in_30d} expiring in 30d`);
       setCheckMsg(pieces.join(" · "));
     } catch {
       setCheckFailed(true);
@@ -398,21 +475,6 @@ export default function CompliancePage() {
         );
       })}
 
-      {/* Permit Expiration Warnings */}
-      {warnings.length === 0 && expiringPermits.length > 0 && (
-        <div role="alert" className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 space-y-1">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-warning shrink-0" aria-hidden="true" />
-            <p className="text-sm text-warning font-medium">Permit Expiration Warning</p>
-          </div>
-          {expiringPermits.map((p) => (
-            <p key={p.id} className="text-xs text-warning ml-6">
-              {p.permit_type} at {p.address}{p.city ? `, ${p.city}` : ""} — expires in {daysUntil(p.expiry_date)} days
-            </p>
-          ))}
-        </div>
-      )}
-
       {complianceError && (
         /* A fetch failure must not read as genuine non-compliance — surface
          * the load error + retry instead of a false 0-score / no-license. */
@@ -432,7 +494,12 @@ export default function CompliancePage() {
 
       {/* Compliance Score + License Card */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ComplianceScore license={license} insuranceExpiry={insuranceExpiry} apiScore={complianceScore} />
+        <ComplianceScore
+          license={license}
+          insuranceExpiry={insuranceExpiry}
+          territories={territories}
+          apiScore={complianceScore}
+        />
 
         {/* License Card */}
         <Card className="p-6 space-y-4">
@@ -571,6 +638,15 @@ export default function CompliancePage() {
             <span className="text-xs text-muted-foreground ml-auto">{permitCount} permit{permitCount !== 1 ? "s" : ""} from your leads</span>
           )}
         </div>
+        {/* Says out loud what the table can and can't tell you. Without
+            this line the "Filed / Age" pair reads as the front half of a
+            deadline, which is how the invented 180-day countdown got
+            written in the first place. */}
+        <p className="text-xs text-muted-foreground mb-2">
+          Jurisdictions don&apos;t publish permit expiry dates in the feeds
+          Henri ingests, so this table shows time elapsed since filing — not
+          a deadline. Check the issuing office for validity windows.
+        </p>
         <Card className="overflow-hidden">
           {leadsLoading ? (
             <div className="p-4 space-y-3">
@@ -608,13 +684,12 @@ export default function CompliancePage() {
                   <th className="text-left px-4 py-2 text-muted-foreground font-medium">Type</th>
                   <th className="text-left px-4 py-2 text-muted-foreground font-medium">Permit ID</th>
                   <th className="text-left px-4 py-2 text-muted-foreground font-medium">Filed</th>
-                  <th className="text-left px-4 py-2 text-muted-foreground font-medium">Expires</th>
+                  <th className="text-left px-4 py-2 text-muted-foreground font-medium">Age</th>
                   <th className="text-left px-4 py-2 text-muted-foreground font-medium">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {permitRows.map((p) => {
-                  const days = daysUntil(p.expiry_date);
                   return (
                     <tr key={p.id} className="border-b border-border last:border-b-0">
                       <td className="px-4 py-3 text-foreground">
@@ -626,15 +701,13 @@ export default function CompliancePage() {
                       <td className="px-4 py-3 text-muted-foreground">
                         {formatDate(p.filed_date, { month: "short", day: "numeric" })}
                       </td>
-                      <td className="px-4 py-3">
-                        {p.expiry_date ? (
-                          <span className={days !== null && days <= 30 ? "text-warning font-medium" : "text-muted-foreground"}>
-                            {formatDate(p.expiry_date, { month: "short", day: "numeric" })}
-                            {days !== null && days <= 30 && days > 0 && ` (${days}d)`}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">--</span>
-                        )}
+                      {/* Elapsed time, stated neutrally. No colour ramp and
+                          no threshold — an "age" that turns amber is a
+                          deadline claim wearing a different label. */}
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {p.days_since_filed === 0
+                          ? "Filed today"
+                          : `${p.days_since_filed}d since filing`}
                       </td>
                       <td className="px-4 py-3">{permitStatusBadge(p.status)}</td>
                     </tr>

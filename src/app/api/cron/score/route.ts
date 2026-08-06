@@ -209,6 +209,183 @@ function stateFromCourtName(court: string): string | null {
 const VALUE_MODEL_TTL_MS = 10 * 60 * 1000;
 let cachedValueModel: { model: ValueModel; builtAt: number } | null = null;
 
+/* ── Enrichment-safe contact columns (2026-08-06 fix) ────────────────────
+ *
+ * These five columns are ALSO written by /api/cron/enrich, which fills them
+ * from same-address sibling permits, the local voter file and county GIS —
+ * the key-free passes that produce Henri's scarcest field, homeowner phone
+ * (1% fill). The score cron only ever knows what `permits.raw_json` shipped,
+ * so for an enriched lead its own value for these columns is null.
+ *
+ * The lead payload goes through `upsert(..., {ignoreDuplicates:false})`,
+ * which writes every column it is given — so sending those nulls set
+ * `leads.phone = null` and erased the enrichment. It was also a loop: enrich
+ * clears `permits.scored_at` on success to trigger a re-score, which re-queues
+ * the very lead it just enriched.
+ *
+ * The fix is to leave the key OFF the payload, exactly as `status` and
+ * `notes` are left off further down — an absent column is not in the
+ * generated `ON CONFLICT DO UPDATE SET` list, so the stored value survives.
+ *
+ * Absence has to hold across the WHOLE batch, not just one row. supabase-js
+ * builds the request's `?columns=` parameter from the UNION of the keys of
+ * every object in the array (postgrest-js `upsert()`), and PostgREST writes
+ * NULL for any column in that list a given row does not supply. So one row
+ * carrying `phone` puts `phone` in the column list for all of them. Hence
+ * `groupByContactColumns` below: rows are upserted in groups that share a
+ * contact-column signature, which makes the union equal the signature. */
+export const ENRICHABLE_CONTACT_COLUMNS = [
+  "owner_name",
+  "owner_first",
+  "owner_last",
+  "phone",
+  "email",
+] as const;
+
+/** Copy of `row` with every null/undefined enrichable contact column removed.
+ *  All other keys — including nulls — pass through untouched. */
+export function omitNullContactColumns(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...row };
+  for (const key of ENRICHABLE_CONTACT_COLUMNS) {
+    if (out[key] == null) delete out[key];
+  }
+  return out;
+}
+
+/** Which enrichable contact columns a payload row actually carries. */
+export function contactColumnSignature(row: Record<string, unknown>): string {
+  return ENRICHABLE_CONTACT_COLUMNS.filter((k) => k in row).join(",");
+}
+
+/** Partition payload rows so each group shares one contact-column signature.
+ *  Order within a group is preserved; groups come out in first-seen order. */
+export function groupByContactColumns(
+  rows: ReadonlyArray<Record<string, unknown>>,
+): Array<Array<Record<string, unknown>>> {
+  const groups = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of rows) {
+    const sig = contactColumnSignature(row);
+    const bucket = groups.get(sig);
+    if (bucket) bucket.push(row);
+    else groups.set(sig, [row]);
+  }
+  return [...groups.values()];
+}
+
+/* ── Trade-aware territory assignment (migration 00135) ──────────────────
+ *
+ * 00135 made exclusivity one contractor per TRADE per ZIP and enforces it
+ * with `CREATE UNIQUE INDEX idx_territories_one_per_trade ON territories
+ * (zip, trade) WHERE status='active'`. Two contractors holding the same ZIP
+ * are therefore necessarily DIFFERENT trades — which is what made the
+ * previous `contractors[counter % contractors.length]` wrong. That rotation
+ * was written for the old three-identical-slots model, where rotating was
+ * fair-share allocation; post-00135 it hands a roofing permit to whichever
+ * of the roofer and the plumber the counter happened to land on.
+ *
+ * The rotation was also a duplicate-lead hazard. Counters are rebuilt per
+ * invocation and the permit batch has no ORDER BY, so a permit's position is
+ * not stable across runs. The upsert conflicts on (permit_id, contractor_id),
+ * so a re-score that picked a different contractor was an INSERT — a second
+ * lead for one permit, which the wedge contract forbids and which
+ * /api/cron/territory-backfill exists to prevent. Resolving deterministically
+ * removes that hazard by construction: same permit, same contractor, every
+ * run, regardless of batch order. */
+
+/** `trade_type` (migration 00002) minus the two values that name no trade.
+ *  'general' is the GC bucket the fallback below targets explicitly, and
+ *  'other' means "unclassified". A permit whose resolved trade is outside
+ *  this set carries no trade signal at all. */
+const SPECIFIC_TRADES: ReadonlySet<string> = new Set([
+  "roofing",
+  "plumbing",
+  "electrical",
+  "hvac",
+  "solar",
+  "landscaping",
+  "painting",
+  "concrete",
+]);
+
+export interface TerritoryHolder {
+  id: string;
+  phone?: string;
+  email?: string;
+  name?: string;
+  /** `territories.trade`, frozen at claim time. Defaults to "general". */
+  trade: string;
+}
+
+/** The trade a permit belongs to, resolved from the same two fields, in the
+ *  same order, that `leads.trade` is written from below — so routing and the
+ *  stored column can never disagree. Lower-cased for map lookup against the
+ *  `trade_type` enum values. */
+export function resolvePermitTrade(
+  rawJson: Record<string, unknown> | null | undefined,
+  permitType: string | null | undefined,
+): string | null {
+  const raw = rawJson?.normalized_trade ?? permitType;
+  const trade = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return trade.length > 0 ? trade : null;
+}
+
+/** Lowest contractor_id among the matching holders. 00135's unique index
+ *  guarantees at most one active holder per (zip, trade), so this normally
+ *  has a single candidate — picking the minimum anyway means neither a
+ *  duplicate nor the unordered row set PostgREST returns can make the choice
+ *  run-dependent. */
+function pickHolder(
+  holders: readonly TerritoryHolder[],
+  match: (h: TerritoryHolder) => boolean,
+): TerritoryHolder | null {
+  let best: TerritoryHolder | null = null;
+  for (const h of holders) {
+    if (!match(h)) continue;
+    if (!best || h.id < best.id) best = h;
+  }
+  return best;
+}
+
+/**
+ * Which territory holder in a ZIP owns this permit.
+ *
+ *   1. the holder who claimed this ZIP for the permit's trade;
+ *   2. else the ZIP's `general` holder — a GC is cross-trade by definition,
+ *      the same rule `resolveTradeGate` applies on the read side;
+ *   3. else, when the permit names no SPECIFIC trade, any holder. 90% of
+ *      `leads.trade` values are the unclassifiable buckets other /
+ *      residential / commercial / general (GENERIC_TRADE_BUCKETS in
+ *      src/lib/auth/trade-gating.ts); those mean "the ingest could not
+ *      classify this permit", not "this job is not yours". Dropping them
+ *      would leave a single-trade holder with almost no leads in a ZIP they
+ *      paid for, so they go to the ZIP's holder;
+ *   4. else null — the permit names a trade nobody here holds, and handing
+ *      it to a different trade is the misrouting this function exists to
+ *      stop.
+ */
+export function resolveTerritoryHolder(
+  holders: readonly TerritoryHolder[] | undefined,
+  permitTrade: string | null,
+): TerritoryHolder | null {
+  if (!holders || holders.length === 0) return null;
+
+  if (permitTrade) {
+    const exact = pickHolder(holders, (h) => h.trade === permitTrade);
+    if (exact) return exact;
+  }
+
+  const general = pickHolder(holders, (h) => h.trade === "general");
+  if (general) return general;
+
+  if (!permitTrade || !SPECIFIC_TRADES.has(permitTrade)) {
+    return pickHolder(holders, () => true);
+  }
+
+  return null;
+}
+
 /* ── Main cron handler ───────────────────────────────────────────────────── */
 
 export async function GET(request: NextRequest) {
@@ -279,6 +456,7 @@ export async function GET(request: NextRequest) {
         permits_considered: 0,
         permits_dropped_null_zip: 0,
         permits_dropped_no_territory: 0,
+        permits_dropped_trade_mismatch: 0,
         permits_deferred_deadline: 0,
         note: "no active territories — nothing can become a lead",
       };
@@ -591,8 +769,8 @@ export async function GET(request: NextRequest) {
 
     /* Per-address history rollup (populates cascade_flag, pipeline_value, etc.)
      * Keyed by the same `address_norm` format used by build-address-history.ts.
-     * `normalizeAddrKey` lives in `./helpers` so the round-robin + key-norm
-     * logic is unit-testable in isolation. */
+     * `normalizeAddrKey` lives in `./helpers` so the key-normalization logic
+     * is unit-testable in isolation. */
     const addrKeysSet = new Set<string>();
     for (const p of permits) {
       const k = normalizeAddrKey(p.address, p.zip);
@@ -1141,7 +1319,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    /* ── 4. Pre-compute contractor assignments (round-robin by ZIP) ──── */
+    /* ── 4. Pre-compute contractor assignments (by ZIP + trade) ──────── */
 
     const leadZips = [...new Set(scoredLeads.map((sl) => sl.permit.zip).filter(Boolean))] as string[];
 
@@ -1158,11 +1336,14 @@ export async function GET(request: NextRequest) {
     // that cannot resolve contractors has not succeeded at anything; it must
     // fail loudly so the fleet marks it and catchup re-fires it, rather than
     // quietly booking a zero.
-    // Shape matches the select: zip + contractor_id are the columns, and
-    // `profiles` is the embedded relation (an object, or an array when
+    // Shape matches the select: zip + trade + contractor_id are the columns,
+    // and `profiles` is the embedded relation (an object, or an array when
     // PostgREST widens it — the consumer below handles both).
+    // `trade` (migration 00135) is what makes the assignment below
+    // trade-aware; without it every holder in a ZIP looks interchangeable.
     type TerritoryRow = {
       zip: string;
+      trade: string | null;
       contractor_id: string;
       profiles: Record<string, string> | Record<string, string>[];
     };
@@ -1171,7 +1352,7 @@ export async function GET(request: NextRequest) {
       const zipChunk = leadZips.slice(i, i + ZIP_IN_CHUNK);
       const { data, error: territoryErr } = await supabase
         .from("territories")
-        .select("zip, contractor_id, profiles!inner(id, phone, email, full_name)")
+        .select("zip, trade, contractor_id, profiles!inner(id, phone, email, full_name)")
         .in("zip", zipChunk)
         .eq("status", "active");
       if (territoryErr) {
@@ -1186,48 +1367,49 @@ export async function GET(request: NextRequest) {
       territoryRowsCount: territoryRows.length,
     });
 
-    /* Build ZIP -> contractors map */
-    const zipToContractors = new Map<
-      string,
-      Array<{ id: string; phone?: string; email?: string; name?: string }>
-    >();
+    /* Build ZIP -> holders map. `trade` falls back to "general" for any row
+     * that predates 00135's backfill — the same default the column carries. */
+    const zipToHolders = new Map<string, TerritoryHolder[]>();
 
     for (const t of territoryRows ?? []) {
       const profile = Array.isArray(t.profiles)
         ? (t.profiles as Record<string, string>[])[0]
         : (t.profiles as Record<string, string>);
 
-      const contractors = zipToContractors.get(t.zip) ?? [];
-      contractors.push({
+      const holders = zipToHolders.get(t.zip) ?? [];
+      holders.push({
         id: t.contractor_id,
         phone: profile?.phone,
         email: profile?.email,
         name: profile?.full_name,
+        trade: (t.trade ?? "general").trim().toLowerCase(),
       });
-      zipToContractors.set(t.zip, contractors);
+      zipToHolders.set(t.zip, holders);
     }
-
-    /* Round-robin counters per ZIP */
-    const zipCounters = new Map<string, number>();
 
     /* ── 5. Insert leads with contractor assignment ────────────────────── */
 
-    /* For each scored lead × each contractor in that ZIP, create a lead.
-     * This supports the multi-contractor-per-territory model. */
+    /* One lead per scored permit, assigned to the single territory holder
+     * that `resolveTerritoryHolder` picks for the permit's trade. */
     const leadsToInsert: Array<Record<string, unknown>> = [];
 
     /* Track which contractor gets which scored lead for notifications */
     const assignmentMap = new Map<string, { scored: ScoredLead; contractor: { id: string; phone?: string; email?: string; name?: string } }>();
 
-    /* Audit finding B — the loop below drops permits in three distinct ways
-     * and, until now, said nothing about any of them. A run that produced
-     * zero leads was indistinguishable from a run that had nothing to do.
-     * These three counters are surfaced in the cron_runs summary so an
+    /* Audit finding B — the loop below drops permits in several distinct
+     * ways and, until now, said nothing about any of them. A run that
+     * produced zero leads was indistinguishable from a run that had nothing
+     * to do. These counters are surfaced in the cron_runs summary so an
      * operator can tell "no territory matched" apart from "no ZIP on the
      * permit" apart from "we ran out of time". */
     let permitsDroppedNullZip = 0;
     let permitsDroppedNoTerritory = 0;
     let permitsDeferredDeadline = 0;
+    /* The ZIP is held, but only for trades this permit is not. Post-00135
+     * that is correct exclusivity, not a bug — it still needs its own
+     * counter so it never hides inside permits_dropped_no_territory, which
+     * means something else entirely (a ZIP with no holder at all). */
+    let permitsDroppedTradeMismatch = 0;
 
     for (const [slIndex, sl] of scoredLeads.entries()) {
       // Audit priority #8: inline 280s deadline. The lead-build loop is
@@ -1248,15 +1430,12 @@ export async function GET(request: NextRequest) {
         permitsDroppedNullZip += 1;
         continue;
       }
-      const contractors = zipToContractors.get(zip);
+      const holders = zipToHolders.get(zip);
+      const rawJson = sl.permit.raw_json as Record<string, string> | null;
+      const permitTrade = resolvePermitTrade(rawJson, sl.permit.permit_type);
+      const contractor = resolveTerritoryHolder(holders, permitTrade);
 
-      if (contractors && contractors.length > 0) {
-        /* Round-robin: one lead per contractor in this ZIP */
-        const counter = zipCounters.get(zip) ?? 0;
-        const contractor = contractors[counter % contractors.length];
-        zipCounters.set(zip, counter + 1);
-
-        const rawJson = sl.permit.raw_json as Record<string, string> | null;
+      if (contractor) {
         const owner = extractOwnerFields(sl.permit.raw_json);
         // Look up per-address history for cascade detection + pipeline rollup.
         const addrKey = normalizeAddrKey(sl.permit.address, sl.permit.zip);
@@ -1350,7 +1529,7 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        leadsToInsert.push({
+        leadsToInsert.push(omitNullContactColumns({
           permit_id: sl.permit.id,
           contractor_id: contractor.id,
           score: sl.score,
@@ -1379,6 +1558,14 @@ export async function GET(request: NextRequest) {
           // upstream feed actually ships. full-name falls back to
           // applicant_name (permits.applicant_name is a top-level column
           // on some feeds, not in raw_json).
+          //
+          // Any of these five that comes out null is STRIPPED by the
+          // omitNullContactColumns() wrapper on this push — see its
+          // definition at the top of the file. Sending the null overwrote
+          // whatever /api/cron/enrich had found for an existing lead, and
+          // enrich clears scored_at on success, so the two crons erased each
+          // other's work in a loop. A permit-derived value still populates a
+          // fresh lead; an enriched value on an existing lead survives.
           owner_name: owner.full ?? sl.permit.applicant_name,
           owner_first: owner.first,
           owner_last: owner.last,
@@ -1424,9 +1611,15 @@ export async function GET(request: NextRequest) {
           // `score_reasoning` and, in full structured form, by
           // `score_signals`, which is what the drawer's transparency
           // breakdown actually renders.
-        });
+        }));
 
         assignmentMap.set(`${sl.permit.id}:${contractor.id}`, { scored: sl, contractor });
+      } else if (holders && holders.length > 0) {
+        /* The ZIP is held, but every holder claimed it for a different
+         * trade and none of them is the cross-trade `general` holder. Under
+         * 00135 that permit is not theirs; routing it anyway is the
+         * misrouting this branch replaced. */
+        permitsDroppedTradeMismatch += 1;
       } else {
         /* A ZIP that came back from the claimed-territory query but has no
          * contractor after the `profiles!inner` join. `territories.
@@ -1446,94 +1639,119 @@ export async function GET(request: NextRequest) {
     const leadProducingPermitIds = new Set<string>();
 
     if (leadsToInsert.length > 0) {
+      type InsertedLeadRow = {
+        id: string;
+        zip: string | null;
+        permit_id: string | null;
+        contractor_id: string;
+        score: number;
+        urgency: string;
+      };
+
       // Use UPSERT on (permit_id, contractor_id) so the scorer is idempotent —
       // re-running after a scored_at reset or claiming more territories won't
       // violate the unique constraint when the same (permit, contractor) pair
       // already has a lead. `ignoreDuplicates: false` means existing rows get
       // their scoring fields refreshed with the latest model output.
-      let insertResult = await supabase
-        .from("leads")
-        .upsert(leadsToInsert, {
-          onConflict: "permit_id,contractor_id",
-          ignoreDuplicates: false,
-        })
-        .select("id, zip, permit_id, contractor_id, score, urgency");
-
-      // Phase 0a resilience — `score_signals` is only present after
-      // migration 00031 lands. If the upsert 400s with a schema-cache
-      // miss, retry once with that field stripped. Keeps the scorer
-      // working both before and after the migration is applied.
-      if (insertResult.error && /score_signals/i.test(insertResult.error.message)) {
-        logger.warn("score_signals column missing \u2014 stripping + retrying (migration 00031 pending)");
-        const stripped = leadsToInsert.map((row) => {
-          const { score_signals: _omit, ...rest } = row as Record<string, unknown>;
-          return rest;
-        });
-        insertResult = await supabase
+      const upsertLeadRows = async (rows: Array<Record<string, unknown>>) => {
+        let result = await supabase
           .from("leads")
-          .upsert(stripped, {
+          .upsert(rows, {
             onConflict: "permit_id,contractor_id",
             ignoreDuplicates: false,
           })
           .select("id, zip, permit_id, contractor_id, score, urgency");
+
+        // Phase 0a resilience — `score_signals` is only present after
+        // migration 00031 lands. If the upsert 400s with a schema-cache
+        // miss, retry once with that field stripped. Keeps the scorer
+        // working both before and after the migration is applied.
+        if (result.error && /score_signals/i.test(result.error.message)) {
+          logger.warn("score_signals column missing \u2014 stripping + retrying (migration 00031 pending)");
+          const stripped = rows.map((row) => {
+            const { score_signals: _omit, ...rest } = row;
+            return rest;
+          });
+          result = await supabase
+            .from("leads")
+            .upsert(stripped, {
+              onConflict: "permit_id,contractor_id",
+              ignoreDuplicates: false,
+            })
+            .select("id, zip, permit_id, contractor_id, score, urgency");
+        }
+
+        // Phase 1.2 resilience — `cross_trade_suggestions` is only present
+        // after migration 00045 lands. Same strip-and-retry pattern as
+        // score_signals above. Keeps the scorer working pre-migration.
+        if (
+          result.error &&
+          /cross_trade_suggestions/i.test(result.error.message)
+        ) {
+          logger.warn(
+            "cross_trade_suggestions column missing \u2014 stripping + retrying (migration 00045 pending)",
+          );
+          const stripped = rows.map((row) => {
+            const { cross_trade_suggestions: _omit, ...rest } = row;
+            return rest;
+          });
+          result = await supabase
+            .from("leads")
+            .upsert(stripped, {
+              onConflict: "permit_id,contractor_id",
+              ignoreDuplicates: false,
+            })
+            .select("id, zip, permit_id, contractor_id, score, urgency");
+        }
+
+        // Module 1 resilience \u2014 `opportunity_stage` + `reason_codes` are
+        // only present after migration 00087 lands. Strip both and retry
+        // when either column is missing.
+        if (
+          result.error &&
+          /(opportunity_stage|reason_codes)/i.test(result.error.message)
+        ) {
+          logger.warn(
+            "opportunity_stage/reason_codes columns missing \u2014 stripping + retrying (migration 00087 pending)",
+          );
+          const stripped = rows.map((row) => {
+            const { opportunity_stage: _o, reason_codes: _r, ...rest } = row;
+            return rest;
+          });
+          result = await supabase
+            .from("leads")
+            .upsert(stripped, {
+              onConflict: "permit_id,contractor_id",
+              ignoreDuplicates: false,
+            })
+            .select("id, zip, permit_id, contractor_id, score, urgency");
+        }
+
+        return result;
+      };
+
+      /* One upsert per contact-column signature, not one for the whole
+       * batch. supabase-js builds the request's `?columns=` list from the
+       * UNION of every row's keys (postgrest-js `upsert()`), and PostgREST
+       * writes NULL for any column in that list a given row does not supply.
+       * So a single row carrying `phone` would put `phone` back in the
+       * column list and re-erase the enriched phone on all the others —
+       * the omission at the top of this file only holds if the key is
+       * absent from EVERY row in the request. Grouping makes the union equal
+       * each group's own key set. Groups are few in practice: a batch comes
+       * from a handful of jurisdictions, which ship the same raw_json keys. */
+      const insertedLeads: InsertedLeadRow[] = [];
+      for (const group of groupByContactColumns(leadsToInsert)) {
+        const { data, error: insertError } = await upsertLeadRows(group);
+        if (insertError) {
+          throw new Error(`Failed to insert leads: ${insertError.message}`);
+        }
+        insertedLeads.push(...((data ?? []) as unknown as InsertedLeadRow[]));
       }
 
-      // Phase 1.2 resilience — `cross_trade_suggestions` is only present
-      // after migration 00045 lands. Same strip-and-retry pattern as
-      // score_signals above. Keeps the scorer working pre-migration.
-      if (
-        insertResult.error &&
-        /cross_trade_suggestions/i.test(insertResult.error.message)
-      ) {
-        logger.warn(
-          "cross_trade_suggestions column missing \u2014 stripping + retrying (migration 00045 pending)",
-        );
-        const stripped = leadsToInsert.map((row) => {
-          const { cross_trade_suggestions: _omit, ...rest } =
-            row as Record<string, unknown>;
-          return rest;
-        });
-        insertResult = await supabase
-          .from("leads")
-          .upsert(stripped, {
-            onConflict: "permit_id,contractor_id",
-            ignoreDuplicates: false,
-          })
-          .select("id, zip, permit_id, contractor_id, score, urgency");
-      }
-
-      // Module 1 resilience \u2014 `opportunity_stage` + `reason_codes` are
-      // only present after migration 00087 lands. Strip both and retry
-      // when either column is missing.
-      if (
-        insertResult.error &&
-        /(opportunity_stage|reason_codes)/i.test(insertResult.error.message)
-      ) {
-        logger.warn(
-          "opportunity_stage/reason_codes columns missing \u2014 stripping + retrying (migration 00087 pending)",
-        );
-        const stripped = leadsToInsert.map((row) => {
-          const { opportunity_stage: _o, reason_codes: _r, ...rest } =
-            row as Record<string, unknown>;
-          return rest;
-        });
-        insertResult = await supabase
-          .from("leads")
-          .upsert(stripped, {
-            onConflict: "permit_id,contractor_id",
-            ignoreDuplicates: false,
-          })
-          .select("id, zip, permit_id, contractor_id, score, urgency");
-      }
-
-      const { data: insertedLeads, error: insertError } = insertResult;
-      if (insertError) {
-        throw new Error(`Failed to insert leads: ${insertError.message}`);
-      }
-
-      assignedCount = insertedLeads?.length ?? 0;
-      for (const l of insertedLeads ?? []) {
-        if (l.permit_id) leadProducingPermitIds.add(l.permit_id as string);
+      assignedCount = insertedLeads.length;
+      for (const l of insertedLeads) {
+        if (l.permit_id) leadProducingPermitIds.add(l.permit_id);
       }
 
       /* ── 6. Send notifications ───────────────────────────────────────── */
@@ -1775,10 +1993,11 @@ export async function GET(request: NextRequest) {
         permits_considered: permits.length,
         permits_dropped_null_zip: permitsDroppedNullZip,
         permits_dropped_no_territory: permitsDroppedNoTerritory,
+        permits_dropped_trade_mismatch: permitsDroppedTradeMismatch,
         permits_deferred_deadline: permitsDeferredDeadline,
         unique_lead_zips: leadZips.length,
         territory_rows: territoryRows?.length ?? 0,
-        zip_to_contractors_map_size: zipToContractors.size,
+        zip_to_contractors_map_size: zipToHolders.size,
         leads_to_insert_count: leadsToInsert.length,
         permits_marked_scored: scoredAtUpdated,
         permits_mark_errors: scoredAtErrors,

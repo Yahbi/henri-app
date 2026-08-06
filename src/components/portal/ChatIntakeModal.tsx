@@ -436,7 +436,12 @@ export function ChatIntakeModal({
           // consent_text_version on the intake row. Without it, the
           // outreach hygiene gate refuses every send for this intake.
           consent_given: consentGiven,
-          consent_text_version: "v1.2026-05-09",
+          /* Bumped 2026-08-06 with the consent wording itself: v1 said "one
+           * matched contractor" while the intake shares with up to three.
+           * The version is the only thing that keeps a stored
+           * consent_given_at attributable to the text the homeowner
+           * actually read, so it MUST move whenever that text moves. */
+          consent_text_version: "v2.2026-08-06",
         }),
       });
       if (res.status === 400) {

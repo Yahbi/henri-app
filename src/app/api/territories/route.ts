@@ -111,10 +111,25 @@ export async function POST(request: NextRequest) {
       const plan = profile?.plan ?? "free";
       const maxZips = PLAN_ZIP_LIMITS[plan] ?? 0;
 
+      /* `status = 'active'` is load-bearing.
+       *
+       * release_territory (00008) does not delete the row — it sets
+       * status='released' and stamps released_at, and claim_territory
+       * INSERTs a fresh row rather than reviving the released one. So
+       * released rows accumulate, one per claim/release cycle.
+       *
+       * Counting them made this gate strictly stricter than the DB gate it
+       * is supposed to mirror (claim_territory counts `AND status =
+       * 'active'`, 00135:134-138). A contractor whose subscription lapsed —
+       * the Stripe webhook releases every ZIP they hold — came back to a
+       * permanent 403 telling them to upgrade, which would not have helped:
+       * they held zero active ZIPs and every number in the message was the
+       * count of territory they no longer had. */
       const { count } = await supabase
         .from("territories")
         .select("*", { count: "exact", head: true })
-        .eq("contractor_id", user.id);
+        .eq("contractor_id", user.id)
+        .eq("status", "active");
 
       if ((count ?? 0) >= maxZips) {
         return NextResponse.json(

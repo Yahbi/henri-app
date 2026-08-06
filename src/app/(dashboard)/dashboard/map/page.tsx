@@ -247,6 +247,13 @@ export default function MapPage() {
      *  says rows are never silently dropped; the API has been returning this
      *  since 2026-08-05 and nothing rendered it. */
     filteredOut: number | null;
+    /** Raw unscored-permit overlay ("Show new permits"). The API can only
+     *  return a bounded sample per request; when `rawPermitsTruncated` is
+     *  true the pins are a sample, not the full density, and the counter
+     *  below says so. */
+    rawPermitsIncluded?: boolean;
+    rawPermitsShown?: number;
+    rawPermitsTruncated?: boolean;
   } | null>(null);
 
   // Module 20 — bottom drawer on full-screen map. Click a pin → fetch the
@@ -258,6 +265,17 @@ export default function MapPage() {
   const [totalCount, setTotalCount] = useState(0);
   const leadCount = useLeadCount();
   const popupRef = useRef<maplibregl.Popup | null>(null);
+
+  /* Cancellation for the two-stage map fetch below. Matches the
+   * ref-cancelled pattern used by useEnrichment / usePermitHistory /
+   * useExclusivity.
+   *   abortRef     — cancels the previous run's in-flight requests.
+   *   latestRunRef — filter identity of the most recent run, so a response
+   *                  that outlives its filters is still discarded if the
+   *                  abort loses the race (fetch can resolve between
+   *                  `abort()` and the microtask that rejects it). */
+  const abortRef = useRef<AbortController | null>(null);
+  const latestRunRef = useRef<string>("");
 
   /* ── Overlay state ── */
   const [overlayState, setOverlayState] = useState<OverlayState>({
@@ -308,6 +326,25 @@ export default function MapPage() {
    *   Stage 2: background fetch with full cap — swaps in more pins when ready.
    * User always sees something fast; the richer dataset backfills silently. */
   const fetchMapData = useCallback(async () => {
+    // Cancel whatever the previous filter selection left in flight.
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const { signal } = controller;
+
+    // Identity of THIS run's filter selection. `limit` is deliberately
+    // excluded — it's the only thing that differs between stage 1 and 2.
+    const runKey = JSON.stringify([
+      tradeFilter,
+      statusFilter,
+      daysFilter,
+      showRawPermits,
+    ]);
+    latestRunRef.current = runKey;
+    const isStale = () => signal.aborted || latestRunRef.current !== runKey;
+    const isAbort = (err: unknown) =>
+      signal.aborted || (err as { name?: string } | null)?.name === "AbortError";
+
     setLoading(true);
     setError(null);
 
@@ -322,8 +359,9 @@ export default function MapPage() {
     };
 
     // Stage 1: fast first paint
+    let stage1Count = 0;
     try {
-      const res = await fetch(`/api/leads/map?${buildParams(2000)}`);
+      const res = await fetch(`/api/leads/map?${buildParams(2000)}`, { signal });
       if (!res.ok) {
         if (res.status === 401) {
           const supabase = createClient();
@@ -336,15 +374,23 @@ export default function MapPage() {
         throw new Error(`Request failed (${res.status})`);
       }
       const data: GeoJSON.FeatureCollection & { _meta?: typeof gateMeta } = await res.json();
+      // A newer filter selection has taken over — drop this response rather
+      // than painting pins the user is no longer asking for.
+      if (isStale()) return;
+      stage1Count = data.features.length;
       setGeojson(data);
-      setTotalCount(data.features.length);
+      setTotalCount(stage1Count);
       // Module 19 — capture the trade-gating decision so the banner renders.
       if (data._meta) setGateMeta(data._meta);
     } catch (err) {
+      // A cancelled request is not an error the user should see, and the
+      // run that superseded it owns `loading` from here on.
+      if (isAbort(err)) return;
       setError(err instanceof Error ? err.message : "Failed to load map data");
       setLoading(false);
       return;
     }
+    if (isStale()) return;
     setLoading(false);
 
     // Stage 2: background refinement — quietly upgrades the geojson with
@@ -353,23 +399,37 @@ export default function MapPage() {
     // tolerance so statement timeouts on a later page still render what
     // came back. We don't set loading=true so the UI stays interactive.
     try {
-      const res = await fetch(`/api/leads/map?${buildParams(500_000)}`);
+      const res = await fetch(`/api/leads/map?${buildParams(500_000)}`, { signal });
       if (!res.ok) return;
       const data: GeoJSON.FeatureCollection = await res.json();
-      // Only swap in if we actually got more features (avoids replacing a
-      // stable paint with the same thing if the API returns identical data).
-      setGeojson((prev) => {
-        if (prev && data.features.length <= prev.features.length) return prev;
-        return data;
-      });
-      setTotalCount(data.features.length);
+      // Staleness is an IDENTITY question, not a magnitude one. This used to
+      // compare `data.features.length <= prev.features.length`, which the
+      // stale response wins whenever the user narrows a filter the server
+      // honours (days 90 -> 7, status all -> won): the fresh narrow stage 1
+      // paints a small set, then the previous run's wide stage 2 lands with
+      // more features, beats the count test, and repaints pins outside the
+      // selected window. `setTotalCount` ran unconditionally on top of that,
+      // so the "N leads on map" counter could describe a response that was
+      // never drawn.
+      if (isStale()) return;
+      // Within a run, stage 2 is a superset of stage 1, so an equal or
+      // smaller count means nothing new arrived — leave the stable paint
+      // (and its fitBounds) alone. This is the check the old comparison was
+      // actually reaching for.
+      if (data.features.length > stage1Count) {
+        setGeojson(data);
+        setTotalCount(data.features.length);
+      }
     } catch {
-      // Silent — stage 1 data is still on screen.
+      // Silent — stage 1 data is still on screen. Aborts land here too.
     }
   }, [tradeFilter, statusFilter, daysFilter, showRawPermits]);
 
   useEffect(() => {
     fetchMapData();
+    // Cancels on unmount and before every re-run, so a filter change never
+    // leaves the previous run's two requests racing this one.
+    return () => { abortRef.current?.abort(); };
   }, [fetchMapData]);
 
   /* ── Apply stageFilter / preset filters client-side ──────────────────────
@@ -1038,6 +1098,15 @@ export default function MapPage() {
               )}
               {leadCount.geocoded > totalCount && (
                 <span className="opacity-70"> · of ~{leadCount.geocoded.toLocaleString()} geocoded</span>
+              )}
+              {/* Honest density label. The unscored-permit overlay is capped
+                  per request, so when it saturates the pins are a sample —
+                  saying nothing would let the map imply this is every new
+                  permit in the territory. */}
+              {showRawPermits && gateMeta?.rawPermitsTruncated && (
+                <span className="opacity-70">
+                  {" "}· newest {(gateMeta.rawPermitsShown ?? 0).toLocaleString()} unscored permits shown, more exist
+                </span>
               )}
             </span>
           )}

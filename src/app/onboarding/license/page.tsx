@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { OnboardingProgress } from "@/components/onboarding/OnboardingProgress";
+import { TRADE_TYPES, TRADE_LABELS, isTradeType, type TradeType } from "@/lib/territory/trades";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
@@ -24,9 +25,30 @@ const US_STATES = [
   "DC",
 ] as const;
 
+/* `trade` is required, and it is required HERE rather than anywhere else in
+ * onboarding, because migration 00135 made territory exclusivity per
+ * (zip, trade) and `claim_territory` freezes `profiles.trade` onto the
+ * territory row at claim time.
+ *
+ * Until 2026-08-06 no onboarding step wrote `profiles.trade` at all, so
+ * every contractor kept the column default 'general' and every territory
+ * froze as 'general'. That silently collapsed the per-trade model back to
+ * one-contractor-per-ZIP: the second contractor to want a ZIP was refused
+ * no matter what they do, which contradicts the live promise on
+ * /contractors that "a roofer and an HVAC contractor can both hold the same
+ * ZIP". It also handed every account the all-trades lead visibility that
+ * src/lib/auth/trade-gating.ts only unlocks for Enterprise, because that
+ * module treats a 'general' profile as a GC and lifts the gate.
+ *
+ * The free-text `license_type` below is NOT a substitute: it is the state
+ * board's classification string ("C-39 Roofing", "General B"), it is
+ * optional, and nothing maps it onto the enum. */
 const licenseSchema = z.object({
   license_number: z.string().min(1, "License number is required"),
   state: z.string().min(1, "State is required"),
+  trade: z.enum(TRADE_TYPES, {
+    error: "Select the trade you'll claim territory for",
+  }),
   license_type: z.string().optional(),
   name_on_license: z.string().optional(),
 });
@@ -94,6 +116,13 @@ function LicenseVerificationContent() {
   // show a "License on file" card instead of the blank form.
   const [existingLicense, setExistingLicense] = useState<ExistingLicense | null>(null);
   const [showReplaceForm, setShowReplaceForm] = useState(false);
+  /* Trade currently on the profile. Seeds the form select, and is what the
+   * resume card lets the contractor confirm or change — otherwise a
+   * contractor who submitted a license before the trade field existed would
+   * skip straight past this step and claim territory as 'general'. */
+  const [profileTrade, setProfileTrade] = useState<TradeType | null>(null);
+  const [resumeTrade, setResumeTrade] = useState<TradeType | "">("");
+  const [savingResume, setSavingResume] = useState(false);
 
   // Forward the pricing-page plan selection through to the plan step.
   const planParam = searchParams?.get("plan");
@@ -112,15 +141,24 @@ function LicenseVerificationContent() {
           data: { user },
         } = await supabase.auth.getUser();
         if (!user || cancelled) return;
-        const { data } = await supabase
-          .from("contractor_licenses")
-          .select("id, license_number, license_state, verification_status, verified")
-          .eq("contractor_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (!cancelled && data) {
+        const [{ data }, { data: profileRow }] = await Promise.all([
+          supabase
+            .from("contractor_licenses")
+            .select("id, license_number, license_state, verification_status, verified")
+            .eq("contractor_id", user.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase.from("profiles").select("trade").eq("id", user.id).maybeSingle(),
+        ]);
+        if (cancelled) return;
+        if (data) {
           setExistingLicense(data as ExistingLicense);
+        }
+        const t = (profileRow as { trade?: unknown } | null)?.trade;
+        if (isTradeType(t)) {
+          setProfileTrade(t);
+          setResumeTrade(t);
         }
       } catch {
         // Best-effort — fall back to the blank form.
@@ -135,10 +173,18 @@ function LicenseVerificationContent() {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<LicenseFormData>({
     resolver: zodResolver(licenseSchema),
   });
+
+  /* Seed the trade select once the profile lands. The form renders before
+   * the fetch resolves, so a `defaultValue` would be stale — setValue is
+   * the only way to prefill an already-mounted uncontrolled field. */
+  useEffect(() => {
+    if (profileTrade) setValue("trade", profileTrade);
+  }, [profileTrade, setValue]);
 
   /* Watch (state, license_number) and fire a verification probe
    * 700ms after the user stops typing. Stale-response guard via a
@@ -177,6 +223,40 @@ function LicenseVerificationContent() {
       if (verifyTimerRef.current) clearTimeout(verifyTimerRef.current);
     };
   }, [state, licenseNumber, runVerify]);
+
+  /* Resume path — persist the trade before leaving for the plan step.
+   * Deliberately blocking rather than fire-and-forget: if the write fails
+   * and we routed anyway, the contractor would reach the territory picker
+   * with a stale trade and only find out after checkout. */
+  const handleResumeContinue = useCallback(async () => {
+    if (!resumeTrade) return;
+    setSavingResume(true);
+    setError(null);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setError("Not signed in. Please log in again.");
+        return;
+      }
+      if (resumeTrade !== profileTrade) {
+        const { error: tradeErr } = await supabase
+          .from("profiles")
+          .update({ trade: resumeTrade })
+          .eq("id", user.id);
+        if (tradeErr) {
+          setError(`Couldn't save your trade: ${tradeErr.message}`);
+          return;
+        }
+        setProfileTrade(resumeTrade);
+      }
+      router.push(planHref);
+    } finally {
+      setSavingResume(false);
+    }
+  }, [resumeTrade, profileTrade, router, planHref]);
 
   async function onSubmit(data: LicenseFormData) {
     setSubmitting(true);
@@ -233,14 +313,23 @@ function LicenseVerificationContent() {
       // Mirror the license state + number onto profiles so the middleware
       // gate at /onboarding/plan can unlock. Without this the gate reads
       // profiles.license_state as null forever and kicks the user back here.
+      //
+      // `trade` rides along on the SAME update, two steps ahead of
+      // /onboarding/territory. claim_territory reads profiles.trade and
+      // freezes it onto the territory row, so it has to be right before the
+      // territory step runs — and the territory step's availability check
+      // asks about that trade, so a wrong value there is only visible after
+      // the card has been charged.
       const { error: profileErr } = await supabase
         .from("profiles")
         .update({
           license_state: data.state,
           license_number: data.license_number,
+          trade: data.trade,
         })
         .eq("id", user.id);
       if (profileErr) throw profileErr;
+      setProfileTrade(data.trade);
 
       /* Hand the roster check to the server, which re-runs it and records
        * the verdict with the service-role client. Best-effort: if it
@@ -329,13 +418,53 @@ function LicenseVerificationContent() {
                   </span>
                 </div>
               </div>
+
+              {/* The resume card skips the form, so without this the trade
+                  would never be collected for anyone who filed a license
+                  before the field existed — they would reach the territory
+                  step as 'general' and claim the wrong exclusivity. */}
+              <div className="w-full max-w-xs text-left mb-4">
+                <label
+                  htmlFor="resume_trade"
+                  className="text-sm font-medium text-foreground mb-1.5 block"
+                >
+                  Your trade <span className="text-destructive">*</span>
+                </label>
+                <Select
+                  id="resume_trade"
+                  value={resumeTrade}
+                  onChange={(e) => setResumeTrade(e.target.value as TradeType | "")}
+                >
+                  <option value="">Select your trade</option>
+                  {TRADE_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {TRADE_LABELS[t]}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Each ZIP is exclusive to one contractor per trade, so this is
+                  what your territory claims are locked to.
+                </p>
+              </div>
+
+              {error && (
+                <div
+                  className="w-full max-w-xs rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive mb-3"
+                  role="alert"
+                >
+                  {error}
+                </div>
+              )}
+
               <Button
                 variant="primary"
                 size="lg"
                 className="w-full max-w-xs"
-                onClick={() => router.push(planHref)}
+                disabled={!resumeTrade || savingResume}
+                onClick={handleResumeContinue}
               >
-                Continue to plan selection
+                {savingResume ? "Saving..." : "Continue to plan selection"}
               </Button>
               <button
                 type="button"
@@ -393,6 +522,41 @@ function LicenseVerificationContent() {
                 {errors.state && (
                   <p id="license_state-error" className="text-xs text-destructive mt-1">
                     {errors.state.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Trade — required. This is the value territory exclusivity
+                  is keyed on (migration 00135), not a profile nicety. */}
+              <div>
+                <label
+                  htmlFor="trade"
+                  className="text-sm font-medium text-foreground mb-1.5 block"
+                >
+                  Your trade <span className="text-destructive">*</span>
+                </label>
+                <Select
+                  id="trade"
+                  {...register("trade")}
+                  error={!!errors.trade}
+                  errorMessageId="trade-error"
+                >
+                  <option value="">Select your trade</option>
+                  {TRADE_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {TRADE_LABELS[t]}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Each ZIP is exclusive to one contractor per trade, so this is
+                  what your territory claims are locked to. You can change it
+                  later in Settings, but territories you already hold keep the
+                  trade they were claimed for.
+                </p>
+                {errors.trade && (
+                  <p id="trade-error" className="text-xs text-destructive mt-1">
+                    {errors.trade.message}
                   </p>
                 )}
               </div>

@@ -6,6 +6,7 @@ import { useUser } from "@/hooks/useUser";
 import { ComingSoon, STUBS_ENABLED } from "@/components/ComingSoon";
 import { useReviews } from "@/hooks/useReviews";
 import { Card } from "@/components/ui/card";
+import { FocusTrap } from "@/components/ui/focus-trap";
 
 /* ─── Types ─── */
 type Sentiment = "positive" | "neutral" | "negative";
@@ -180,56 +181,58 @@ function ReplyModal({ review, onClose }: { review: ReviewItem; onClose: () => vo
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="reply-modal-title">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 id="reply-modal-title" className="text-lg font-heading font-normal text-foreground">Reply to {review.reviewer}</h2>
-            <div className="flex items-center gap-2 mt-1">
-              <StarRating count={review.stars} />
-              <span className="text-xs text-muted-foreground">{review.platform} · {review.date}</span>
-              <SentimentBadge sentiment={review.sentiment} />
+    <FocusTrap active>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="reply-modal-title">
+        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+        <div className="relative z-10 w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 id="reply-modal-title" className="text-lg font-heading font-normal text-foreground">Reply to {review.reviewer}</h2>
+              <div className="flex items-center gap-2 mt-1">
+                <StarRating count={review.stars} />
+                <span className="text-xs text-muted-foreground">{review.platform} · {review.date}</span>
+                <SentimentBadge sentiment={review.sentiment} />
+              </div>
             </div>
+            <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-bg-subtle" aria-label="Close">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 2l12 12M14 2L2 14" /></svg>
+            </button>
           </div>
-          <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-bg-subtle" aria-label="Close">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 2l12 12M14 2L2 14" /></svg>
-          </button>
+
+          <div className="rounded-lg bg-bg-subtle p-3 text-sm text-muted-foreground leading-relaxed">{review.text}</div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-primary font-semibold">AI-Generated Draft</span>
+            <span className="text-[10px] text-muted-foreground">
+              {aiLoading ? "— drafting…" : "— edit before sending"}
+            </span>
+          </div>
+
+          {sent ? (
+            <div className="rounded-lg bg-green-500/10 p-3 text-sm text-green-400 text-center">Reply saved as draft</div>
+          ) : (
+            <>
+              <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5}
+                disabled={aiLoading}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none disabled:opacity-60" />
+              {aiError && (
+                <p className="text-xs text-red-400">{aiError}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button onClick={handleCopy} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-bg-subtle transition-colors">
+                  {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+                <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-sm text-foreground hover:bg-bg-subtle transition-colors">Cancel</button>
+                <button onClick={handleSend} disabled={!text.trim() || saving} className="rounded-lg bg-cta px-4 py-1.5 text-sm text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-40">
+                  {saving ? "Saving…" : "Send Reply"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
-
-        <div className="rounded-lg bg-bg-subtle p-3 text-sm text-muted-foreground leading-relaxed">{review.text}</div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-primary font-semibold">AI-Generated Draft</span>
-          <span className="text-[10px] text-muted-foreground">
-            {aiLoading ? "— drafting…" : "— edit before sending"}
-          </span>
-        </div>
-
-        {sent ? (
-          <div className="rounded-lg bg-green-500/10 p-3 text-sm text-green-400 text-center">Reply saved as draft</div>
-        ) : (
-          <>
-            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5}
-              disabled={aiLoading}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none disabled:opacity-60" />
-            {aiError && (
-              <p className="text-xs text-red-400">{aiError}</p>
-            )}
-            <div className="flex justify-end gap-2">
-              <button onClick={handleCopy} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-bg-subtle transition-colors">
-                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? "Copied" : "Copy"}
-              </button>
-              <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-sm text-foreground hover:bg-bg-subtle transition-colors">Cancel</button>
-              <button onClick={handleSend} disabled={!text.trim() || saving} className="rounded-lg bg-cta px-4 py-1.5 text-sm text-cta-foreground hover:opacity-90 transition-opacity disabled:opacity-40">
-                {saving ? "Saving…" : "Send Reply"}
-              </button>
-            </div>
-          </>
-        )}
       </div>
-    </div>
+    </FocusTrap>
   );
 }
 
@@ -276,68 +279,70 @@ function ReviewRequestModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="review-request-title">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
-        <div className="flex items-start justify-between">
-          <h2 id="review-request-title" className="text-lg font-heading font-normal text-foreground">Request a Review</h2>
-          <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-bg-subtle" aria-label="Close">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 2l12 12M14 2L2 14" /></svg>
-          </button>
-        </div>
-
-        <div className="flex gap-2">
-          {(["sms", "email"] as const).map((m) => (
-            <button key={m} onClick={() => setMethod(m)}
-              aria-pressed={method === m}
-              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                method === m ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:text-foreground"
-              }`}>
-              {m.toUpperCase()}
-            </button>
-          ))}
-        </div>
-
-        <div>
-          <label htmlFor="rev-customer-name" className="text-xs font-medium text-muted-foreground mb-1 block">Customer Name</label>
-          <input id="rev-customer-name" type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="John Doe"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
-        </div>
-
-        <div>
-          <label htmlFor="rev-recipient" className="text-xs font-medium text-muted-foreground mb-1 block">
-            {method === "sms" ? "Phone Number" : "Email Address"}
-          </label>
-          <input id="rev-recipient" type={method === "sms" ? "tel" : "email"} value={recipient} onChange={(e) => setRecipient(e.target.value)}
-            placeholder={method === "sms" ? "(310) 555-0123" : "customer@email.com"}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
-        </div>
-
-        <div>
-          <p className="text-xs font-medium text-muted-foreground mb-1">Message Preview</p>
-          <div className="rounded-lg bg-bg-subtle p-3 text-xs text-muted-foreground leading-relaxed whitespace-pre-line">{template}</div>
-        </div>
-
-        {requestError && (
-          <p role="alert" className="rounded-lg bg-destructive/10 p-2 text-xs text-destructive">
-            {requestError}
-          </p>
-        )}
-
-        {sent ? (
-          <div className="rounded-lg bg-green-500/10 p-3 text-sm text-green-400 text-center">Review request sent</div>
-        ) : (
-          <div className="flex gap-2">
-            <button onClick={onClose} className="flex-1 rounded-lg border border-border px-4 py-2 text-sm hover:bg-bg-subtle transition-colors">Cancel</button>
-            <button onClick={handleSend} disabled={!recipient.trim() || !customerName.trim() || sending}
-              className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm text-cta-foreground font-medium hover:opacity-90 transition-opacity disabled:opacity-40">
-              {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-              {sending ? "Sending..." : "Send Request"}
+    <FocusTrap active>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="review-request-title">
+        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+        <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
+          <div className="flex items-start justify-between">
+            <h2 id="review-request-title" className="text-lg font-heading font-normal text-foreground">Request a Review</h2>
+            <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-bg-subtle" aria-label="Close">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 2l12 12M14 2L2 14" /></svg>
             </button>
           </div>
-        )}
+
+          <div className="flex gap-2">
+            {(["sms", "email"] as const).map((m) => (
+              <button key={m} onClick={() => setMethod(m)}
+                aria-pressed={method === m}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                  method === m ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:text-foreground"
+                }`}>
+                {m.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          <div>
+            <label htmlFor="rev-customer-name" className="text-xs font-medium text-muted-foreground mb-1 block">Customer Name</label>
+            <input id="rev-customer-name" type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="John Doe"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+          </div>
+
+          <div>
+            <label htmlFor="rev-recipient" className="text-xs font-medium text-muted-foreground mb-1 block">
+              {method === "sms" ? "Phone Number" : "Email Address"}
+            </label>
+            <input id="rev-recipient" type={method === "sms" ? "tel" : "email"} value={recipient} onChange={(e) => setRecipient(e.target.value)}
+              placeholder={method === "sms" ? "(310) 555-0123" : "customer@email.com"}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">Message Preview</p>
+            <div className="rounded-lg bg-bg-subtle p-3 text-xs text-muted-foreground leading-relaxed whitespace-pre-line">{template}</div>
+          </div>
+
+          {requestError && (
+            <p role="alert" className="rounded-lg bg-destructive/10 p-2 text-xs text-destructive">
+              {requestError}
+            </p>
+          )}
+
+          {sent ? (
+            <div className="rounded-lg bg-green-500/10 p-3 text-sm text-green-400 text-center">Review request sent</div>
+          ) : (
+            <div className="flex gap-2">
+              <button onClick={onClose} className="flex-1 rounded-lg border border-border px-4 py-2 text-sm hover:bg-bg-subtle transition-colors">Cancel</button>
+              <button onClick={handleSend} disabled={!recipient.trim() || !customerName.trim() || sending}
+                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm text-cta-foreground font-medium hover:opacity-90 transition-opacity disabled:opacity-40">
+                {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                {sending ? "Sending..." : "Send Request"}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </FocusTrap>
   );
 }
 

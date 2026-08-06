@@ -33,15 +33,40 @@ export interface LeadData {
 export interface ZipAvailabilityContractor {
   contractor_id: string;
   slot_number: number;
+  /** Trade this holder claimed the ZIP for. Added by migration 00135. */
+  trade: string | null;
   claimed_at: string;
 }
 
 export interface ZipAvailability {
   zip: string;
-  /** Active territories currently held on this ZIP. */
+  /**
+   * Active territories currently held on this ZIP.
+   *
+   * Under migration 00135's unique index on (zip, trade) WHERE
+   * status='active', this is also the number of DISTINCT TRADES taken.
+   */
   slots_used: number;
-  /** Capacity per ZIP enforced by claim_territory. Currently 3. */
+  /**
+   * Maximum contractors one ZIP can hold: 10, the number of `trade_type`
+   * values (was 3 before migration 00135 made exclusivity per-trade).
+   *
+   * Availability for a specific contractor is NOT `slots_used < slots_total`
+   * — that only says the ZIP is not saturated across every trade. Ask
+   * `get_zip_availability(zip, trade)` and read `available_for_trade`.
+   */
   slots_total: number;
+  /** Which trades are already taken. Never carries contractor identity. */
+  taken_trades: string[];
+  /**
+   * Whether the queried trade can still claim this ZIP.
+   *
+   * TRI-STATE: `null` means no trade was supplied, i.e. UNKNOWN — never
+   * treat it as available. A trade-blind caller reading this as a boolean is
+   * exactly how the onboarding picker showed every ZIP as free and let
+   * contractors get charged before the claim failed.
+   */
+  available_for_trade: boolean | null;
   contractors: ZipAvailabilityContractor[];
   waitlist_count: number;
 }

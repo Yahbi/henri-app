@@ -35,6 +35,12 @@ interface SourceSpec {
   budget: number | null;
   /** 'month' → period key YYYY-MM; 'day' → YYYY-MM-DD. */
   window: "month" | "day" | null;
+  /** Name of the env var holding this source's API key, for the sources
+   *  that need one. Every keyed module returns null BEFORE opening a socket
+   *  when its key is unset, so a source named here with an empty env var
+   *  cannot reach the wire and must be neither attempted nor billed.
+   *  Free / in-DB sources omit this. */
+  env?: string;
 }
 
 /** Source registry. Keys MUST match the telemetry source names used in
@@ -50,21 +56,84 @@ export const SOURCE_SPECS: Record<string, SourceSpec> = {
   osm_contact: { class: "free", budget: null, window: null },
   contractor_license: { class: "free", budget: null, window: null },
   // ── high-volume free (generous quota) ──
-  opencorporates: { class: "highVolumeFree", budget: 500, window: "day" },
-  fec: { class: "highVolumeFree", budget: 1000, window: "day" },
-  google_places: { class: "highVolumeFree", budget: 5000, window: "month" },
+  // `env` names must match the variable each module reads before it makes
+  // its first request — see the corresponding `src/lib/enrichment/*.ts`.
+  opencorporates: {
+    class: "highVolumeFree",
+    budget: 500,
+    window: "day",
+    env: "OPENCORPORATES_API_KEY",
+  },
+  fec: { class: "highVolumeFree", budget: 1000, window: "day", env: "FEC_API_KEY" },
+  google_places: {
+    class: "highVolumeFree",
+    budget: 5000,
+    window: "month",
+    env: "GOOGLE_PLACES_API_KEY",
+  },
   // ── keyed (moderate budget) ──
-  cloudmersive_phone: { class: "keyed", budget: 800, window: "month" },
-  cloudmersive_address: { class: "keyed", budget: 800, window: "month" },
-  weatherstack: { class: "keyed", budget: 100, window: "month" },
-  yelp: { class: "keyed", budget: 5000, window: "month" },
-  regrid: { class: "keyed", budget: 1000, window: "month" },
+  cloudmersive_phone: {
+    class: "keyed",
+    budget: 800,
+    window: "month",
+    env: "CLOUDMERSIVE_API_KEY",
+  },
+  cloudmersive_address: {
+    class: "keyed",
+    budget: 800,
+    window: "month",
+    env: "CLOUDMERSIVE_API_KEY",
+  },
+  weatherstack: {
+    class: "keyed",
+    budget: 100,
+    window: "month",
+    env: "WEATHERSTACK_API_KEY",
+  },
+  yelp: { class: "keyed", budget: 5000, window: "month", env: "YELP_API_KEY" },
+  regrid: { class: "keyed", budget: 1000, window: "month", env: "REGRID_API_KEY" },
   // ── low-quota keyed (priority-1 ONLY) ──
   // Keys match the telemetry source names emitted by orchestrator trace().
-  numverify: { class: "lowQuotaKeyed", budget: 100, window: "month" },
-  hunter_io: { class: "lowQuotaKeyed", budget: 25, window: "month" },
-  apollo: { class: "lowQuotaKeyed", budget: 750, window: "month" },
+  numverify: {
+    class: "lowQuotaKeyed",
+    budget: 100,
+    window: "month",
+    env: "NUMVERIFY_API_KEY",
+  },
+  hunter_io: {
+    class: "lowQuotaKeyed",
+    budget: 25,
+    window: "month",
+    env: "HUNTER_API_KEY",
+  },
+  apollo: {
+    class: "lowQuotaKeyed",
+    budget: 750,
+    window: "month",
+    env: "APOLLO_API_KEY",
+  },
 };
+
+/**
+ * True when a source can actually reach the network: it either needs no
+ * API key, or its key is present and non-empty in the environment.
+ *
+ * This is what separates "attempted" from "billable". Every keyed module
+ * returns null before any I/O when its env var is unset, so counting those
+ * no-op invocations as spend would retire the source's whole monthly budget
+ * without a single request leaving the process — and the source would then
+ * report 0 remaining, and stay dark, from the moment its key IS provisioned
+ * until the period rolls over.
+ *
+ * Read from `process.env` at call time rather than module load so a test or
+ * a redeploy that sets the variable takes effect immediately.
+ */
+export function sourceKeyConfigured(source: string): boolean {
+  const spec = SOURCE_SPECS[source];
+  if (!spec?.env) return true;
+  const value = process.env[spec.env];
+  return typeof value === "string" && value.trim().length > 0;
+}
 
 /** Which source classes a tier is allowed to spend. Low-quota keyed
  *  sources are additionally restricted to tier 1 only (see tierAllows). */

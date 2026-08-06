@@ -217,11 +217,26 @@ export default function StormPage() {
     });
   }, [leadsForStage]);
 
+  /* 2026-08-06 truthfulness pass — `affectedZips: territories` is gone.
+   *
+   * It attached the contractor's ENTIRE territory list to every alert, so a
+   * warning covering one county printed as "Affected ZIPs: 33602, 33604,
+   * 33629" and "3 ZIPs affected". /api/storm does no per-alert geography at
+   * all: it derives states from ZIP prefixes, asks NWS for each state's
+   * active alerts, and returns the union. Nothing in that path establishes
+   * that a given alert touches a given ZIP.
+   *
+   * What the feed does carry is `areaDesc` — the NWS's own county/zone
+   * list — which the route already maps to `area`. That is now what
+   * renders. (The banner below was reading `mostSevereAlert.areas`, plural,
+   * which the route never sets, so the contractor previously got no
+   * geographic context anywhere on the page.)
+   */
   const mappedAlerts = alerts.map((alert) => ({
     id: alert.id,
     type: alert.event,
     date: formatOnset(alert.onset),
-    affectedZips: territories,
+    area: alert.area,
     severity: mapNwsSeverity(alert.severity),
     headline: alert.headline,
   }));
@@ -334,9 +349,12 @@ export default function StormPage() {
           {mostSevereAlert.instruction && (
             <p className="mt-2 font-medium whitespace-pre-line">{mostSevereAlert.instruction}</p>
           )}
-          {mostSevereAlert.areas && (
+          {/* `.area` (from NWS areaDesc), not `.areas` — the latter is
+              declared on the hook's type but never populated by
+              /api/storm, so this block used to never render. */}
+          {mostSevereAlert.area && (
             <p className="mt-2 opacity-80">
-              <span className="font-medium">Affected areas:</span> {mostSevereAlert.areas}
+              <span className="font-medium">NWS-listed areas:</span> {mostSevereAlert.area}
             </p>
           )}
           {mostSevereAlert.expires && (
@@ -368,7 +386,14 @@ export default function StormPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Active Events */}
         <div>
-          <h2 className="text-lg font-heading font-normal text-foreground mb-3">Active Events</h2>
+          <h2 className="text-lg font-heading font-normal text-foreground">Active Events</h2>
+          {/* The one disclosure that keeps this list honest: these are
+              state-wide NWS pulls, matched to you by state, not by ZIP. */}
+          <p className="text-xs text-muted-foreground mb-3 mt-0.5">
+            NWS alerts active in the states covering your territories. Henri
+            doesn&apos;t match them to individual ZIPs — compare the listed
+            areas against your own.
+          </p>
           <div className="space-y-3">
             {isLoading ? (
               Array.from({ length: 3 }).map((_, i) => (
@@ -414,9 +439,11 @@ export default function StormPage() {
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Affected ZIPs</span>
-                      <span className="text-foreground">{event.affectedZips.join(", ")}</span>
+                    <div className="flex justify-between gap-3 text-sm">
+                      <span className="text-muted-foreground shrink-0">Areas in the NWS bulletin</span>
+                      <span className="text-foreground text-right">
+                        {event.area || "Not listed by the NWS"}
+                      </span>
                     </div>
                   </div>
                 </Card>
@@ -465,9 +492,26 @@ export default function StormPage() {
         )}
       </div>
 
-      {/* Historical Timeline */}
+      {/* Active-alert timeline.
+       *
+       * 2026-08-06 truthfulness pass. This was headed "Storm History &
+       * Permit Surge" and drew a progress bar per row whose width was the
+       * literal `severity === "Severe" ? 85 : "Moderate" ? 50 : 25`% — a
+       * severity re-encoding dressed up as a measured permit surge. No
+       * permit query exists anywhere on this page, so there was no surge
+       * to plot; a contractor reading "85%" next to a storm had every
+       * reason to think Henri had counted permits. The bar is deleted and
+       * the heading no longer promises one.
+       *
+       * "History" was also wrong: the rows are `mappedAlerts` — the same
+       * currently-active alerts rendered above, not past events. Renamed
+       * to what it is. If real storm history lands (weather_swdi_* has it),
+       * this is the surface to hang it on. */}
       <div>
-        <h2 className="text-lg font-heading font-normal text-foreground mb-3">Storm History & Permit Surge</h2>
+        <h2 className="text-lg font-heading font-normal text-foreground">Active alerts, most severe first</h2>
+        <p className="text-xs text-muted-foreground mb-3 mt-0.5">
+          The same alerts listed above, ordered by NWS severity.
+        </p>
         <Card className="p-5">
           <div className="space-y-4">
             {isLoading ? (
@@ -480,7 +524,6 @@ export default function StormPage() {
                   <div className="pb-3 flex-1 space-y-2">
                     <Skeleton className="h-4 w-48" />
                     <Skeleton className="h-3 w-32" />
-                    <Skeleton className="h-1.5 w-full rounded-full" />
                   </div>
                 </div>
               ))
@@ -502,19 +545,8 @@ export default function StormPage() {
                       {severityBadge(event.severity)}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {event.affectedZips.length} ZIPs affected
+                      {event.area || "Areas not listed by the NWS"}
                     </p>
-                    <div className="mt-2 flex items-center gap-4">
-                      <div className="flex-1 h-1.5 rounded-full bg-bg-subtle overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-primary/70"
-                          style={{ width: `${event.severity === "Severe" ? 85 : event.severity === "Moderate" ? 50 : 25}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] text-muted-foreground shrink-0">
-                        {event.severity}
-                      </span>
-                    </div>
                   </div>
                 </div>
               ))

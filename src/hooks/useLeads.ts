@@ -160,6 +160,21 @@ async function fetchLeads(
       data = rows ?? [];
     }
   } else {
+    /* Progressive-paint accumulator. Each landed page is mapped ONCE and
+     * appended; the loop used to call `mapRowsToLeads(data)` over the whole
+     * accumulator every page, which is O(n^2) in the expensive direction —
+     * mapRowsToLeads does a ~20-field spread plus classifyPropertyType per
+     * row, then dedupByAddress with three regex passes per address. At the
+     * god-mode dashboard's 100k ceiling that is ~5M row-maps for 100 pages
+     * instead of 100k.
+     *
+     * Cross-page dedupe is intentionally NOT re-run here: the final
+     * `mapRowsToLeads(data)` after the loop already does the cumulative
+     * dedupRowsById + dedupByAddress, and its result is what the queryFn
+     * returns, so the settled cache is byte-identical to before. The only
+     * difference is that an intermediate frame can briefly show a duplicate
+     * address that a later page would have collapsed. */
+    const mappedSoFar: Lead[] = [];
     for (let offset = 0; offset < limit; offset += PAGE_SIZE) {
       const take = Math.min(PAGE_SIZE, limit - offset);
       // Must rebuild the query per page — Supabase query builders are
@@ -188,10 +203,12 @@ async function fetchLeads(
       // No-op when the caller didn't pass `progressive` — preserves the
       // legacy queryFn-only behaviour for non-list callers.
       if (progressive) {
-        const partial = mapRowsToLeads(data);
+        mappedSoFar.push(...mapRowsToLeads(rows as Row[]));
+        // Fresh array reference so React Query treats it as a new value;
+        // the elements themselves are shared, not re-created.
         progressive.queryClient.setQueryData<Lead[]>(
           progressive.queryKey,
-          partial,
+          mappedSoFar.slice(),
         );
       }
       if (rows.length < take) break;

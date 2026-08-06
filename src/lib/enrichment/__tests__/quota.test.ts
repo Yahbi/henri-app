@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { tierAllows, periodKey, SOURCE_SPECS } from "../quota";
+import { describe, it, expect, afterEach } from "vitest";
+import {
+  tierAllows,
+  periodKey,
+  sourceKeyConfigured,
+  SOURCE_SPECS,
+} from "../quota";
 
 describe("tierAllows", () => {
   it("free sources always run, every tier", () => {
@@ -42,6 +47,60 @@ describe("tierAllows", () => {
       expect(tierAllows(tier, "lowQuotaKeyed")).toBe(false);
     }
     expect(tierAllows(1, "lowQuotaKeyed")).toBe(true);
+  });
+});
+
+describe("sourceKeyConfigured", () => {
+  const touched: string[] = [];
+  const setEnv = (name: string, value: string | undefined) => {
+    touched.push(name);
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  };
+
+  afterEach(() => {
+    for (const name of touched) delete process.env[name];
+    touched.length = 0;
+  });
+
+  it("free / in-DB sources need no key", () => {
+    expect(sourceKeyConfigured("county_gis")).toBe(true);
+    expect(sourceKeyConfigured("same_address_permit")).toBe(true);
+    expect(sourceKeyConfigured("ppp_sba")).toBe(true);
+  });
+
+  it("unknown sources are not blocked", () => {
+    expect(sourceKeyConfigured("not_a_source")).toBe(true);
+  });
+
+  it("a keyed source is unavailable while its env var is unset", () => {
+    setEnv("WEATHERSTACK_API_KEY", undefined);
+    expect(sourceKeyConfigured("weatherstack")).toBe(false);
+  });
+
+  it("whitespace-only is treated as unset", () => {
+    setEnv("REGRID_API_KEY", "   ");
+    expect(sourceKeyConfigured("regrid")).toBe(false);
+  });
+
+  it("becomes available as soon as the key is present", () => {
+    setEnv("HUNTER_API_KEY", "hk_test");
+    expect(sourceKeyConfigured("hunter_io")).toBe(true);
+  });
+
+  it("both Cloudmersive sources share one key", () => {
+    setEnv("CLOUDMERSIVE_API_KEY", "cm_test");
+    expect(sourceKeyConfigured("cloudmersive_phone")).toBe(true);
+    expect(sourceKeyConfigured("cloudmersive_address")).toBe(true);
+  });
+
+  it("every budgeted source names the env var that gates its network call", () => {
+    // A budgeted source with no `env` would be billed for invocations that
+    // cannot reach the wire — the exact defect this map exists to prevent.
+    const budgetedWithoutEnv = Object.entries(SOURCE_SPECS)
+      .filter(([, spec]) => spec.budget != null && !spec.env)
+      .map(([name]) => name);
+    expect(budgetedWithoutEnv).toEqual([]);
   });
 });
 

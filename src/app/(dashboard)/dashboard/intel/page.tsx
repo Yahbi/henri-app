@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
 import { MarketIntelPanel } from "@/components/dashboard/MarketIntelPanel";
 import { StageHistogram } from "@/components/analytics/StageHistogram";
+import { tintTextColor, scoreHex } from "@/components/dashboard/LeadCard";
 
 const FILTERS = ["All", "New Today", "High Value", "Cascade"];
 
@@ -16,15 +17,23 @@ const FILTERS = ["All", "New Today", "High Value", "Cascade"];
 /* Score-tier pill — uses the canonical `--hot`/`--warm`/`--cool` tokens
  * via the same `color-mix` pattern as LeadCard. Migrated from raw hex
  * 2026-04-25 per design-system audit priority action #4. */
+/* The `text-hot` / `text-warm` / `text-cool` glyph classes were removed on
+ * 2026-08-06: on a 12% tint they render the numeral at 2.51 / 2.12 / 3.59:1,
+ * all below the WCAG AA 4.5:1 minimum. The glyph now comes from the shared
+ * AA solver in LeadCard (a `light-dark()` pair, so each theme gets its own
+ * compliant colour) while the tint background keeps the raw brand token. */
 function scoreBadge(score: number) {
   const color =
     score >= 75
-      ? "text-hot  bg-[color-mix(in_srgb,var(--hot)_12%,transparent)]"
+      ? "bg-[color-mix(in_srgb,var(--hot)_12%,transparent)]"
       : score >= 50
-      ? "text-warm bg-[color-mix(in_srgb,var(--warm)_12%,transparent)]"
-      : "text-cool bg-[color-mix(in_srgb,var(--cool)_12%,transparent)]";
+      ? "bg-[color-mix(in_srgb,var(--warm)_12%,transparent)]"
+      : "bg-[color-mix(in_srgb,var(--cool)_12%,transparent)]";
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${color}`}
+      style={{ color: tintTextColor(scoreHex(score), 0.12) }}
+    >
       {score}
     </span>
   );
@@ -161,6 +170,31 @@ interface ZipCount {
   count: number;
 }
 
+/* 2026-08-06 truthfulness pass — READ THIS BEFORE RENAMING ANY CARD BELOW.
+ *
+ * Every figure the three compute* functions produce describes the array
+ * `useLeads()` returned, and that array is at most the 50 highest-scoring
+ * leads (useLeads.ts defaults `limit = 50`, `sort_by = "score"`,
+ * `sort_dir = "desc"`). It is NOT a territory-wide market total.
+ *
+ * A score-ordered top-50 is the single least representative sample you
+ * could take for a market average: `permit_value` is one of the six scoring
+ * signals, so the slice is upward-biased by construction and "Avg Permit
+ * Value" inherits that bias, while "Filed Today / This Week" undercounts
+ * because a fresh low-scoring permit is exactly what gets cut. The cards
+ * used to be titled "Total Permits" / "Avg Permit Value" under the
+ * subtitle "Real-time permit activity in your territory", which read as
+ * territory truth.
+ *
+ * The honest options were: pull the whole territory set, or say what the
+ * number covers. Pulling it is not free — useLeads pages at 1,000 rows
+ * against an 8s statement_timeout, and god-mode sessions bypass the
+ * contractor_id filter entirely (270k leads), so a 5,000-row aggregate pull
+ * on page load is exactly the query shape that has timed out before. So the
+ * scope is now stated on the surface, in the card labels and the section
+ * heading — not in a tooltip. If someone later computes real aggregates
+ * server-side, delete the scope labels in the same commit.
+ */
 function computeMarketSummary(leads: Lead[]): MarketSummary {
   const total = leads.length;
   const values = leads.map((l) => l.permit_value ?? l.pipeline_value ?? 0).filter((v) => v > 0);
@@ -342,25 +376,38 @@ export default function IntelPage() {
       {isLoading ? (
         <SummaryBarSkeleton />
       ) : summary ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="p-4">
-            <p className="text-xs text-muted-foreground">Total Permits</p>
-            <p className="text-xl font-heading font-normal text-foreground mt-1">{summary.totalPermits}</p>
-          </Card>
-          <Card className="p-4">
-            <p className="text-xs text-muted-foreground">Avg Permit Value</p>
-            <p className="text-xl font-heading font-normal text-foreground mt-1">{formatCurrency(summary.avgValue)}</p>
-          </Card>
-          <Card className="p-4">
-            <p className="text-xs text-muted-foreground">Hottest Trade</p>
-            <p className="text-xl font-heading font-normal text-hot mt-1">{summary.hottestTrade}</p>
-          </Card>
-          <Card className="p-4">
-            <p className="text-xs text-muted-foreground">Filed Today / This Week</p>
-            <p className="text-xl font-heading font-normal text-foreground mt-1">
-              {summary.filedToday} <span className="text-sm text-muted-foreground">/</span> {summary.filedThisWeek}
+        <div className="space-y-2">
+          {/* Scope, stated where the numbers are. These four cards describe
+              the score-ordered slice below them, not the territory. */}
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <h2 className="text-sm font-heading font-normal text-foreground">
+              Your {summary.totalPermits} highest-scoring leads
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              These figures cover the leads shown below — not your whole
+              territory.
             </p>
-          </Card>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="p-4">
+              <p className="text-xs text-muted-foreground">Leads in this view</p>
+              <p className="text-xl font-heading font-normal text-foreground mt-1">{summary.totalPermits}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs text-muted-foreground">Avg permit value (these leads)</p>
+              <p className="text-xl font-heading font-normal text-foreground mt-1">{formatCurrency(summary.avgValue)}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs text-muted-foreground">Top trade (these leads)</p>
+              <p className="text-xl font-heading font-normal text-hot mt-1">{summary.hottestTrade}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs text-muted-foreground">Filed today / this week (these leads)</p>
+              <p className="text-xl font-heading font-normal text-foreground mt-1">
+                {summary.filedToday} <span className="text-sm text-muted-foreground">/</span> {summary.filedThisWeek}
+              </p>
+            </Card>
+          </div>
         </div>
       ) : null}
 
@@ -375,7 +422,12 @@ export default function IntelPage() {
           {/* Trade Breakdown */}
           {tradeBreakdown.length > 0 && (
             <Card className="p-5">
-              <h2 className="text-sm font-heading font-normal text-foreground mb-4">Trade Breakdown</h2>
+              <h2 className="text-sm font-heading font-normal text-foreground">Trade Breakdown</h2>
+              {/* Same slice as the summary cards — say so here too, since
+                  this card is often read on its own. */}
+              <p className="text-xs text-muted-foreground mb-4 mt-0.5">
+                Across the {intelCards.length} leads in this view
+              </p>
               <div className="space-y-2.5">
                 {tradeBreakdown.map(({ trade, count }) => {
                   const pct = Math.round((count / maxTradeCount) * 100);
@@ -401,7 +453,13 @@ export default function IntelPage() {
           {/* Trending Areas */}
           {trendingZips.length > 0 && (
             <Card className="p-5">
-              <h2 className="text-sm font-heading font-normal text-foreground mb-4">Trending Areas</h2>
+              {/* Was "Trending Areas". Nothing here measures a trend — it is
+                  a frequency count over the same score-ordered slice, with
+                  no time dimension and no comparison period. */}
+              <h2 className="text-sm font-heading font-normal text-foreground">Most common ZIPs</h2>
+              <p className="text-xs text-muted-foreground mb-4 mt-0.5">
+                Across the {intelCards.length} leads in this view
+              </p>
               <div className="space-y-3">
                 {trendingZips.map(({ zip, city, state, count }, idx) => {
                   const label = [city, state].filter(Boolean).join(", ");
@@ -425,7 +483,7 @@ export default function IntelPage() {
                         </div>
                       </div>
                       <span className="text-sm font-medium text-foreground">
-                        {count} {count === 1 ? "permit" : "permits"}
+                        {count} {count === 1 ? "lead" : "leads"}
                       </span>
                     </div>
                   );

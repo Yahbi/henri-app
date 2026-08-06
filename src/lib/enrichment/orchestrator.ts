@@ -90,6 +90,7 @@ import { lookupYelp } from "./yelp-fusion";
 import { mineMultiple } from "./description-miner";
 import {
   SOURCE_SPECS,
+  sourceKeyConfigured,
   tierAllows,
   type EnrichTier,
   type QuotaRemaining,
@@ -267,16 +268,27 @@ async function queryAddressSiblings(
 
 /* ── In-memory result cache ────────────────────────────────────────────
  *
- * Same-address enrichments are surprisingly common: multiple permits at
- * the same property over months/years, the scorer re-processes leads,
- * manual "retry this lead" actions, etc. Without a cache each of these
- * repeats every single external API call — wasteful, slow, and it
- * burns the OpenCorporates 500/day bucket much faster than it needs to.
+ * Repeat enrichments of the same lead are common: the re-enrich cron and
+ * the inflow cron overlap, the scorer re-processes leads, manual "retry
+ * this lead" actions. Without a cache each of these repeats every single
+ * external API call — wasteful, slow, and it burns the OpenCorporates
+ * 500/day bucket much faster than it needs to.
  *
- * Keyed on (normalized address, zip). Entries expire after TTL. No
- * persistence — the cache is per-lambda-instance, which is fine because
- * each invocation processes hundreds of leads and the hit rate WITHIN
- * a single enrichment cron invocation is high (same-zip batching).
+ * The cache is a MEMO OF enrichLead's INPUTS, not of the property. It used
+ * to be keyed on (address, zip, state) alone, which was wrong: the returned
+ * record is seeded verbatim from the caller's own `owner_name` / `phone` /
+ * `email`, and `ppp_sba` + `contractor_license` derive owner_name / phone
+ * from the caller's `contractor_name` / `applicant_name`. None of that was
+ * in the key, so the FIRST lead enriched at an address handed its contact
+ * identity to every later lead at the same address — two units in a duplex,
+ * or two permits on one parcel, were enough, and the enrich cron then wrote
+ * that borrowed identity onto the second lead.
+ *
+ * Keying on every identity-bearing input means a hit can only ever return
+ * the result of an identical call, so genuinely derived data (county GIS,
+ * OSM, parcel records) is still shared while contact identity cannot cross
+ * leads. Entries expire after TTL. No persistence — the cache is
+ * per-lambda-instance.
  *
  * Separate cache from the `pipeline.ts` FIPS cache; different concern
  * (that one's property-data only, this one's full-contact).
@@ -289,8 +301,46 @@ const enrichCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — same-day re-enrichment hits
 const CACHE_MAX = 2000;                  // hard cap to prevent unbounded growth
 
-function cacheKey(ctx: EnrichmentContext): string {
-  return `${ctx.address}|${ctx.zip ?? ""}|${ctx.state ?? ""}`
+/** FNV-1a 32-bit. Folds the permit free-text (which the description miner
+ *  reads phone/email out of, and which can be kilobytes long) into the key
+ *  without storing it verbatim. Only needs to separate different texts. */
+function hashText(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * Build the cache key from every input that can change the identity fields
+ * in the result. Returns null for leads that must not be cached at all.
+ *
+ * A zip that isn't 5 digits collapses the key onto address + state, which
+ * widens a collision from one parcel to an entire state, so those leads
+ * skip the cache on both read and write.
+ */
+function cacheKey(ctx: EnrichmentContext): string | null {
+  if (!ctx.zip || !/^\d{5}$/.test(ctx.zip)) return null;
+  return [
+    ctx.address,
+    ctx.zip,
+    ctx.state ?? "",
+    // Tier decides which keyed sources are allowed to run, so a thin
+    // tier-4 result must not be served to a paid tier-1 lead.
+    String(ctx.tier ?? 4),
+    ctx.contractor_name ?? "",
+    ctx.applicant_name ?? "",
+    ctx.applicant_classification ?? "",
+    ctx.owner_name ?? "",
+    ctx.owner_first ?? "",
+    ctx.owner_last ?? "",
+    ctx.phone ?? "",
+    ctx.email ?? "",
+    hashText((ctx.permit_text ?? []).filter(Boolean).join(" ~ ")),
+  ]
+    .join("|")
     .toUpperCase()
     .replace(/\s+/g, " ")
     .trim();
@@ -353,8 +403,9 @@ async function trace<T>(
 }
 
 export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContact> {
+  // null key = this lead is not cacheable (see cacheKey). Skip both halves.
   const key = cacheKey(ctx);
-  const cached = cacheGet(key);
+  const cached = key ? cacheGet(key) : null;
   if (cached) return cached;
 
   const result: EnrichedContact = {
@@ -402,6 +453,12 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
   const allow = (source: string): boolean => {
     const spec = SOURCE_SPECS[source];
     if (!spec || spec.class === "free") return true;
+    // A source whose API key is unset returns null before it opens a socket.
+    // Refusing it HERE — rather than letting it no-op inside trace() — keeps
+    // it out of the telemetry the cron converts into recorded quota spend.
+    // Otherwise an unconfigured source bills its full monthly budget for
+    // calls that never left the process.
+    if (!sourceKeyConfigured(source)) return false;
     if (!tierAllows(tier, spec.class)) return false;
     if (spec.budget == null) return true;
     const rem = ctx.quotaRemaining?.[source];
@@ -931,6 +988,6 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
     result.confidence = Math.min(1, result.confidence + 0.05);
   }
 
-  cacheSet(key, result);
+  if (key) cacheSet(key, result);
   return result;
 }

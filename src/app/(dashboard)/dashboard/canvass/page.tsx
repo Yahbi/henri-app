@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils/cn";
 import { ComingSoon, STUBS_ENABLED } from "@/components/ComingSoon";
+import { tintTextColor, scoreHex } from "@/components/dashboard/LeadCard";
 
 /* Trade pill colours — same `--trade-*-fg` / `--trade-*-tint` token set
  * as KanbanBoard / LeadCard / jobs. Migrated from raw hex 2026-04-25. */
@@ -41,16 +42,27 @@ function priorityBadge(score: number) {
   return <span className="inline-flex items-center rounded-full bg-zinc-500/10 px-2 py-0.5 text-xs font-medium text-muted-foreground">Low</span>;
 }
 
-/* Score-tier pill — uses the canonical `--hot`/`--warm`/`--cool` tokens
- * via the `color-mix` pattern. Same as KanbanBoard.scoreColor. */
+/* Score-tier pill — tint background stays on the canonical
+ * `--hot`/`--warm`/`--cool` tokens via `color-mix`.
+ *
+ * The `text-hot` / `text-warm` / `text-cool` glyph classes were removed on
+ * 2026-08-06: on a 12% tint they render the numeral at 2.51 / 2.12 / 3.59:1,
+ * all below the WCAG AA 4.5:1 minimum, with `warm` the worst. The glyph now
+ * comes from the shared AA solver in LeadCard, which emits a `light-dark()`
+ * pair so each theme gets its own compliant colour while the tint keeps the
+ * raw brand hex. Same fix as the Leads list and the Kanban card — this file
+ * held a third copy of the helper. */
 function scoreBadge(score: number) {
   const color = score >= 75
-    ? "text-hot  bg-[color-mix(in_srgb,var(--hot)_12%,transparent)]"
+    ? "bg-[color-mix(in_srgb,var(--hot)_12%,transparent)]"
     : score >= 50
-    ? "text-warm bg-[color-mix(in_srgb,var(--warm)_12%,transparent)]"
-    : "text-cool bg-[color-mix(in_srgb,var(--cool)_12%,transparent)]";
+    ? "bg-[color-mix(in_srgb,var(--warm)_12%,transparent)]"
+    : "bg-[color-mix(in_srgb,var(--cool)_12%,transparent)]";
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${color}`}
+      style={{ color: tintTextColor(scoreHex(score), 0.12) }}
+    >
       {score}
     </span>
   );

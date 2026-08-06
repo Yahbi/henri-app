@@ -50,6 +50,13 @@ export default function TerritoriesPage() {
         .from("territories")
         .select("id, zip, claimed_at")
         .eq("contractor_id", user.id)
+        // Active only. `territories` keeps released rows for history, and
+        // without this filter a contractor who ever released a ZIP saw it
+        // listed as "Active", saw their plan cap read as full ("3 of 3
+        // claimed"), and lost the Add ZIP button — permanently, with no way
+        // to tell why. `claim_territory` and /api/territories both scope to
+        // status='active'; this select was the last place that did not.
+        .eq("status", "active")
         .order("claimed_at", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) {

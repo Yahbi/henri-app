@@ -4,6 +4,7 @@ import { logger } from "@/lib/logger";
 import { OutreachQueueBodySchema, parseBody } from "@/lib/schemas/api";
 import { requireContractor } from "@/lib/auth/requireContractor";
 import { renderTemplate, type OutreachTokenContext } from "@/lib/outreach/tokens";
+import { SENT_STATUSES, computeRatePct } from "./stats";
 
 /* ─── GET /api/outreach — outreach history + stats for the current contractor ─── */
 export async function GET() {
@@ -49,26 +50,55 @@ export async function GET() {
 
     const items = outreachRows ?? [];
 
-    /* Compute stats from fetched items — including delivery tracking */
-    let totalSent = 0;
-    let totalOpened = 0;
-    let totalReplied = 0;
-    const sentStatuses = new Set(["sent", "delivered", "opened", "replied"]);
+    /* ── Stats ──────────────────────────────────────────────────────────
+     *
+     * Counted across the contractor's WHOLE queue, not the 50-row page
+     * above. The previous version looped over `items`, so "Messages Sent"
+     * silently saturated at 50 — a contractor who had sent 400 messages
+     * read 50 on the card, and the rates were computed against that
+     * truncated denominator too.
+     *
+     * `head: true` means no rows cross the wire: three index-scoped COUNTs
+     * against `outreach_queue` filtered by contractor_id. The 50-row select
+     * above now exists purely to render the `recent` table.
+     *
+     * A COUNT failure is propagated as a 500 rather than defaulted to 0 —
+     * useOutreach already has an error branch with a Retry affordance, and
+     * a fabricated zero on a stats card is exactly the failure mode this
+     * pass exists to remove.
+     */
+    const countQuery = () =>
+      supabase
+        .from("outreach_queue")
+        .select("id", { count: "exact", head: true })
+        .eq("contractor_id", user.id);
 
-    for (const item of items) {
-      if (sentStatuses.has(item.status)) {
-        totalSent += 1;
-      }
-      if (item.opened_at) {
-        totalOpened += 1;
-      }
-      if (item.replied_at) {
-        totalReplied += 1;
-      }
+    const [sentRes, openedRes, repliedRes] = await Promise.all([
+      countQuery().in("status", [...SENT_STATUSES]),
+      countQuery().not("opened_at", "is", null),
+      countQuery().not("replied_at", "is", null),
+    ]);
+
+    const countErr = sentRes.error ?? openedRes.error ?? repliedRes.error;
+    if (countErr) {
+      logger.error("Outreach stat count error", {
+        error: countErr instanceof Error ? countErr.message : String(countErr),
+      });
+      return Response.json(
+        { error: "Failed to fetch outreach data" },
+        { status: 500 }
+      );
     }
 
-    const openRate = totalSent > 0 ? Math.round((totalOpened / totalSent) * 100) / 100 : 0;
-    const replyRate = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) / 100 : 0;
+    const totalSent = sentRes.count ?? 0;
+    const totalOpened = openedRes.count ?? 0;
+    const totalReplied = repliedRes.count ?? 0;
+
+    /* Percentages (0–100), floored to one decimal — see ./stats.ts. The old
+     * expression divided by 100 instead of multiplying, so every rate the
+     * UI printed was 100× too small. */
+    const openRate = computeRatePct(totalOpened, totalSent);
+    const replyRate = computeRatePct(totalReplied, totalSent);
 
     /* Fetch follow-up sequences.
      * Capped at 50 (matching the outreach-queue cap above). This query was

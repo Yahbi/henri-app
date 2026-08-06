@@ -6,9 +6,12 @@ import { requireContractor } from "@/lib/auth/requireContractor";
 /**
  * POST /api/compliance/verify
  *
- * On-demand compliance re-check. Composes the same data the daily cron
- * would — license validity + permit expirations — and returns a single
- * consolidated summary.
+ * On-demand license re-check. Reads the contractor's licence validity off
+ * their profile and stamps `last_compliance_check_at`.
+ *
+ * It used to also return permit-expiration counts; those were derived from
+ * a hardcoded 180-day validity window Henri has no data for, and were
+ * removed 2026-08-06 (see the block comment in the handler).
  *
  * The UI uses this for the "Verify now" button. Previously that button
  * just called `refresh()` on the useCompliance hook without triggering
@@ -44,31 +47,30 @@ export async function POST(_req: NextRequest) {
       ? licensedUntil.getTime() - Date.now() < 30 * 86_400_000
       : false;
 
-    // 2. Permit expiration check — count leads whose permits will expire
-    // within 30 days (scorer uses 180-day default validity window).
-    const PERMIT_VALIDITY_DAYS = 180;
-    const thirtyDaysAhead = Date.now() + 30 * 86_400_000;
-    const ninetyDaysAhead = Date.now() + 90 * 86_400_000;
-
-    const { data: leads } = await supabase
-      .from("leads")
-      .select("id, status, permits (issued_date, applied_date)")
-      .eq("contractor_id", user.id)
-      .in("status", ["new", "contacted", "quoted", "proposal"])
-      .limit(5000);
-
-    let expiringSoon = 0;
-    let expiringLater = 0;
-    let alreadyExpired = 0;
-    for (const lead of leads ?? []) {
-      const p = (lead.permits as unknown as { issued_date?: string; applied_date?: string } | null);
-      const filedStr = p?.issued_date ?? p?.applied_date;
-      if (!filedStr) continue;
-      const expiresAt = new Date(filedStr).getTime() + PERMIT_VALIDITY_DAYS * 86_400_000;
-      if (expiresAt < Date.now()) alreadyExpired++;
-      else if (expiresAt < thirtyDaysAhead) expiringSoon++;
-      else if (expiresAt < ninetyDaysAhead) expiringLater++;
-    }
+    /* 2026-08-06 truthfulness pass — the permit-expiration bucketing that
+     * used to live here is deleted, not repaired.
+     *
+     * It pulled the contractor's open leads, added a hardcoded
+     * `PERMIT_VALIDITY_DAYS = 180` to each joined permit's issued/applied
+     * date, and returned `already_expired` / `expiring_in_30d` /
+     * `expiring_in_90d` counts that the Compliance tab printed verbatim.
+     * Henri ingests no permit expiry data — no such column exists in any
+     * migration and no scraper captures one — so all three numbers were
+     * arithmetic on an invented rule, presented to the contractor as
+     * jurisdiction fact. The matching UI (an "Expires" column, an "Expired"
+     * badge that overwrote the contractor's own CRM status, and an
+     * address-level countdown banner) is gone from
+     * dashboard/compliance/page.tsx in the same commit.
+     *
+     * It was also sampled wrong: `.limit(5000)` with no ORDER BY, against
+     * PostgREST's hard 1,000-row ceiling, so the buckets described an
+     * arbitrary thousand leads. That defect is moot now — but it is why the
+     * fix is deletion rather than pagination. Bounding the sample of a
+     * fabricated metric only makes the fabrication reproducible.
+     *
+     * This route is now what its name says: a license re-check. If a real
+     * expiry field is ever ingested, count it here from that column.
+     */
 
     // Optional: record the check on the profile.
     try {
@@ -88,12 +90,6 @@ export async function POST(_req: NextRequest) {
         expired: licenseExpired,
         expiring_soon: licenseExpiringSoon,
         leads_paused: licenseExpired,
-      },
-      permits: {
-        already_expired: alreadyExpired,
-        expiring_in_30d: expiringSoon,
-        expiring_in_90d: expiringLater,
-        validity_days: PERMIT_VALIDITY_DAYS,
       },
     });
   } catch (error) {

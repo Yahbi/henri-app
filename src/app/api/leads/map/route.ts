@@ -425,14 +425,32 @@ export async function GET(request: NextRequest) {
 
     /* ── Also fetch raw permits in territory (not yet scored) ─────────── */
     const includePermits = searchParams.get("include_permits") === "1";
+    let rawPermitsShown = 0;
+    let rawPermitsTruncated = false;
 
     if (includePermits) {
+      /* PostgREST caps a single response at 1,000 rows regardless of
+       * `.limit()` — that is precisely why the leads half above paginates at
+       * PAGE = 1000. This overlay asked for 10,000 and silently received at
+       * most 1,000, with no ORDER BY, so the surviving rows were
+       * planner-arbitrary and the map drew them as if that were the whole
+       * picture.
+       *
+       * Deliberately NOT paginated: this is a supplementary unscored-permit
+       * backdrop, not the contractor's lead set, and nine extra round trips
+       * would land on the same Postgres that already times out the scored
+       * half. Instead the limit now states the truth, the ORDER BY makes the
+       * survivors the NEWEST (which is what the "Show new permits" checkbox
+       * promises) rather than arbitrary, and `_meta.rawPermitsTruncated`
+       * lets the map say so instead of over-claiming density. */
+      const RAW_PERMIT_CAP = 1000;
       let permitQuery = supabase
         .from("permits")
         .select("id, address, city, state, zip, permit_type, estimated_value, description, latitude, longitude, created_at, source_type")
         .in("zip", userZips)
         .is("scored_at", null)
-        .limit(10000);
+        .order("created_at", { ascending: false })
+        .limit(RAW_PERMIT_CAP);
       if (!allTime) {
         permitQuery = permitQuery.gte("created_at", sinceDate.toISOString());
       }
@@ -441,7 +459,17 @@ export async function GET(request: NextRequest) {
         permitQuery = permitQuery.ilike("description", `%${tradeFilter}%`);
       }
 
-      const { data: rawPermits } = await permitQuery;
+      const { data: rawPermits, error: rawPermitsErr } = await permitQuery;
+      if (rawPermitsErr) {
+        // Previously discarded entirely, so a statement timeout here looked
+        // identical to "this territory has no unscored permits".
+        logger.warn("leads/map: raw permit overlay unavailable", {
+          error: rawPermitsErr.message,
+        });
+      }
+      rawPermitsShown = rawPermits?.length ?? 0;
+      // Exactly at the cap means Postgres had more to give.
+      rawPermitsTruncated = rawPermitsShown >= RAW_PERMIT_CAP;
 
       for (const permit of rawPermits ?? []) {
         const lat = Number(permit.latitude);
@@ -494,6 +522,13 @@ export async function GET(request: NextRequest) {
         gatedTradeTags: tradeGate.tradeTags,
         tradeFilterApplied: tradeFilter,
         filteredOut,
+        // Raw unscored-permit overlay. `rawPermitsTruncated` means the
+        // response hit the per-request ceiling and the map is showing a
+        // sample, not the full density — the UI must say so rather than let
+        // the pin count read as the truth.
+        rawPermitsIncluded: includePermits,
+        rawPermitsShown,
+        rawPermitsTruncated,
       },
     };
 

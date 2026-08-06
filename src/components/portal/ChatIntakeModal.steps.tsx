@@ -469,8 +469,24 @@ function Step5Contact({
           onChange={(e) => onConsentChange(e.target.checked)}
           className="mt-0.5 h-3.5 w-3.5 rounded border-border accent-primary"
         />
+        {/* "one matched contractor" was false, and it was the one place the
+            2026-08-05 truthfulness pass missed — PortalContent.tsx was
+            corrected to "up to three" throughout and this consent string
+            was not. The intake shares with every match the engine returns:
+            findMatches caps at three (src/lib/matching/engine.ts:390),
+            /api/intake notifies all of them (route.ts:312 ->
+            notify.ts:134-136), and each gets an intake_matches row granting
+            read access. So the checkbox was authorizing a narrower share
+            than the code performs.
+            Corrected here rather than by capping the dispatch at one, because
+            three-way matching is the product described on /portal; the
+            consent text is what was wrong. Only the primary match receives
+            phone + email — matches two and three receive the name — so
+            "contact info" is if anything generous to us.
+            consent_text_version in ChatIntakeModal.tsx is bumped in the same
+            change so rows stamped under the old wording stay attributable. */}
         <span className="text-[11px] text-foreground/85 leading-snug">
-          I authorize Henri to share my contact info with one matched contractor in my territory.
+          I authorize Henri to share my contact info with up to three matched contractors in my territory.
           I can opt out anytime by withdrawing my project from my homeowner dashboard.
         </span>
       </label>

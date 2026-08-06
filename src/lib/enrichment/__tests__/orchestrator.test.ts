@@ -95,6 +95,7 @@ import {
 } from "../orchestrator";
 import * as countyGis from "../county-gis";
 import * as voterFile from "../voter-file";
+import * as pppLoan from "../ppp-loan";
 
 /** Build a chainable supabase mock matching the locks.test.ts pattern. The
  *  orchestrator's only DB call is the sibling-permit query in
@@ -217,6 +218,127 @@ describe("enrichLead — cache", () => {
     // belt-and-braces.
     const callsAfterSecond = vi.mocked(countyGis.enrichFromCounty).mock.calls.length;
     expect(callsAfterSecond).toBe(callsAfterFirst);
+  });
+});
+
+/* ── Cache isolation ────────────────────────────────────────────────────
+ *
+ * The cache used to be keyed on (address, zip, state) alone while the result
+ * it stored was seeded verbatim from the CALLER's own owner_name / phone /
+ * email — so the first lead enriched at an address handed its contact
+ * identity to every later lead at the same address, and the enrich cron then
+ * wrote that borrowed identity onto the second lead. Two units in a duplex,
+ * or two permits on one parcel, were enough; no API key was required to
+ * reproduce it.
+ *
+ * These tests fail against that version of cacheKey().
+ */
+describe("enrichLead — cache isolation between leads at one address", () => {
+  it("does not hand the first lead's upstream contact identity to a second lead at the same address", async () => {
+    const shared = { address: "1000 DUPLEX ST", zip: "11111", state: "CA" };
+
+    const first = await enrichLead({
+      ...shared,
+      owner_name: "Unit A Owner",
+      phone: "5551110000",
+      email: "unit-a@example.com",
+    });
+    expect(first.owner_name).toBe("Unit A Owner");
+
+    // Same address / zip / state, but this lead knows nothing about a
+    // homeowner. It must not inherit unit A's identity.
+    const second = await enrichLead(shared);
+    expect(second.owner_name).toBeNull();
+    expect(second.phone).toBeNull();
+    expect(second.email).toBeNull();
+    expect(second.sources.owner_name).toBeUndefined();
+  });
+
+  it("does not share an owner derived from one permit's business name with a permit for a different business", async () => {
+    // ppp_sba derives owner_name / phone from the CALLER's contractor_name,
+    // which was not part of the old key either.
+    vi.mocked(pppLoan.lookupPPP).mockResolvedValueOnce({
+      owner_name: "Acme Principal",
+      owner_first: "Acme",
+      owner_last: "Principal",
+      business_name: "ACME ROOFING LLC",
+      business_phone: "5552220000",
+      business_address: "2000 PARCEL RD",
+      naics_code: null,
+      employee_count: null,
+      loan_amount: null,
+      source: "ppp_sba",
+      confidence: 0.8,
+    });
+
+    const acme = await enrichLead({
+      address: "2000 PARCEL RD",
+      zip: "22222",
+      state: "TX",
+      contractor_name: "ACME ROOFING LLC",
+    });
+    expect(acme.owner_name).toBe("Acme Principal");
+
+    // Different contractor, same parcel. The PPP mock is back to its default
+    // null, so a correctly-keyed cache yields nothing here.
+    const beta = await enrichLead({
+      address: "2000 PARCEL RD",
+      zip: "22222",
+      state: "TX",
+      contractor_name: "BETA PLUMBING LLC",
+    });
+    expect(beta.owner_name).toBeNull();
+    expect(beta.phone).toBeNull();
+  });
+
+  it("still memoizes genuinely derived property data across identical calls", async () => {
+    // The cache must stay useful: an identical call re-uses the county
+    // result rather than re-querying the endpoint.
+    vi.mocked(countyGis.enrichFromCounty).mockResolvedValueOnce({
+      owner_name: null,
+      owner_first: null,
+      owner_last: null,
+      mailing_address: null,
+      year_built: 1972,
+      home_sqft: 1800,
+      lot_sqft: null,
+      assessed_value: null,
+      property_value: null,
+      owner_occupied: null,
+      last_sale_date: null,
+      last_sale_price: null,
+      source: "county_gis_la",
+    });
+
+    const ctx: EnrichmentContext = {
+      address: "3000 MEMO AVE",
+      zip: "33333",
+      state: "CA",
+      owner_name: "Same Caller",
+    };
+    const first = await enrichLead(ctx);
+    const callsAfterFirst = vi.mocked(countyGis.enrichFromCounty).mock.calls.length;
+    expect(first.year_built).toBe(1972);
+
+    const second = await enrichLead({ ...ctx });
+    expect(second.year_built).toBe(1972);
+    expect(second.home_sqft).toBe(1800);
+    expect(vi.mocked(countyGis.enrichFromCounty).mock.calls.length).toBe(
+      callsAfterFirst,
+    );
+  });
+
+  it("never caches a lead whose zip is not a 5-digit ZIP", async () => {
+    // Without a zip the key collapses to address + state, which widens a
+    // collision from one parcel to a whole state. Those leads skip the
+    // cache on both read and write, so the sources run every time.
+    const ctx: EnrichmentContext = { address: "4000 NOZIP BLVD", state: "CA" };
+    await enrichLead(ctx);
+    const afterFirst = vi.mocked(countyGis.enrichFromCounty).mock.calls.length;
+    await enrichLead(ctx);
+    expect(vi.mocked(countyGis.enrichFromCounty).mock.calls.length).toBe(
+      afterFirst + 1,
+    );
   });
 });
 
@@ -350,6 +472,56 @@ describe("trace() instrumentation + getTelemetry()", () => {
     expect(t.county_gis).toBeDefined();
     expect(t.county_gis.calls).toBeGreaterThanOrEqual(1);
     expect(t.county_gis.hits).toBe(0);
+  });
+});
+
+/* ── Quota gate ─────────────────────────────────────────────────────────
+ *
+ * Every keyed module returns null before any network I/O when its env var is
+ * unset. Those no-op invocations used to still be counted by trace(), and
+ * the cron copies telemetry call-counts straight into recorded quota spend —
+ * so an unconfigured source retired its entire monthly budget without a
+ * single request leaving the process, then reported 0 remaining and stayed
+ * dark for the rest of the period once its key was finally provisioned.
+ */
+describe("quota gate — a source with no API key is neither attempted nor billed", () => {
+  const KEY = "WEATHERSTACK_API_KEY";
+  const original = process.env[KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("records no telemetry and spends no budget when the key is unset", async () => {
+    delete process.env[KEY];
+    const quotaRemaining = { weatherstack: 100 };
+    await enrichLead({
+      address: "1100 NOKEY WAY",
+      zip: "10001",
+      state: "CA",
+      tier: 1, // paid tier: the tier gate is NOT what stops this source
+      quotaRemaining,
+    });
+    // No telemetry entry => the cron's telemetry-to-spend loop has nothing
+    // to bill for weatherstack.
+    expect(getTelemetry().weatherstack).toBeUndefined();
+    // And the in-memory soft-decrement did not run either.
+    expect(quotaRemaining.weatherstack).toBe(100);
+  });
+
+  it("attempts the source once the key is present", async () => {
+    process.env[KEY] = "test-key";
+    const quotaRemaining = { weatherstack: 100 };
+    await enrichLead({
+      address: "1200 HASKEY WAY",
+      zip: "10002",
+      state: "CA",
+      tier: 1,
+      quotaRemaining,
+    });
+    expect(getTelemetry().weatherstack?.calls).toBe(1);
+    expect(quotaRemaining.weatherstack).toBe(99);
   });
 });
 

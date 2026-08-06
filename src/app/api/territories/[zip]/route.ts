@@ -5,9 +5,10 @@ import { getZipAvailability } from "@/lib/territory/ziplock";
 import { releaseTerritory } from "@/lib/territory/ziplock";
 import { logger } from "@/lib/logger";
 import { isZip5 } from "@/lib/validation/params";
+import { isTradeType } from "@/lib/territory/trades";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ zip: string }> }
 ) {
   try {
@@ -20,7 +21,26 @@ export async function GET(
       );
     }
 
-    const availability = await getZipAvailability(zip);
+    /* ?trade= — optional, and the whole point of the endpoint since
+     * migration 00135 made exclusivity per (zip, trade). Without it the RPC
+     * can only answer "how many trades are taken", which is not the question
+     * the contractor is asking: a ZIP with nine trades taken is still open
+     * to the tenth, and a ZIP with one trade taken is CLOSED if that trade
+     * is theirs. The onboarding picker used to read the trade-blind counts,
+     * so every ZIP rendered available and the claim failed after checkout.
+     *
+     * Rejected rather than ignored when malformed: silently dropping a bad
+     * label would answer the trade-blind question while the caller believed
+     * it had asked the trade-specific one — the exact failure being fixed. */
+    const tradeParam = request.nextUrl.searchParams.get("trade");
+    if (tradeParam !== null && !isTradeType(tradeParam)) {
+      return NextResponse.json(
+        { error: "trade must be one of the trade_type values" },
+        { status: 400 }
+      );
+    }
+
+    const availability = await getZipAvailability(zip, tradeParam);
 
     // This endpoint is PUBLIC and unauthenticated by design — the ZIP
     // availability widget on /portal and the onboarding territory picker both
@@ -31,9 +51,11 @@ export async function GET(
     // back that contractor's full active-ZIP portfolio. Both routes read
     // through the service-role client, so RLS never applied.
     //
-    // Nothing consumes the identities. Both callers read only slots_used and
-    // slots_total (see readSlots in src/app/onboarding/territory/page.tsx:67),
-    // so the occupancy COUNT is published and the identities are not.
+    // Nothing consumes the identities. Callers read slots_used / slots_total
+    // and, since 00137, taken_trades + available_for_trade (see readSlots in
+    // src/app/onboarding/territory/page.tsx) — occupancy and which TRADES are
+    // gone, never who holds them. That is the same coarseness the wedge
+    // contract requires of the "N contractors are watching" bucket.
     //
     // Kept as a key rather than dropped so any client destructuring
     // `contractors` gets a number instead of a crash.
