@@ -222,7 +222,30 @@ async function runScrape(request: NextRequest): Promise<NextResponse> {
   // run always returns a clean summary; unprocessed sources keep their
   // old last_scraped_at and lead the next hourly rotation.
   const startMs = Date.now();
-  const BUDGET_MS = 230_000;
+  // 175s, lowered from 230s on 2026-08-06.
+  //
+  // This is the budget for LAUNCHING new source batches, not for the run. The
+  // batch already in flight still has to finish, and each processed source
+  // then costs a recordSourceRun round-trip before the summary is written, so
+  // the wall time always lands well ABOVE this number. Measured at 230s:
+  // 279,848ms / 264,654ms / 296,354ms.
+  //
+  // The fleet calls this endpoint with `curl --max-time 290`, so the 296s run
+  // came back as HTTP 000 and the fleet recorded a failure — even though the
+  // function completed and wrote its cron_runs row. Two of those in a row
+  // trips the mid-run abort and the rest of the slot is skipped, so a scrape
+  // that actually succeeded can cost the ingest of everything scheduled
+  // behind it.
+  //
+  // Today's freshness-pass change is what pushed it over: each source now
+  // does a head pass plus a backfill pass, and runs cover 15 sources instead
+  // of 10, so there is more post-budget tail than when 230s was chosen.
+  // 175s leaves ~115s of headroom under the curl ceiling for that tail.
+  //
+  // Raising --max-time is NOT the alternative: Vercel hard-kills the function
+  // at maxDuration=300, so 290 is already at the ceiling. The budget is the
+  // only side with room to move.
+  const BUDGET_MS = 175_000;
   let budgetExhausted = false;
 
   // ── FRESHNESS PASS vs BACKFILL (2026-08-05) ───────────────────────────
