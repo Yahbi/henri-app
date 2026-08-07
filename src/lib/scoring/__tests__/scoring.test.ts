@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { buildSignals, calculateScore, type ScoringSignals } from "../model";
+import {
+  buildSignals,
+  calculateScore,
+  SCORE_COMPONENT_MAX,
+  type ScoringSignals,
+} from "../model";
 
 /** Helper to create a default signal set that can be selectively overridden */
 function makeSignals(overrides: Partial<ScoringSignals> = {}): ScoringSignals {
@@ -149,6 +154,7 @@ describe("Wave 1.5 storm/lien boosters", () => {
         tradeConversionRate: 0.5,
         stormProximity24h: 95,
         recentLienCount: 10,
+        nriRiskScore: 95,
       }),
     );
     expect(result.total).toBe(100);
@@ -457,5 +463,111 @@ describe("buildSignals — permit-value provenance", () => {
     });
     expect(s.permitValue).toBeNull();
     expect(s.permitValueIsModeled).toBe(false);
+  });
+});
+
+/* ── Attainable weights (2026-08-07) ──────────────────────────────────────
+ *
+ * The Hot tier (total >= 75) had never been reached: across 161,345 leads
+ * scored by the current model the live maximum was 64, and four of the six
+ * components had NEVER reached their declared weight. The largest term was
+ * `historical_conversion`, which advertised 15 points but computed
+ * `zipRate * 7.5 + tradeRate * 7.5` — payable at 15 only with a 100% close
+ * rate in both the ZIP and the trade. 97%+ of leads scored exactly 3 and
+ * none had ever exceeded 3, so 12 of the 100 "available" points were
+ * structurally dead while the drawer rendered them to contractors as a 3/15
+ * bar.
+ *
+ * These tests lock the invariant that broke: a component may not declare a
+ * ceiling that no input can reach. Data-bound gaps (Henri has ~1% phone
+ * fill today) are fine — that is a fill-rate problem, and `contact` DOES
+ * pay 15 when the data is present. An arithmetically unreachable ceiling
+ * is not fine: it is a fabricated denominator.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+describe("every declared component weight is attainable", () => {
+  /** Inputs that push exactly one component to its ceiling. */
+  const maxOut: Record<
+    keyof typeof SCORE_COMPONENT_MAX,
+    Partial<ScoringSignals>
+  > = {
+    freshness:  { permitAge: 0 },
+    value:      { permitValue: 250_000 },
+    contact:    { hasPhone: true, hasEmail: true, hasOwnerName: true, ownerOccupied: true },
+    demand:     { zipDemandScore: 100, competitorCount: 0, seasonalFactor: 1.5 },
+    engagement: { isHomeownerIntake: true, hasDescription: true },
+    conversion: { zipConversionRate: 0.4, tradeConversionRate: 0.4 },
+    storm:      { stormProximity24h: 95 },
+    lien:       { recentLienCount: 5 },
+    nri:        { nriRiskScore: 95 },
+    nfip:       { nfipClaimCount: 20 },
+    quake:      { recentQuakeCount: 2 },
+  };
+
+  for (const [key, overrides] of Object.entries(maxOut)) {
+    const component = key as keyof typeof SCORE_COMPONENT_MAX;
+    it(`${component} reaches its declared weight of ${SCORE_COMPONENT_MAX[component]}`, () => {
+      const result = calculateScore(makeSignals(overrides));
+      expect(result[component]).toBe(SCORE_COMPONENT_MAX[component]);
+    });
+  }
+
+  it("no component ever exceeds its declared weight", () => {
+    const everything = calculateScore(
+      makeSignals(
+        Object.values(maxOut).reduce((acc, o) => ({ ...acc, ...o }), {}),
+      ),
+    );
+    for (const [key, max] of Object.entries(SCORE_COMPONENT_MAX)) {
+      const component = key as keyof typeof SCORE_COMPONENT_MAX;
+      expect(everything[component] ?? 0).toBeLessThanOrEqual(max);
+    }
+  });
+});
+
+describe("historical conversion — reachable ceiling, unchanged payouts", () => {
+  const conv = (zip: number | null, trade: number | null) =>
+    calculateScore(
+      makeSignals({ zipConversionRate: zip, tradeConversionRate: trade }),
+    ).conversion;
+
+  it("pays the national-baseline 3 when there is no local history", () => {
+    expect(conv(null, null)).toBe(3);
+  });
+
+  it("pays 0 when both markets are known never to convert", () => {
+    expect(conv(0, 0)).toBe(0);
+  });
+
+  /* The weight change must NOT move any live lead. Every rate at or below
+   * the 40% full-credit benchmark produces exactly what the old
+   * `rate * 7.5` per side produced — verified here rate by rate. */
+  it.each([
+    [0.0, 0],
+    [0.05, 1],
+    [0.1, 2],
+    [0.18, 3],
+    [0.25, 4],
+    [0.3, 5],
+    [0.4, 6],
+  ])("a %s close rate still pays %i, exactly as before", (rate, expected) => {
+    expect(conv(rate, rate)).toBe(expected);
+  });
+
+  it("saturates at the weight instead of paying for impossible close rates", () => {
+    // The old mapping paid 15 here — a ceiling that required winning every
+    // single lead in both the ZIP and the trade.
+    expect(conv(1, 1)).toBe(SCORE_COMPONENT_MAX.conversion);
+    expect(conv(0.9, 0.9)).toBe(SCORE_COMPONENT_MAX.conversion);
+  });
+});
+
+describe("contact scoring — no unreachable partial-credit floor", () => {
+  it("pays the full 5 for an owner name alone (the removed floor paid 3)", () => {
+    expect(calculateScore(makeSignals({ hasOwnerName: true })).contact).toBe(5);
+  });
+
+  it("pays 0 when there is no contact signal of any kind", () => {
+    expect(calculateScore(makeSignals()).contact).toBe(0);
   });
 });

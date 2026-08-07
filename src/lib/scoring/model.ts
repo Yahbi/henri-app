@@ -1,6 +1,7 @@
 /* ── Henri Lead Scoring Engine ────────────────────────────────────────────── */
 /*  Multi-signal deterministic scoring. No LLM calls — pure math.            */
-/*  8 weighted factors, 6 score components, 0-100 total.                     */
+/*  6 score components (91-pt base budget) + 5 additive boosters (15 pts),   */
+/*  clamped to 100. See SCORE_COMPONENT_MAX for the per-component ceilings.  */
 /* ───────────────────────────────────────────────────────────────────────── */
 
 import { getSeasonalFactor, getSeasonLabel } from "./seasonal";
@@ -137,6 +138,34 @@ export interface ScoreCalibration {
 
 export type Urgency = "hot" | "warm" | "cool" | "cold";
 
+/**
+ * The maximum points each component can award, keyed by its `ScoreResult`
+ * field. THIS IS THE SINGLE SOURCE OF TRUTH — `reconcileComponents` clamps
+ * against it and `signals.ts` renders it as the denominator in the drawer's
+ * "Why this score" rows ("3/6"). Keeping the two in one place is the whole
+ * point: when they were duplicated, `historical_conversion` advertised a
+ * ceiling of 15 that its own mapping could not pay (see `scoreConversion`)
+ * and nothing caught it.
+ *
+ * Every weight here MUST be attainable by some real input — that invariant
+ * is asserted in `__tests__/scoring.test.ts` ("every declared weight is
+ * attainable"). A denominator a lead can never reach is a fabricated number
+ * shown to a paying contractor.
+ */
+export const SCORE_COMPONENT_MAX = {
+  freshness: 20,
+  value: 20,
+  contact: 15,
+  demand: 15,
+  engagement: 15,
+  conversion: 6,
+  storm: 5,
+  lien: 3,
+  nri: 3,
+  nfip: 2,
+  quake: 2,
+} as const;
+
 export interface ScoreResult {
   total: number;         // 0-100
   freshness: number;     // 0-20
@@ -144,7 +173,7 @@ export interface ScoreResult {
   contact: number;       // 0-15
   demand: number;        // 0-15
   engagement: number;    // 0-15
-  conversion: number;    // 0-15
+  conversion: number;    // 0-6  (see scoreConversion — full credit at a 40% close rate)
   /* Wave 1.5 + 2.A additive boosters — all default 0 when the input
    * signal is null. Capped sums are folded into `total` via
    * Math.min(100, ...) so urgency thresholds stay at 75/50/25. */
@@ -270,14 +299,15 @@ function scoreContact(signals: ScoringSignals, factors: string[]): number {
     factors.push("Owner-occupied property");
   }
 
-  // Partial-credit floor: most public permit feeds don't ship phone/email
-  // but the mailing address IS on every permit. A name + mailing address
-  // is a real contactable signal (direct mail, door-knock, public records
-  // lookup). Without this, 99% of leads get contact=0 and the ceiling caps
-  // at ~60 regardless of how hot the permit is.
-  if (score === 0 && signals.hasOwnerName) score = 3;
+  // NOTE (2026-08-07): a `if (score === 0 && hasOwnerName) score = 3` floor
+  // used to sit here, commented as the thing keeping 99% of leads off
+  // contact=0. It was unreachable — `hasOwnerName` unconditionally adds 5
+  // above, so `score` is never 0 when the guard's own condition holds. Live
+  // data confirms it never ran: the owner-name-only population scores 5, not
+  // 3. Removed rather than "fixed", because the +5 branch already does the
+  // job the floor was written for.
 
-  return Math.min(15, score);
+  return Math.min(SCORE_COMPONENT_MAX.contact, score);
 }
 
 /**
@@ -357,20 +387,56 @@ function scoreEngagement(signals: ScoringSignals, factors: string[]): number {
 }
 
 /**
- * Compute historical conversion score (0-15).
- * Uses ZIP-level and trade-level win rates from historical data.
+ * National home-improvement lead → close rate sits around 18% across
+ * industry benchmarks (ServiceTitan, Angi, HomeAdvisor reports). Used as
+ * the baseline when we have no local history; without it the scorer floors
+ * at 0 on fresh markets, which reads as "this ZIP never converts" when the
+ * truth is "we have not sold here yet".
+ */
+const NATIONAL_BASELINE_CLOSE_RATE = 0.18;
+
+/**
+ * The close rate that earns FULL credit on this component — roughly double
+ * the national baseline, i.e. a genuinely exceptional market/trade. Rates at
+ * or above this saturate the component.
+ */
+const CONVERSION_FULL_CREDIT_RATE = 0.40;
+
+/**
+ * Compute historical conversion score (0-6).
+ *
+ * 2026-08-07 fix — the unreachable-weight defect that pinned the whole
+ * scale. This component used to declare a ceiling of 15 and compute
+ * `zipRate * 7.5 + tradeRate * 7.5`, so paying out 15 required a 100% close
+ * rate in BOTH the ZIP and the trade. That is not a data gap, it is an
+ * impossible denominator: across 161,345 leads scored by the current model
+ * the component had NEVER exceeded 3, and 97%+ sat at exactly the 3-point
+ * baseline fallback. The 12 permanently-unawarded points were the single
+ * largest term holding the 100-point scale's live ceiling down at 64, and
+ * the drawer rendered them to contractors as a 3/15 progress bar — a
+ * fabricated ceiling, which the truthfulness rule forbids.
+ *
+ * The mapping below is UNCHANGED for every close rate at or under
+ * `CONVERSION_FULL_CREDIT_RATE` (3 points per side at 0.40 is exactly the
+ * old `rate * 7.5`), so no existing lead's score moves. The only difference
+ * is that the declared ceiling is now a number a lead can actually reach.
  */
 function scoreConversion(signals: ScoringSignals, factors: string[]): number {
-  // National home-improvement lead → close rate sits around 18% across
-  // industry benchmarks (ServiceTitan, Angi, HomeAdvisor reports). Use this
-  // as the baseline when we have no local history; without it the scorer
-  // was floor-ing at 6/15 (2 × 3-point neutral fallback) on fresh markets.
-  const NATIONAL_BASELINE = 0.18;
+  const MAX = SCORE_COMPONENT_MAX.conversion;
+  const perSide = MAX / 2;
 
-  const zipRate = signals.zipConversionRate ?? NATIONAL_BASELINE;
-  const tradeRate = signals.tradeConversionRate ?? NATIONAL_BASELINE;
+  const zipRate = signals.zipConversionRate ?? NATIONAL_BASELINE_CLOSE_RATE;
+  const tradeRate = signals.tradeConversionRate ?? NATIONAL_BASELINE_CLOSE_RATE;
 
-  const score = zipRate * 7.5 + tradeRate * 7.5;
+  // Points per percentage-point of close rate. Written as `rate * K` rather
+  // than `rate / BENCHMARK * perSide` so the float arithmetic is bit-for-bit
+  // identical to the pre-2026-08-07 `rate * 7.5` — otherwise a 0.30 rate
+  // rounds to 4 instead of 5 and existing leads shift by a point.
+  const pointsPerRate = perSide / CONVERSION_FULL_CREDIT_RATE;
+  const credit = (rate: number) =>
+    Math.min(perSide, Math.max(0, rate) * pointsPerRate);
+
+  const score = credit(zipRate) + credit(tradeRate);
 
   if (signals.zipConversionRate != null && signals.zipConversionRate >= 0.3) {
     factors.push(`Strong ZIP conversion history (${Math.round(signals.zipConversionRate * 100)}%)`);
@@ -379,7 +445,7 @@ function scoreConversion(signals: ScoringSignals, factors: string[]): number {
     factors.push(`Strong trade conversion history (${Math.round(signals.tradeConversionRate * 100)}%)`);
   }
 
-  return Math.min(15, Math.max(0, Math.round(score)));
+  return Math.min(MAX, Math.max(0, Math.round(score)));
 }
 
 /**
@@ -552,9 +618,14 @@ function deriveUrgency(total: number): Urgency {
 /**
  * Calculate a comprehensive lead score from multi-signal inputs.
  *
- * Total: 0-100 across 6 components:
+ * Total: 0-91 across 6 components (see SCORE_COMPONENT_MAX):
  *   freshness (0-20) + value (0-20) + contact (0-15) +
- *   demand (0-15) + engagement (0-15) + conversion (0-15)
+ *   demand (0-15) + engagement (0-15) + conversion (0-6)
+ * plus up to 15 additive booster points, with the sum clamped to 100.
+ * The base budget is 91, NOT 100 — `conversion` was reduced to the ceiling
+ * its mapping can actually pay (2026-08-07). Anything rendering the score
+ * as "N / 100" is overstating the denominator; sum SCORE_COMPONENT_MAX (or
+ * the rendered rows' weights, as ScoreSignalBreakdown does) instead.
  *
  * The optional `calibration` arg applies (Module 13):
  *   - Per-trade weights to freshness/value/contact/demand BEFORE summing
@@ -601,7 +672,7 @@ export function calculateScore(
   // Wave 1.5 + 2.A additive boosters — all capped so the total stays
   // within [0, 100] and urgency thresholds (75/50/25) keep their
   // meaning. Theoretical max booster sum: 5+3+3+2+2 = 15 pts on top
-  // of the 100-pt base, but Math.min absorbs anything that would
+  // of the 91-pt base, but Math.min absorbs anything that would
   // otherwise push past 100.
   const storm = scoreStormBooster(signals, factors);
   const lien  = scoreLienBooster(signals, factors);
@@ -647,7 +718,19 @@ export function calculateScore(
     quakeOut,
   ] = reconcileComponents(
     [freshness, value, contact, demand, engagement, conversion, storm, lien, nri, nfip, quake],
-    [20, 20, 15, 15, 15, 15, 5, 3, 3, 2, 2],
+    [
+      SCORE_COMPONENT_MAX.freshness,
+      SCORE_COMPONENT_MAX.value,
+      SCORE_COMPONENT_MAX.contact,
+      SCORE_COMPONENT_MAX.demand,
+      SCORE_COMPONENT_MAX.engagement,
+      SCORE_COMPONENT_MAX.conversion,
+      SCORE_COMPONENT_MAX.storm,
+      SCORE_COMPONENT_MAX.lien,
+      SCORE_COMPONENT_MAX.nri,
+      SCORE_COMPONENT_MAX.nfip,
+      SCORE_COMPONENT_MAX.quake,
+    ],
     total,
     componentSum,
   );

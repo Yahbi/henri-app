@@ -1136,6 +1136,87 @@ export async function GET(request: NextRequest) {
       return n;
     }
 
+    /* ── 2f. Existing enriched leads for these permits ─────────────────────
+     *
+     * Without this the scorer never sees anything enrichment produced.
+     *
+     * `buildSignals` below is handed a `lead` object synthesized ENTIRELY
+     * from `permit.raw_json` via `extractOwnerFields`. That is correct for a
+     * permit being scored the first time — there is no lead yet. It is wrong
+     * on every RE-score: `/api/cron/enrich` writes phone / email / owner_name
+     * onto the `leads` row and then clears `permits.scored_at` specifically so
+     * the lead is re-scored with that data, but the re-score read the permit
+     * again and the enriched values were invisible.
+     *
+     * Measured 2026-08-07: all 2,696 leads that HAVE a phone number scored
+     * `contact_completeness <= 5` — not one received the +5 phone credit the
+     * model grants. The enrichment→scoring loop was open at both ends.
+     *
+     * `owner_occupied` and `assessed_value` were never passed at all, so a
+     * further +4 and +3 were unawardable on every lead in the system.
+     *
+     * Chunked at 200: `.in()` values ride in the QUERY STRING (~8KB ceiling),
+     * and a UUID plus separator is ~39 chars. Degrades to an empty map on
+     * error — that is exactly today's behaviour, so a lookup failure costs
+     * enrichment credit rather than the whole run.
+     */
+    const enrichedByPermit = new Map<
+      string,
+      {
+        phone: string | null;
+        email: string | null;
+        owner_name: string | null;
+        owner_first: string | null;
+        owner_last: string | null;
+        owner_occupied: boolean | null;
+        assessed_value: number | null;
+        property_value: number | null;
+      }
+    >();
+    {
+      const permitIds = permits.map((p) => p.id as string);
+      const IN_CHUNK = 200;
+      for (let i = 0; i < permitIds.length; i += IN_CHUNK) {
+        const chunk = permitIds.slice(i, i + IN_CHUNK);
+        try {
+          const { data: rows, error } = await supabase
+            .from("leads")
+            .select(
+              "permit_id, phone, email, owner_name, owner_first, owner_last, owner_occupied, assessed_value, property_value",
+            )
+            .in("permit_id", chunk);
+          if (error) {
+            logger.warn("score.enriched_lead_lookup_failed", { error: error.message });
+            continue;
+          }
+          for (const r of rows ?? []) {
+            const pid = r.permit_id as string;
+            // A permit can hold more than one lead (one per contractor).
+            // Contact data is a property of the ADDRESS, not the assignment,
+            // so first non-null wins and later rows only fill gaps.
+            const prev = enrichedByPermit.get(pid);
+            enrichedByPermit.set(pid, {
+              phone: prev?.phone ?? (r.phone as string | null) ?? null,
+              email: prev?.email ?? (r.email as string | null) ?? null,
+              owner_name: prev?.owner_name ?? (r.owner_name as string | null) ?? null,
+              owner_first: prev?.owner_first ?? (r.owner_first as string | null) ?? null,
+              owner_last: prev?.owner_last ?? (r.owner_last as string | null) ?? null,
+              owner_occupied:
+                prev?.owner_occupied ?? (r.owner_occupied as boolean | null) ?? null,
+              assessed_value:
+                prev?.assessed_value ?? (r.assessed_value as number | null) ?? null,
+              property_value:
+                prev?.property_value ?? (r.property_value as number | null) ?? null,
+            });
+          }
+        } catch (e) {
+          logger.warn("score.enriched_lead_lookup_failed", {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+    }
+
     /* ── 3. Score every permit with the new engine ─────────────────────── */
 
     const scoredLeads: ScoredLead[] = permits.map((permit) => {
@@ -1160,6 +1241,10 @@ export async function GET(request: NextRequest) {
         .toLowerCase()
         .trim();
       const owner = extractOwnerFields(permit.raw_json);
+      /* Anything enrichment already found for this permit's address. Absent
+       * on a first-time score (no lead exists yet), present on every
+       * re-score triggered by the enrich cron. See the 2f prefetch above. */
+      const enriched = enrichedByPermit.get(permit.id as string);
       // Per-address history for cascade scoring (feeds engagement floor in
       // model.ts). Falls back to 1 permit when we have no rollup row.
       const addrKey = normalizeAddrKey(permit.address, permit.zip);
@@ -1212,13 +1297,31 @@ export async function GET(request: NextRequest) {
           zip: permit.zip,
           created_at: permit.created_at,
         },
-        /* Pre-populate lead signals from permit-level data */
+        /* Lead signals: enrichment first, permit-derived as the fallback.
+         *
+         * Order matters and this direction is the fix. The permit-derived
+         * values come from `raw_json` and are what a first-time score has to
+         * work with. The enriched values come from the `leads` row that
+         * /api/cron/enrich populated — they are strictly better evidence
+         * (validated, deduped, sourced) and they are the whole reason the
+         * enrich cron clears `scored_at` to force a re-score.
+         *
+         * `??` not `||`: an empty string from raw_json is a real (if useless)
+         * value and must not be silently replaced, while null/undefined
+         * correctly falls through. */
         lead: {
-          owner_name: owner.full ?? permit.applicant_name,
-          owner_first: owner.first,
-          owner_last: owner.last,
-          phone: owner.phone,
-          email: owner.email,
+          owner_name: enriched?.owner_name ?? owner.full ?? permit.applicant_name,
+          owner_first: enriched?.owner_first ?? owner.first,
+          owner_last: enriched?.owner_last ?? owner.last,
+          phone: enriched?.phone ?? owner.phone,
+          email: enriched?.email ?? owner.email,
+          /* Never passed before today, so `scoreContact`'s +4 was dead on
+           * every lead in the system. Only enrichment can know this. */
+          owner_occupied: enriched?.owner_occupied ?? null,
+          /* Same: `propertyValue` resolved to null for every permit, so the
+           * property-value contribution was unawardable. */
+          assessed_value: enriched?.assessed_value ?? null,
+          property_value: enriched?.property_value ?? null,
           trade: normalizedTrade ?? permit.permit_type,
           cascadeCount,
         },

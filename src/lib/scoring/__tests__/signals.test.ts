@@ -5,7 +5,7 @@
  *  breakdown intact. This file locks the invariants:
  *
  *    1. The 6 signals are present, in stable order, with the documented
- *       weights summing to 100.
+ *       weights summing to the 91-pt base budget.
  *    2. `buildScoreSignalBreakdown` returns 6 rows whose `value` is
  *       clamped to [0, weight].
  *    3. Every signal renders a NON-EMPTY `detail` string in both the
@@ -72,13 +72,13 @@ const emptySignals: ScoringSignals = {
 
 /** A representative ScoreResult — values match the populated fixture. */
 const populatedResult: ScoreResult = {
-  total: 80,
+  total: 76,
   freshness: 16,
   value: 16,
   contact: 13,
   demand: 12,
   engagement: 13,
-  conversion: 10,
+  conversion: 6,
   urgency: "hot",
   factors: [
     "Filed 2 days ago",
@@ -112,11 +112,17 @@ describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
     expect(SCORE_SIGNAL_ORDER).toHaveLength(11);
   });
 
-  it("base 6 weights sum to 100 (boosters are additive on top)", () => {
+  /* 2026-08-07 — this used to assert 100. It was the tidiest-looking number
+   * in the file and it was wrong: `historical_conversion` claimed 15 of that
+   * 100 while its mapping could only pay 15 at a 100% close rate, so the
+   * "budget" included 12 points no lead could ever be awarded. The base
+   * budget is 91 and every point of it is now reachable — the guard for
+   * that lives in scoring.test.ts ("every declared weight is attainable"). */
+  it("base 6 weights sum to the 91-pt base budget (boosters are additive on top)", () => {
     const baseTotal = SCORE_SIGNAL_ORDER
       .filter((s) => !s.optional)
       .reduce((acc, s) => acc + s.weight, 0);
-    expect(baseTotal).toBe(100);
+    expect(baseTotal).toBe(91);
   });
 
   it("declares the 11 canonical signal keys (base 6 + 5 boosters)", () => {
@@ -137,7 +143,7 @@ describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
     expect(keys).toEqual(expected);
   });
 
-  it("uses the documented per-signal weights (20/20/15/15/15/15 + 5/3/3/2/2)", () => {
+  it("uses the documented per-signal weights (20/20/15/15/15/6 + 5/3/3/2/2)", () => {
     const weightByKey = Object.fromEntries(
       SCORE_SIGNAL_ORDER.map((s) => [s.key, s.weight]),
     );
@@ -146,7 +152,7 @@ describe("SCORE_SIGNAL_ORDER (the wedge-#2 contract surface)", () => {
     expect(weightByKey.contact_completeness).toBe(15);
     expect(weightByKey.zip_demand).toBe(15);
     expect(weightByKey.homeowner_engagement).toBe(15);
-    expect(weightByKey.historical_conversion).toBe(15);
+    expect(weightByKey.historical_conversion).toBe(6);
     expect(weightByKey.storm_proximity_24h).toBe(5);
     expect(weightByKey.recent_lien_90d).toBe(3);
     expect(weightByKey.nri_risk_tier).toBe(3);
@@ -255,9 +261,10 @@ describe("buildScoreSignalBreakdown — empty case", () => {
     expect(engagement?.detail).toMatch(/no direct engagement/i);
   });
 
-  it("historical_conversion reports the not-enough-history fallback", () => {
+  it("historical_conversion names the industry-average fallback, not a deficiency", () => {
     const conv = breakdown.find((r) => r.signal === "historical_conversion");
-    expect(conv?.detail).toMatch(/not enough history/i);
+    expect(conv?.detail).toMatch(/no local win history/i);
+    expect(conv?.detail).toMatch(/industry-average/i);
   });
 });
 

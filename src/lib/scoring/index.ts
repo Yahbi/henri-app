@@ -3,6 +3,7 @@
 export {
   calculateScore,
   buildSignals,
+  SCORE_COMPONENT_MAX,
   type ScoringSignals,
   type ScoreResult,
   type Urgency,

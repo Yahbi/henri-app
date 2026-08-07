@@ -9,6 +9,7 @@
 /*  weight (max possible for that component), value (actual), and a short   */
 /*  human-readable detail pulled from the scorer's `factors` list.          */
 
+import { SCORE_COMPONENT_MAX } from "./model";
 import type { ScoreResult, ScoringSignals } from "./model";
 
 export type ScoreSignalKey =
@@ -66,18 +67,18 @@ export const SCORE_SIGNAL_ORDER: Array<{
    *  storm / lien activity nearby. */
   optional?: boolean;
 }> = [
-  { key: "permit_freshness",     label: "Permit freshness",       weight: 20, resultKey: "freshness" },
-  { key: "permit_value",         label: "Permit value",           weight: 20, resultKey: "value" },
-  { key: "contact_completeness", label: "Contact completeness",   weight: 15, resultKey: "contact" },
-  { key: "zip_demand",           label: "ZIP demand",             weight: 15, resultKey: "demand" },
-  { key: "homeowner_engagement", label: "Homeowner engagement",   weight: 15, resultKey: "engagement" },
-  { key: "historical_conversion",label: "Historical conversion",  weight: 15, resultKey: "conversion" },
+  { key: "permit_freshness",     label: "Permit freshness",       weight: SCORE_COMPONENT_MAX.freshness,  resultKey: "freshness" },
+  { key: "permit_value",         label: "Permit value",           weight: SCORE_COMPONENT_MAX.value,      resultKey: "value" },
+  { key: "contact_completeness", label: "Contact completeness",   weight: SCORE_COMPONENT_MAX.contact,    resultKey: "contact" },
+  { key: "zip_demand",           label: "ZIP demand",             weight: SCORE_COMPONENT_MAX.demand,     resultKey: "demand" },
+  { key: "homeowner_engagement", label: "Homeowner engagement",   weight: SCORE_COMPONENT_MAX.engagement, resultKey: "engagement" },
+  { key: "historical_conversion",label: "Historical conversion",  weight: SCORE_COMPONENT_MAX.conversion, resultKey: "conversion" },
   /* Wave 1.5 / 2.A / 2.B additive boosters — render only when active. */
-  { key: "storm_proximity_24h",  label: "Storm proximity (24h)",  weight: 5,  resultKey: "storm", optional: true },
-  { key: "recent_lien_90d",      label: "Payment-distress nearby",weight: 3,  resultKey: "lien",  optional: true },
-  { key: "nri_risk_tier",        label: "FEMA risk tier",         weight: 3,  resultKey: "nri",   optional: true },
-  { key: "nfip_flood_history",   label: "NFIP flood-claim history",weight: 2, resultKey: "nfip",  optional: true },
-  { key: "recent_quake_50mi",    label: "Recent earthquakes",     weight: 2,  resultKey: "quake", optional: true },
+  { key: "storm_proximity_24h",  label: "Storm proximity (24h)",  weight: SCORE_COMPONENT_MAX.storm, resultKey: "storm", optional: true },
+  { key: "recent_lien_90d",      label: "Payment-distress nearby",weight: SCORE_COMPONENT_MAX.lien,  resultKey: "lien",  optional: true },
+  { key: "nri_risk_tier",        label: "FEMA risk tier",         weight: SCORE_COMPONENT_MAX.nri,   resultKey: "nri",   optional: true },
+  { key: "nfip_flood_history",   label: "NFIP flood-claim history",weight: SCORE_COMPONENT_MAX.nfip, resultKey: "nfip",  optional: true },
+  { key: "recent_quake_50mi",    label: "Recent earthquakes",     weight: SCORE_COMPONENT_MAX.quake, resultKey: "quake", optional: true },
 ];
 
 /**
@@ -167,7 +168,12 @@ function detailFor(key: ScoreSignalKey, factors: string[], signals: ScoringSigna
       if (signals.tradeConversionRate != null) {
         parts.push(`trade wins ${Math.round(signals.tradeConversionRate * 100)}%`);
       }
-      return parts.length > 0 ? parts.join(" · ") : "Not enough history yet";
+      if (parts.length > 0) return parts.join(" · ");
+      // "Not enough history yet" beside a half-filled bar read as a mark
+      // against the lead. It isn't: with no local win history the scorer
+      // substitutes the industry-average close rate, which lands mid-scale
+      // by design. Say so, so the row can't be misread as a weak signal.
+      return "No local win history yet — scored at the industry-average close rate";
     }
     case "storm_proximity_24h": {
       if (signals.stormProximity24h == null || signals.stormProximity24h <= 0) {
