@@ -82,6 +82,12 @@ const ALLOWED: ReadonlySet<string> = new Set([
   // exercised from the admin UI at all — the operator had to wait for a
   // scheduled run to find out whether a field mapping was even correct.
   "scrape",
+  // Parcel/assessor sidecar (2026-08-07). Same reasoning as `scrape` above:
+  // the registry holds 69 feeds of which only 4 are enabled, and bringing a
+  // new one up means probing its field_map against live rows. The admin
+  // button supports `?source_key=<KEY>&max_rows=2000` for exactly that, plus
+  // `&offset=N` to walk a specific slice of history.
+  "parcels-sidecar",
 ]);
 
 /* Body schema. `query` is appended verbatim to the upstream URL, so it is

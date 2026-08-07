@@ -239,6 +239,26 @@ jobs:
               # deliberately rather than refilled.
               19:00) ;;
               20:00) [ "$DOW" = "0" ] && due+=(fema-nri) ;;
+              # parcels-sidecar — fills public.parcels_sidecar from the
+              # parcel_sources registry (added 2026-08-07).
+              #
+              # 21:00 is the only slot in this table with no daily job of its
+              # own, so this stacks on nothing but the hourly discover-sources
+              # / census-geocode / catchup trio.
+              #
+              # DAILY, not hourly. Parcel data refreshes QUARTERLY upstream,
+              # so there is nothing fresher to fetch in between; the cadence
+              # is set by the initial fill, not by freshness. The four enabled
+              # sources hold ~2.64M rows between them and a run writes ~80,000
+              # (measured: 80,000 rows in 117s across 4 sources), so the first
+              # full pass completes in roughly a month and the operator can
+              # watch pg_database_size between runs — the table costs ~1.2 KB
+              # per row with indexes, i.e. ~3 GB fully loaded onto an 11 GB
+              # database that has hit disk-full once before.
+              #
+              # Weekly would also be defensible; daily was chosen only so the
+              # initial fill finishes this quarter rather than next year.
+              21:00) due+=(parcels-sidecar) ;;
               22:00) due+=(openfema-declarations) ;;
               22:30) due+=(gdelt-triggers) ;;
               23:00) due+=(swdi-events) ;;

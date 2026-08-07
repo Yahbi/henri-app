@@ -137,6 +137,11 @@ const CADENCE_H: Record<string, number> = {
   // weekly ingest
   "fema-nri": 168,
   "hud-reo": 168,
+  // Daily. Walks the enabled parcel_sources feeds a page at a time; the
+  // per-source cursor means a skipped day only delays the fill, never
+  // corrupts it. Included here because the initial fill needs ~33 runs and
+  // GH throttling has previously frozen daily slots for weeks at a time.
+  "parcels-sidecar": 24,
 };
 
 /**

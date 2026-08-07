@@ -151,6 +151,71 @@ function isMissingTable(message: string): boolean {
   return /does not exist|relation .* does not exist/i.test(message);
 }
 
+/* ── Availability memo ───────────────────────────────────────────────────
+ *
+ * `ppp_loans` is populated by `scripts/ingest-ppp.ts`, which has never been
+ * run against this deployment: the table exists but holds 0 rows. The enrich
+ * cron's telemetry across 31 runs recorded 16,704 `ppp_sba` calls, 0 hits, at
+ * an average 146 ms each — and this pass is SEQUENTIAL (orchestrator Phase A),
+ * so that 146 ms is added to the wall-clock cost of every single lead. The
+ * cron is deadline-bound at 280 s and only finishes 38-56% of its 1,200-lead
+ * batch, so the time is taken directly out of leads that would have been
+ * enriched.
+ *
+ * One `LIMIT 1` probe per TTL window replaces up to two full lookups per lead.
+ * The TTL means the source re-arms on its own within 30 minutes of the ingest
+ * script finally landing rows — no redeploy, no flag to remember to flip.
+ *
+ * Deliberately NOT a permanent latch: an empty table today is an operational
+ * state, not a fact about the world.
+ */
+const AVAILABILITY_TTL_MS = 30 * 60 * 1000;
+let availability: { hasRows: boolean; checkedAt: number } | null = null;
+
+/** Test seam — drops the memo so each case starts from an unprobed state. */
+export function __resetPPPAvailability(): void {
+  availability = null;
+}
+
+/** True when `ppp_loans` holds at least one row. Never throws; a missing
+ *  table or any query error is reported as "no data" so callers short-circuit
+ *  exactly as they would for an empty table. */
+async function pppHasData(
+  client: ReturnType<typeof createAdminClient>,
+): Promise<boolean> {
+  const now = Date.now();
+  if (availability && now - availability.checkedAt < AVAILABILITY_TTL_MS) {
+    return availability.hasRows;
+  }
+  let hasRows = false;
+  try {
+    const probe = await (client
+      .from("ppp_loans")
+      .select("borrower_name")
+      .limit(1) as unknown as Promise<{
+      data: unknown[] | null;
+      error: { message?: string } | null;
+    }>);
+    if (probe.error) {
+      if (isMissingTable(probe.error.message ?? "")) {
+        logger.warn("ppp-loan: ppp_loans missing (run migration 00042)");
+      } else {
+        logger.warn("ppp-loan: availability probe failed", {
+          error: probe.error.message,
+        });
+      }
+    } else {
+      hasRows = (probe.data?.length ?? 0) > 0;
+    }
+  } catch (err) {
+    logger.warn("ppp-loan: availability probe threw", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+  availability = { hasRows, checkedAt: now };
+  return hasRows;
+}
+
 /* ── Query modes ─────────────────────────────────────────────────────── */
 
 // `SupabaseLike` removed 2026-04-24 — was a structural type used by an
@@ -281,6 +346,10 @@ export async function lookupPPP(
     });
     return null;
   }
+
+  // Skip every lookup while the table is empty / missing. See the
+  // availability-memo block above for the measured cost of not doing this.
+  if (!(await pppHasData(client))) return null;
 
   try {
     // ── Mode 1: business name first (exact → fuzzy) ─────────────────

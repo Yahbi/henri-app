@@ -19,6 +19,7 @@ import {
   SOURCE_SPECS,
   type QuotaRemaining,
 } from "@/lib/enrichment/quota";
+import { collectMinableText } from "@/lib/enrichment/description-miner";
 import { buildEnrichPatch, enrichAttemptCutoff } from "./helpers";
 
 export const runtime = "nodejs";
@@ -293,9 +294,19 @@ export async function GET(request: NextRequest) {
     const byId = new Map<string, Record<string, unknown>>();
     for (let i = 0; i < permitIds.length; i += PERMIT_IN_CHUNK) {
       const chunk = permitIds.slice(i, i + PERMIT_IN_CHUNK);
+      // `raw_json` is pulled so the description miner can read the free-text
+      // scope fields that never made it into the `description` COLUMN —
+      // `work_desc`, `DESC_OF_WORK`, `JobDescription`, `COMMENTS`,
+      // `permit_condition`, `projectdescription`. Measured 2026-08-07: those
+      // keys hold an embedded phone for 0.058% of phone-less leads that the
+      // column-only path cannot see. `collectMinableText` selects which keys
+      // are safe to read (and excludes contractor-attributed ones).
+      //
+      // Payload cost: raw_json averages 1,000 bytes and peaks at 4,527 across
+      // the 4.1M-row permits table, so a 200-id chunk carries ~200 KB.
       const { data: rows, error: pErr } = await supabase
         .from("permits")
-        .select("id, contractor_name, applicant_name, description")
+        .select("id, contractor_name, applicant_name, description, raw_json")
         .in("id", chunk);
       if (pErr) {
         error = pErr;
@@ -369,14 +380,22 @@ export async function GET(request: NextRequest) {
       email: lead.email as string | null,
       contractor_name: (permitRow?.contractor_name as string | null) ?? null,
       applicant_name: (permitRow?.applicant_name as string | null) ?? null,
-      // Feed free-text fields to the description miner. The permit's
-      // description is the canonical scope-of-work text across all 25
-      // Socrata sources. `leads.notes` was removed from the initial
-      // SELECT to keep the query fast — the broad `year_built IS NULL`
-      // filter + a wider projection started hitting Supabase's 60s
-      // statement budget. If we want to mine `leads.notes` later,
-      // fetch it lazily in a targeted update pass.
-      permit_text: [permitRow?.description as string | null | undefined],
+      // Feed free-text fields to the description miner. `permits.description`
+      // is the canonical scope-of-work column, but it is only populated for
+      // the sources whose upstream blob happens to use that key name — 59% of
+      // leads. `collectMinableText` recovers the same prose from the raw_json
+      // keys the column misses, and drops contractor-attributed keys so the
+      // 2026-08-05 decision (contractor phone must never land in
+      // `leads.phone`) holds through this door too.
+      //
+      // `leads.notes` is still not mined: it was removed from the initial
+      // SELECT to keep the query fast — the broad `year_built IS NULL` filter
+      // + a wider projection started hitting Supabase's statement budget. If
+      // we want it later, fetch it lazily in a targeted update pass.
+      permit_text: [
+        permitRow?.description as string | null | undefined,
+        ...collectMinableText(permitRow?.raw_json),
+      ],
       supabase,
       // Territory-scoped tier + shared quota snapshot (WS2). Free sources
       // always run; keyed/quota sources gate on tier + remaining budget.

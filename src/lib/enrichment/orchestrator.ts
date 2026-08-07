@@ -266,6 +266,47 @@ async function queryAddressSiblings(
   }
 }
 
+/* ── Fabricated-ZIP detection ──────────────────────────────────────────
+ *
+ * 67,394 of 276,965 leads (24.3%, measured 2026-08-07) carry a `zip` that is
+ * literally the leading house number of their own `address`:
+ *
+ *   address "15310 W SUNSET BLVD"  city "Los Angeles"  state CA  zip "15310"
+ *   address "10341 SNAPDRAGON DR"  city "Austin"       state TX  zip "10341"
+ *
+ * California ZIPs run 90001-96162; the 48,303 affected CA rows carry ZIPs in
+ * 10000-28158. These are street numbers written into the ZIP column by an
+ * upstream ingest, and they pass every `/^\d{5}$/` validity check in the
+ * codebase, so nothing downstream notices.
+ *
+ * The damage is confined to the GEOCODING passes: `queryOSMBuilding` and
+ * `lookupOSMContact` both concatenate the ZIP into a Nominatim query string,
+ * and `queryNYC` filters `zipcode='<zip>'`. A ZIP that contradicts the city
+ * and state turns a resolvable address into a miss. Handing those passes
+ * `null` instead lets them geocode on address + city + state, which is what
+ * they would do for any lead that simply has no ZIP.
+ *
+ * Deliberately NOT applied to the same-address sibling lookup. That pass
+ * matches `permits` rows on (zip, address), and `permits` carries the SAME
+ * fabricated ZIPs from the SAME ingest — the pair is self-consistent, so the
+ * join still finds true siblings. Nulling the ZIP there would only disable a
+ * pass that currently works.
+ *
+ * Detection is deliberately narrow: equality with the address's own leading
+ * house number. That is the exact observed corruption, needs no per-state ZIP
+ * range table, and a genuine address whose house number equals its own ZIP is
+ * vanishingly rare (and loses only ZIP-assisted geocoding if it occurs).
+ */
+export function zipLooksFabricated(
+  zip: string | null | undefined,
+  address: string | null | undefined,
+): boolean {
+  if (!zip || !address) return false;
+  const houseNumber = /^\s*(\d+)/.exec(address)?.[1];
+  if (!houseNumber) return false;
+  return houseNumber === zip.trim();
+}
+
 /* ── In-memory result cache ────────────────────────────────────────────
  *
  * Repeat enrichments of the same lead are common: the re-enrich cron and
@@ -475,17 +516,32 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
    * data short-circuits the expensive passes.
    */
 
-  /* Pass 0: Permit-description text mining (synchronous, 0 cost).
+  /* Pass 0: Permit free-text mining (synchronous, 0 cost).
    * Extracts phone + email patterns embedded in free-text fields we
    * already have. Only populates when the structured fields upstream
-   * didn't catch them. */
+   * didn't catch them.
+   *
+   * Wrapped in trace() as of 2026-08-07. It was the ONLY key-free source
+   * outside the telemetry map, so across 31 recorded enrich runs — every one
+   * of which reports calls/hits for county_gis, osm_contact, ppp_sba,
+   * voter_file_local, same_address_permit and contractor_license — there was
+   * no way to answer "is the description miner contributing anything?"
+   * without cracking open individual leads. It is the one key-free source
+   * that still finds contact data, so it is the one that most needed a
+   * number next to it. Returning null on an empty mine makes trace()'s
+   * hit-counter mean "found a phone or an email" rather than "ran". */
   if (ctx.permit_text && ctx.permit_text.length > 0) {
-    const mined = mineMultiple(ctx.permit_text);
-    if (!result.phone && mined.phones.length > 0) {
-      applyField(result, "phone", mined.phones[0]!, "permit_description");
-    }
-    if (!result.email && mined.emails.length > 0) {
-      applyField(result, "email", mined.emails[0]!, "permit_description");
+    const mined = await trace("permit_description", async () => {
+      const m = mineMultiple(ctx.permit_text!);
+      return m.phones.length > 0 || m.emails.length > 0 ? m : null;
+    });
+    if (mined) {
+      if (!result.phone && mined.phones.length > 0) {
+        applyField(result, "phone", mined.phones[0]!, "permit_description");
+      }
+      if (!result.email && mined.emails.length > 0) {
+        applyField(result, "email", mined.emails[0]!, "permit_description");
+      }
     }
   }
 
@@ -573,6 +629,30 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
     !result.owner_name && !result.year_built && !result.home_sqft;
   const needsBizPhone = !result.phone && !!businessName;
 
+  /* ZIP handed to the GEOCODING passes only. See zipLooksFabricated. */
+  const geocodeZip = zipLooksFabricated(ctx.zip, ctx.address) ? null : (ctx.zip ?? null);
+
+  /* OSM gate (2026-08-07).
+   *
+   * Telemetry across 31 enrich runs: 16,728 calls, 0 hits, avg 1,507 ms.
+   * Not a transport failure — a live probe of the exact query this module
+   * builds returns HTTP 200 for real corpus addresses; US residential
+   * buildings simply carry no `contact:phone` / `contact:email` tags. The
+   * module's own header says as much ("Residential: <5% have any contact
+   * tags"), yet the pass was firing for every lead.
+   *
+   * The cost is not free even though the call sits inside a Promise.all: it
+   * sets the FLOOR for the whole parallel phase. On the 2026-08-07 19:23 run
+   * county_gis averaged 311 ms and osm_contact 1,529 ms, so OSM alone
+   * accounted for ~1.2 s of the ~2.3 s spent per lead — on a cron that is
+   * deadline-bound at 280 s and finishes only 38-56% of its 1,200-lead batch.
+   *
+   * Narrowing to leads that carry a business name keeps the source pointed at
+   * the case its documentation claims (commercial addresses, ~30-40% tagged)
+   * and takes it off the critical path for the residential majority. Revert by
+   * restoring the `!result.phone || !result.email` condition below. */
+  const osmWorthTrying = !!businessName && (!result.phone || !result.email);
+
   const [countyHit, regridHit, licenseHit, ocHit, googleHit, yelpHit, osmHit] =
     await Promise.all([
       // County GIS — always runs when we have an address.
@@ -581,7 +661,7 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
           ctx.state ?? null,
           ctx.city ?? null,
           ctx.address,
-          ctx.zip ?? null,
+          geocodeZip,
         ),
       ),
       // Regrid — gated on initial thinness. queryRegrid itself no-ops
@@ -632,14 +712,14 @@ export async function enrichLead(ctx: EnrichmentContext): Promise<EnrichedContac
       // OSM contact metadata — not just year_built (county-gis.ts
       // already handles that). Pulls contact:phone / contact:email /
       // website / operator for commercial buildings tagged in OSM.
-      // Thin gate: always run when we need any contact field.
-      !result.phone || !result.email
+      // Gated on a business name — see `osmWorthTrying` above.
+      osmWorthTrying
         ? trace("osm_contact", () =>
             lookupOSMContact({
               address: ctx.address,
               city: ctx.city,
               state: ctx.state,
-              zip: ctx.zip,
+              zip: geocodeZip,
             }),
           )
         : Promise.resolve(null),

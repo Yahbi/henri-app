@@ -87,6 +87,13 @@ const TABLES: TableSpec[] = [
   { table: "state_license_rosters", cron_path: "state-licenses-rotate",schedule: "30 0 * * *",  wave: "2.B.2", description: "Public state contractor license rosters (rot.)",exact_count: true  },
   // Wave 2.C pruned entirely — code_violations + wildfires_nifc had no
   // drawer / scoring consumer at the time of the audit.
+  //
+  // Phase 5 substitute layer (2026-08-07). Unlike the Wave 2.C tables this
+  // one DOES have consumers already wired and waiting: the parcel fall-through
+  // in lib/enrichment/parcels-sidecar.ts (reached from enrichFromCounty) and
+  // the ZIP-keyed reads in /api/cron/synthesize-pre-intent. It sat at 0 rows
+  // because its only writer was a Hetzner Python loader Henri no longer runs.
+  { table: "parcels_sidecar",       cron_path: "parcels-sidecar",      schedule: "0 21 * * *",  wave: "5",     description: "State/county parcel + assessor rows (rotator)",  exact_count: false },
 ];
 
 interface CronRunInfo {

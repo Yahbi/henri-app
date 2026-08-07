@@ -60,6 +60,25 @@ const NON_PERSONAL_EMAIL_DOMAINS = new Set([
   "permit.com",
 ]);
 
+/**
+ * Domain suffixes that identify the ISSUING AUTHORITY rather than a party to
+ * the job. Measured 2026-08-07 against the live corpus: of 292 email-shaped
+ * strings found in `permits.raw_json` across a 5% lead sample, 290 sat under
+ * the key `ASSIGNED_TO` and were of the form `<staff-id>@hartford.gov` — the
+ * city permit inspector assigned to the file. Exactly 2 were a party to the
+ * work (`PERMIT_APPLICANT`).
+ *
+ * `leads.email` is presented to the contractor as the way to reach the
+ * homeowner. Writing an inspector's address there would send outreach to a
+ * municipal employee who never consented, under a message written in the
+ * homeowner's voice — the same failure mode the 2026-08-05 contractor-phone
+ * decision in `src/lib/ingest/extract-contact.ts` was made to prevent.
+ *
+ * Matched on the domain's tail so `hartford.gov`, `ci.austin.tx.us` and
+ * `dc.gov` are all rejected without enumerating every municipality.
+ */
+const AUTHORITY_EMAIL_SUFFIXES = [".gov", ".mil", ".us", ".state", ".courts"];
+
 /** Phone-shape regex. Requires at least one separator between groups
  *  to avoid matching bare 10-digit permit IDs. Accepts:
  *    (555) 123-4567
@@ -71,9 +90,19 @@ const NON_PERSONAL_EMAIL_DOMAINS = new Set([
 const PHONE_RE =
   /(?:\+?1[\s\-\.]?)?\(?(\d{3})\)?[\s\-\.\/]+(\d{3})[\s\-\.\/]+(\d{4})\b/g;
 
-/** Email regex — standard RFC-relaxed form. Bounded by word boundary. */
+/** Email regex — standard RFC-relaxed form. Bounded by word boundary.
+ *
+ *  The domain is one-or-more dot-separated labels followed by the TLD. The
+ *  prior form allowed exactly ONE label plus a TLD, so any multi-label domain
+ *  matched only its own prefix: `planner@ci.austin.tx.us` came back as
+ *  `planner@ci.austin`. That is both a malformed address to write into
+ *  `leads.email` AND a bypass of the authority guard below, which decides on
+ *  the domain's suffix — `.us` had already been chopped off by the time
+ *  `isPersonalEmail` saw it. Municipal domains are exactly the multi-label
+ *  case (`ci.<city>.<st>.us`, `co.<county>.<st>.us`), so the truncation hit
+ *  precisely the addresses that most needed rejecting. */
 const EMAIL_RE =
-  /\b[a-zA-Z0-9][a-zA-Z0-9._+-]*@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.[a-zA-Z]{2,}\b/g;
+  /\b[a-zA-Z0-9][a-zA-Z0-9._+-]*@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b/g;
 
 /** Normalize a 3-part phone capture into xxx-xxx-xxxx. */
 function normalizePhone(a: string, b: string, c: string): string | null {
@@ -94,6 +123,8 @@ function isPersonalEmail(email: string): boolean {
   const domain = email.split("@")[1]?.toLowerCase();
   if (!domain) return false;
   if (NON_PERSONAL_EMAIL_DOMAINS.has(domain)) return false;
+  // Reject the permit-issuing authority — see AUTHORITY_EMAIL_SUFFIXES.
+  if (AUTHORITY_EMAIL_SUFFIXES.some((s) => domain.endsWith(s))) return false;
   // Reject addresses that are obvious shared inboxes — they're business
   // contacts but generic, not the homeowner we're trying to reach.
   const local = email.split("@")[0]?.toLowerCase();
@@ -101,6 +132,10 @@ function isPersonalEmail(email: string): boolean {
   const genericLocals = new Set([
     "info", "contact", "admin", "webmaster", "postmaster", "noreply",
     "no-reply", "support", "sales", "hello",
+    // Municipal shared inboxes seen on non-.gov vanity domains.
+    "permits", "permitting", "inspections", "inspection", "building",
+    "clerk", "records", "office", "help", "service", "services",
+    "donotreply", "do-not-reply", "notifications",
   ]);
   if (genericLocals.has(local)) return false;
   return true;
@@ -154,4 +189,73 @@ export function mineMultiple(texts: Array<string | null | undefined>): MinedCont
   all.phones = [...phoneSet];
   all.emails = [...emailSet];
   return all;
+}
+
+/* ── raw_json free-text collection ─────────────────────────────────────────
+ *
+ * The enrich cron used to hand the miner exactly one string: the
+ * `permits.description` COLUMN. But `description` is only populated for the
+ * subset of sources whose upstream blob happens to use that key name. Many
+ * jurisdictions put the same scope-of-work prose under `work_desc`,
+ * `DESC_OF_WORK`, `JobDescription`, `COMMENTS`, `permit_condition` or
+ * `projectdescription`, and those never reached the miner at all.
+ *
+ * Measured 2026-08-07 on a 20% sample (55,085 leads with `phone IS NULL`):
+ *   - phone-shaped string in the `permits.description` column ...... 22
+ *   - phone-shaped string in a raw_json FREE-TEXT key .............. 53
+ *   - of those, NOT also present in the description column ......... 32
+ * So reading raw_json free-text recovers ~0.058% of phone-less leads that
+ * the column-only path structurally cannot see.
+ *
+ * ## Why contractor-attributed keys are excluded
+ *
+ * The same sample found 566 phone-shaped strings (1.03% of phone-less leads)
+ * under contractor-attributed keys — overwhelmingly one `contractor` blob per
+ * permit of the form
+ *   "1ST CLASS PLUMBING 1108 summit ave #3, plano, TX 75074 (214) 227-9554".
+ * That is 91% of every free phone number in the corpus, and it is deliberately
+ * off-limits: on 2026-08-05 `contractor_phone` / `gc_phone` /
+ * `contractor_phone_number` / `contractor_phone_1` were removed from the
+ * upstream extractor's phone list (see `src/lib/ingest/extract-contact.ts`)
+ * because `leads.phone` is rendered under the drawer's "Homeowner" heading and
+ * is the SMS destination for messages written in the homeowner's voice —
+ * texting a COMPETING CONTRACTOR such a message is wrong for the subscriber,
+ * wrong for the recipient, and TCPA exposure on a business line.
+ *
+ * Reading those numbers back in through the free-text door would silently undo
+ * that decision, so `CONTRACTOR_KEY_RE` drops them here too. The numbers stay
+ * in raw_json, verbatim, for a future contractor-intel surface.
+ */
+
+/** Keys whose value is prose we are willing to scan for embedded contacts. */
+const FREE_TEXT_KEY_RE =
+  /(desc|comment|remark|note|scope|work|condition|project|narrative|detail|purpose)/i;
+
+/** Keys attributable to the permit-pulling contractor — never mined. */
+const CONTRACTOR_KEY_RE = /contract|builder|\bgc[_-]?/i;
+
+/** Upper bound on a single mined value. Guards against a pathological blob
+ *  turning the regex scan into a hot loop; the longest raw_json in the corpus
+ *  is 4,527 bytes total, so this never truncates real scope text. */
+const MAX_TEXT_LEN = 8_000;
+
+/**
+ * Pull the free-text values out of a permit's `raw_json` that are safe to
+ * mine for embedded contact data.
+ *
+ * Never throws — a malformed / non-object blob yields an empty array.
+ * Returns values only; the caller passes them to `mineMultiple`.
+ */
+export function collectMinableText(raw: unknown): string[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== "string") continue;
+    if (CONTRACTOR_KEY_RE.test(key)) continue;
+    if (!FREE_TEXT_KEY_RE.test(key)) continue;
+    const text = value.trim();
+    if (!text) continue;
+    out.push(text.length > MAX_TEXT_LEN ? text.slice(0, MAX_TEXT_LEN) : text);
+  }
+  return out;
 }

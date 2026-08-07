@@ -91,11 +91,14 @@ import {
   enrichLead,
   getTelemetry,
   resetTelemetry,
+  zipLooksFabricated,
   type EnrichmentContext,
 } from "../orchestrator";
 import * as countyGis from "../county-gis";
 import * as voterFile from "../voter-file";
 import * as pppLoan from "../ppp-loan";
+import * as osmContact from "../osm-contact";
+import * as descriptionMiner from "../description-miner";
 
 /** Build a chainable supabase mock matching the locks.test.ts pattern. The
  *  orchestrator's only DB call is the sibling-permit query in
@@ -657,6 +660,171 @@ describe("structural — orchestrator covers documented source count", () => {
     //           weatherstack, apollo
     //  Plus: ppp_sba, google_places, yelp, osm_contact
     expect(labels.size).toBeGreaterThanOrEqual(8);
+  });
+});
+
+/* ── Fabricated ZIPs (2026-08-07) ─────────────────────────────────────────
+ *
+ * 67,394 of 276,965 leads (24.3%) carry a `zip` equal to their own address's
+ * house number — e.g. "15310 W SUNSET BLVD", Los Angeles CA, zip "15310",
+ * where California ZIPs run 90001-96162. They pass every `/^\d{5}$/` check in
+ * the codebase, so the only place they surface is as a contradictory token in
+ * a geocoder query.
+ */
+describe("zipLooksFabricated", () => {
+  it("flags a zip that is the address's own house number", () => {
+    expect(zipLooksFabricated("15310", "15310 W SUNSET BLVD")).toBe(true);
+    expect(zipLooksFabricated("10341", "10341 SNAPDRAGON DR")).toBe(true);
+    expect(zipLooksFabricated(" 13166 ", "13166 N ALTA VISTA WAY")).toBe(true);
+  });
+
+  it("leaves a real zip alone", () => {
+    expect(zipLooksFabricated("90210", "15310 W SUNSET BLVD")).toBe(false);
+    expect(zipLooksFabricated("20009", "1219 FAIRMONT ST NW")).toBe(false);
+    // House number is a prefix of the zip but not equal — not the bug.
+    expect(zipLooksFabricated("15310", "153 W SUNSET BLVD")).toBe(false);
+  });
+
+  it("returns false for missing input or an address with no house number", () => {
+    expect(zipLooksFabricated(null, "15310 W SUNSET BLVD")).toBe(false);
+    expect(zipLooksFabricated("15310", null)).toBe(false);
+    expect(zipLooksFabricated("15310", "E 7 STREET")).toBe(false);
+    expect(zipLooksFabricated(undefined, undefined)).toBe(false);
+  });
+});
+
+describe("enrichLead — geocoders are shielded from fabricated ZIPs", () => {
+  it("passes null instead of the fabricated zip to county GIS", async () => {
+    await enrichLead({
+      address: "15311 W SUNSET BLVD",
+      city: "Los Angeles",
+      state: "CA",
+      zip: "15311",
+    });
+    const call = vi.mocked(countyGis.enrichFromCounty).mock.calls[0]!;
+    // (state, city, address, zip)
+    expect(call[3]).toBeNull();
+  });
+
+  it("passes a legitimate zip straight through", async () => {
+    await enrichLead({
+      address: "15312 W SUNSET BLVD",
+      city: "Los Angeles",
+      state: "CA",
+      zip: "90049",
+    });
+    const call = vi.mocked(countyGis.enrichFromCounty).mock.calls[0]!;
+    expect(call[3]).toBe("90049");
+  });
+
+  it("still lets the sibling-permit lookup use the fabricated zip", async () => {
+    // permits carries the SAME fabricated zips from the same ingest, so the
+    // (zip, address) pair is self-consistent and the join still works.
+    // Nulling it there would disable a pass that currently produces hits.
+    const supabase = makeMockSupabase(null);
+    await enrichLead({
+      address: "15313 W SUNSET BLVD",
+      city: "Los Angeles",
+      state: "CA",
+      zip: "15313",
+      supabase: supabase as never,
+    });
+    expect(supabase.eqCalls).toEqual(
+      expect.arrayContaining([{ column: "zip", value: "15313" }]),
+    );
+  });
+});
+
+/* ── OSM gate (2026-08-07) ───────────────────────────────────────────────
+ *
+ * 16,728 calls, 0 hits, avg 1,507 ms across 31 recorded enrich runs. Not a
+ * transport failure — Nominatim answers 200 for real corpus addresses; US
+ * residential buildings just carry no contact tags. Because the call sits in
+ * a Promise.all it sets the FLOOR for the parallel phase, so on fast-county
+ * runs (county averaged 311 ms) it was the wall-clock bottleneck.
+ */
+describe("enrichLead — OSM contact gate", () => {
+  it("does not call OSM for a residential lead with no business name", async () => {
+    await enrichLead({
+      address: "300 RESIDENTIAL WAY",
+      city: "Austin",
+      state: "TX",
+      zip: "78704",
+    });
+    expect(osmContact.lookupOSMContact).not.toHaveBeenCalled();
+  });
+
+  it("calls OSM when a business name makes a commercial tag plausible", async () => {
+    await enrichLead({
+      address: "301 COMMERCIAL BLVD",
+      city: "Austin",
+      state: "TX",
+      zip: "78704",
+      contractor_name: "Acme Roofing LLC",
+    });
+    expect(osmContact.lookupOSMContact).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips OSM once both phone and email are already known", async () => {
+    await enrichLead({
+      address: "302 COMMERCIAL BLVD",
+      city: "Austin",
+      state: "TX",
+      zip: "78704",
+      contractor_name: "Acme Roofing LLC",
+      phone: "512-555-0100",
+      email: "owner@acmeroofing.com",
+    });
+    expect(osmContact.lookupOSMContact).not.toHaveBeenCalled();
+  });
+});
+
+/* ── Description miner is observable ─────────────────────────────────────
+ *
+ * It was the only key-free source outside the telemetry map, so 31 recorded
+ * runs reported hit rates for every other source and nothing at all for the
+ * one source that still finds contact data.
+ */
+describe("enrichLead — permit_description telemetry", () => {
+  it("records a hit when the miner finds a phone", async () => {
+    vi.mocked(descriptionMiner.mineMultiple).mockReturnValueOnce({
+      phones: ["512-555-9012"],
+      emails: [],
+    });
+    const result = await enrichLead({
+      address: "400 MINED ST",
+      state: "TX",
+      zip: "78704",
+      permit_text: ["Install 4-ton HVAC. Owner: Maria Gonzalez, (512) 555-9012"],
+    });
+    expect(result.phone).toBe("512-555-9012");
+    expect(result.sources.phone).toBe("permit_description");
+    const t = getTelemetry().permit_description;
+    expect(t).toBeDefined();
+    expect(t!.calls).toBe(1);
+    expect(t!.hits).toBe(1);
+  });
+
+  it("records a call but no hit when the text yields nothing", async () => {
+    vi.mocked(descriptionMiner.mineMultiple).mockReturnValueOnce({
+      phones: [],
+      emails: [],
+    });
+    const result = await enrichLead({
+      address: "401 MINED ST",
+      state: "TX",
+      zip: "78704",
+      permit_text: ["RE-ROOF PER PLANS"],
+    });
+    expect(result.phone).toBeNull();
+    const t = getTelemetry().permit_description;
+    expect(t!.calls).toBe(1);
+    expect(t!.hits).toBe(0);
+  });
+
+  it("does not run at all when there is no permit text", async () => {
+    await enrichLead({ address: "402 MINED ST", state: "TX", zip: "78704" });
+    expect(getTelemetry().permit_description).toBeUndefined();
   });
 });
 
